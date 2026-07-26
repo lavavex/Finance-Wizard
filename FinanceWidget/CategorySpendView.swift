@@ -89,8 +89,8 @@ struct CategorySpendView: View {
                 Section("Breakdown") {
                     ForEach(snapshot.categories) { item in
                         HStack(spacing: 12) {
-                            Image(systemName: CategorySymbol.name(forCategory: item.category))
-                                .foregroundStyle(.tint)
+                            Image(systemName: CategoryStyle.symbolName(for: item.category))
+                                .foregroundStyle(CategoryStyle.color(for: item.category))
                                 .frame(width: 24)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.category)

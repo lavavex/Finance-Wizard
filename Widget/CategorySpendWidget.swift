@@ -58,6 +58,8 @@ struct CategorySpendEntry: TimelineEntry {
     let date: Date
     let snapshot: CategorySpendSnapshot
     let chartFormat: ChartFormat
+    /// Applied after pie color-merge (bars ignore this; snapshot is already limited).
+    var pieSliceLimit: Int? = nil
 }
 
 struct CategorySpendProvider: AppIntentTimelineProvider {
@@ -93,21 +95,27 @@ struct CategorySpendProvider: AppIntentTimelineProvider {
     }
 
     private func makeEntry(for configuration: CategorySpendConfigIntent, family: WidgetFamily) -> CategorySpendEntry {
+        // How many bars / pie slices this widget size can show
         let limit: Int
         switch family {
-        case .systemSmall: limit = 4
-        case .systemMedium: limit = 6
-        default: limit = 8
+        case .systemSmall: limit = 6
+        case .systemMedium: limit = 8
+        default: limit = 10
         }
 
+        let chartFormat = configuration.chartStyle.chartFormat
+        // Pie merges budget categories into Apple Card color groups. Load *all*
+        // raw categories so each color group can form its own slice; the chart
+        // then applies `limit` to the merged slices. Bars still pre-limit.
         let snapshot = SharedStore.loadCategorySnapshot(
             period: configuration.period.snapshotPeriod,
-            categoryLimit: limit
+            categoryLimit: chartFormat == .pie ? nil : limit
         )
         return CategorySpendEntry(
             date: Date(),
             snapshot: snapshot,
-            chartFormat: configuration.chartStyle.chartFormat
+            chartFormat: chartFormat,
+            pieSliceLimit: limit
         )
     }
 }
@@ -135,7 +143,8 @@ struct CategorySpendWidgetView: View {
                     totalSpend: entry.snapshot.totalSpend,
                     format: entry.chartFormat,
                     compact: !isSmall,
-                    ultraCompact: isSmall
+                    ultraCompact: isSmall,
+                    pieSliceLimit: entry.pieSliceLimit
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

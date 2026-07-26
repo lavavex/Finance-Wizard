@@ -188,10 +188,10 @@ struct TransactionRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Category SF Symbol (from Shared/CategorySymbol.swift)
-            Image(systemName: CategorySymbol.name(forCategory: transaction.category))
+            // Category SF Symbol + Apple Card–style color
+            Image(systemName: CategoryStyle.symbolName(for: transaction.category))
                 .font(.title3)
-                .foregroundStyle(.tint)
+                .foregroundStyle(CategoryStyle.color(for: transaction.category))
                 .frame(width: 28, alignment: .center)
                 .accessibilityLabel(transaction.category)
 
