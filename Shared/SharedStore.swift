@@ -89,6 +89,34 @@ enum SnapshotPeriod: String, CaseIterable, Identifiable, Sendable {
         case .all: return "All time"
         }
     }
+
+    /// Widget-friendly label using the real calendar period (e.g. "July", "Jul 20–26")
+    func widgetLabel(now: Date = Date(), calendar: Calendar = .current) -> String {
+        switch self {
+        case .all:
+            return "All"
+        case .month:
+            // Full month name, e.g. "July"
+            let formatter = DateFormatter()
+            formatter.locale = .current
+            formatter.setLocalizedDateFormatFromTemplate("MMMM")
+            return formatter.string(from: now)
+        case .week:
+            // Compact week range in the current month context, e.g. "Jul 20–26"
+            guard let interval = calendar.dateInterval(of: .weekOfYear, for: now) else {
+                return "Week"
+            }
+            let start = interval.start
+            // interval.end is exclusive
+            let end = calendar.date(byAdding: .day, value: -1, to: interval.end) ?? interval.end
+            let formatter = DateFormatter()
+            formatter.locale = .current
+            formatter.setLocalizedDateFormatFromTemplate("MMMd")
+            let startText = formatter.string(from: start)
+            let endText = formatter.string(from: end)
+            return "\(startText)–\(endText)"
+        }
+    }
 }
 
 // How a transaction list is ordered (app + reusable helpers)
@@ -218,7 +246,9 @@ enum TransactionAnalytics {
         transaction.category.isEmpty ? "Uncategorized" : transaction.category
     }
 
-    // Per-category spend for charts (period should already be applied by caller)
+    // Per-category spend for charts (period should already be applied by caller).
+    // When limited, leftover spend is rolled into "Other" so pie slices always
+    // sum to the same total shown in the center.
     static func categorySummaries(
         from transactions: [Transaction],
         categoryLimit: Int? = nil
@@ -231,7 +261,7 @@ enum TransactionAnalytics {
             counts[cat, default: 0] += 1
         }
 
-        var list = spent.map { name, amount in
+        let sorted = spent.map { name, amount in
             CategorySpendSummary(
                 category: name,
                 spent: amount,
@@ -240,10 +270,28 @@ enum TransactionAnalytics {
         }
         .sorted { $0.spent > $1.spent }
 
-        if let categoryLimit {
-            list = Array(list.prefix(categoryLimit))
+        guard let categoryLimit, sorted.count > categoryLimit else {
+            return sorted
         }
-        return list
+
+        // Keep top (limit - 1) categories; merge the rest into Other
+        let keepCount = max(1, categoryLimit - 1)
+        let head = Array(sorted.prefix(keepCount))
+        let tail = sorted.dropFirst(keepCount)
+        let otherSpent = tail.reduce(0.0) { $0 + $1.spent }
+        let otherCount = tail.reduce(0) { $0 + $1.transactionCount }
+
+        if otherSpent <= 0 {
+            return Array(sorted.prefix(categoryLimit))
+        }
+
+        return head + [
+            CategorySpendSummary(
+                category: "Other",
+                spent: otherSpent,
+                transactionCount: otherCount
+            )
+        ]
     }
 
     // Full category chart snapshot for a period
@@ -275,9 +323,13 @@ enum TransactionAnalytics {
             )
         }
 
+        let categories = categorySummaries(from: inPeriodRows, categoryLimit: categoryLimit)
+        // Total = sum of slices (includes Other) so the pie always adds up
+        let sliceTotal = categories.reduce(0.0) { $0 + $1.spent }
+
         return CategorySpendSnapshot(
-            categories: categorySummaries(from: inPeriodRows, categoryLimit: categoryLimit),
-            totalSpend: totalSpend(in: inPeriodRows),
+            categories: categories,
+            totalSpend: sliceTotal,
             transactionCount: inPeriodRows.count,
             period: period,
             isEmptyOrError: false,

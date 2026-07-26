@@ -3,6 +3,7 @@
 //  Widget
 //
 //  Separate widget: spend by category charts (default horizontal bars).
+//  No “Categories” title — pie has total in the center; bars use SF Symbol labels.
 //
 
 import WidgetKit
@@ -68,7 +69,7 @@ struct CategorySpendProvider: AppIntentTimelineProvider {
             snapshot: CategorySpendSnapshot(
                 categories: [
                     CategorySpendSummary(category: "Dining", spent: 120, transactionCount: 8),
-                    CategorySpendSummary(category: "Gas", spent: 80, transactionCount: 5),
+                    CategorySpendSummary(category: "Gas (Car)", spent: 80, transactionCount: 5),
                     CategorySpendSummary(category: "Groceries", spent: 200, transactionCount: 6)
                 ],
                 totalSpend: 400,
@@ -92,11 +93,10 @@ struct CategorySpendProvider: AppIntentTimelineProvider {
     }
 
     private func makeEntry(for configuration: CategorySpendConfigIntent, family: WidgetFamily) -> CategorySpendEntry {
-        // Fewer slices/bars on small so labels and marks fit
         let limit: Int
         switch family {
-        case .systemSmall: limit = 3
-        case .systemMedium: limit = 5
+        case .systemSmall: limit = 4
+        case .systemMedium: limit = 6
         default: limit = 8
         }
 
@@ -120,141 +120,27 @@ struct CategorySpendWidgetView: View {
 
     private var isSmall: Bool { family == .systemSmall }
 
-    private var periodShort: String {
-        switch entry.snapshot.period {
-        case .week: return "Week"
-        case .month: return "Month"
-        case .all: return "All"
-        }
-    }
-
-    private var totalText: String {
-        entry.snapshot.totalSpend.formatted(
-            .currency(code: "USD").precision(.fractionLength(0))
-        )
-    }
-
     var body: some View {
-        if isSmall {
-            smallLayout
-        } else {
-            regularLayout
-        }
-    }
-
-    // Small square: total + simple top categories OR ultra-compact chart
-    // Prefer list for bars (more readable); pie still draws
-    private var smallLayout: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                Text("Categories")
-                    .font(.caption2.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 2)
-                Text(periodShort)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
+        Group {
             if entry.snapshot.isEmptyOrError {
                 Text(entry.snapshot.message ?? "No data")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.85)
-                Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
-                Text(totalText)
-                    .font(.title3.weight(.bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.45)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                // Pie fits small; bars are clearer as a tiny ranked list
-                if entry.chartFormat == .pie {
-                    CategorySpendChartView(
-                        categories: entry.snapshot.categories,
-                        format: .pie,
-                        compact: true,
-                        ultraCompact: true
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    // Ranked mini-list (avoids axis/label clipping)
-                    VStack(spacing: 2) {
-                        ForEach(entry.snapshot.categories.prefix(3)) { item in
-                            HStack(spacing: 4) {
-                                Image(systemName: CategorySymbol.name(forCategory: item.category))
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 12)
-                                Text(item.category)
-                                    .font(.system(size: 11))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Text(
-                                    item.spent.formatted(
-                                        .currency(code: "USD").precision(.fractionLength(0))
-                                    )
-                                )
-                                .font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                                .layoutPriority(1)
-                            }
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    // Medium / large: full compact chart
-    private var regularLayout: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("By Category")
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text(entry.snapshot.period.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            if entry.snapshot.isEmptyOrError {
-                Text(entry.snapshot.message ?? "No data")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                Spacer(minLength: 0)
-            } else {
-                Text(totalText)
-                    .font(.headline.weight(.bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-
+                // Chart fills the widget — no “Categories” title
+                // Pie: total in the donut hole; bars: SF Symbol labels on the category axis
                 CategorySpendChartView(
                     categories: entry.snapshot.categories,
+                    totalSpend: entry.snapshot.totalSpend,
                     format: entry.chartFormat,
-                    compact: true,
-                    ultraCompact: false
+                    compact: !isSmall,
+                    ultraCompact: isSmall
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Text("\(entry.snapshot.categories.count) categories")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -296,5 +182,26 @@ struct CategorySpendWidget: Widget {
             message: nil
         ),
         chartFormat: .horizontalBar
+    )
+}
+
+#Preview(as: .systemSmall) {
+    CategorySpendWidget()
+} timeline: {
+    CategorySpendEntry(
+        date: .now,
+        snapshot: CategorySpendSnapshot(
+            categories: [
+                CategorySpendSummary(category: "Dining", spent: 120, transactionCount: 8),
+                CategorySpendSummary(category: "Gas (Car)", spent: 80, transactionCount: 5),
+                CategorySpendSummary(category: "Groceries", spent: 200.55, transactionCount: 6)
+            ],
+            totalSpend: 400.55,
+            transactionCount: 19,
+            period: .month,
+            isEmptyOrError: false,
+            message: nil
+        ),
+        chartFormat: .pie
     )
 }

@@ -33,6 +33,8 @@ enum CategorySymbol {
             return "heart.text.square.fill"
         case "miscellaneous", "misc", "other":
             return "ellipsis.circle.fill"
+        case "coffee":
+            return "cup.and.saucer.fill"
         default:
             // Unknown category — generic receipt
             return "doc.text.fill"

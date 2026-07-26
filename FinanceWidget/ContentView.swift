@@ -66,6 +66,13 @@ struct AllTransactionsView: View {
     @State private var importError: String?
     @State private var isSyncing = false
 
+    // Live + final Sync Status panel (Plaid result, month downloads, etc.)
+    @State private var syncStatusTitle: String = ""
+    @State private var syncStatusDetail: String = ""
+    @State private var syncStatusKind: SyncStatusKind = .idle
+    /// Keeps the status section visible after a run until the next Sync
+    @State private var showSyncStatus = false
+
     // Same filter concepts as the widget
     @State private var period: SnapshotPeriod = .month
     @State private var sort: TransactionSort = .dateNewest
@@ -100,6 +107,32 @@ struct AllTransactionsView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Live / last Sync Status (Plaid + downloads)
+                if showSyncStatus || isSyncing {
+                    Section("Sync Status") {
+                        HStack(alignment: .top, spacing: 12) {
+                            if isSyncing {
+                                ProgressView()
+                            } else {
+                                Image(systemName: syncStatusKind.systemImage)
+                                    .foregroundStyle(syncStatusKind.color)
+                                    .font(.title3)
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(syncStatusTitle.isEmpty ? "Working…" : syncStatusTitle)
+                                    .font(.subheadline.weight(.semibold))
+                                if !syncStatusDetail.isEmpty {
+                                    Text(syncStatusDetail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
                 // Total Spend — tap to open category charts
                 Section {
                     NavigationLink {
@@ -151,8 +184,15 @@ struct AllTransactionsView: View {
             .navigationTitle("Finances")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Sync") {
+                    Button {
                         Task { await syncFromServer() }
+                    } label: {
+                        if isSyncing {
+                            // Show progress in the toolbar while a sync is running
+                            ProgressView()
+                        } else {
+                            Text("Sync")
+                        }
                     }
                     .disabled(isSyncing)
                 }
@@ -272,46 +312,150 @@ struct AllTransactionsView: View {
         }
     }
 
+    // How the Sync Status row is colored / which SF Symbol to show
+    private enum SyncStatusKind {
+        case idle
+        case running
+        case success
+        case warning
+        case failure
+
+        var systemImage: String {
+            switch self {
+            case .idle: return "ellipsis.circle"
+            case .running: return "arrow.triangle.2.circlepath"
+            case .success: return "checkmark.circle.fill"
+            case .warning: return "exclamationmark.triangle.fill"
+            case .failure: return "xmark.circle.fill"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .idle: return .secondary
+            case .running: return .accentColor
+            case .success: return .green
+            case .warning: return .orange
+            case .failure: return .red
+            }
+        }
+    }
+
+    // Update the Sync Status section (call from MainActor / UI path)
+    @MainActor
+    private func setSyncStatus(_ kind: SyncStatusKind, title: String, detail: String = "") {
+        showSyncStatus = true
+        syncStatusKind = kind
+        syncStatusTitle = title
+        syncStatusDetail = detail
+    }
+
     // Sync button flow:
     // 1) Ask the PC to pull from Plaid into SQLite (once; no fixed month)
     // 2) GET + upsert current month AND previous month
     // 3) If Plaid is rate-limited (429) or busy (409), still do those GETs
+    // 4) Surface each step in Sync Status
     private func syncFromServer() async {
-        isSyncing = true
-        defer { isSyncing = false }
+        await MainActor.run {
+            isSyncing = true
+            setSyncStatus(.running, title: "Starting sync…", detail: "Connecting to \(apiBaseURL)")
+        }
 
         // Always pull these two calendar months (not hardcoded)
         let months = AppSettings.currentAndPreviousMonths()
 
         do {
+            await MainActor.run {
+                setSyncStatus(
+                    .running,
+                    title: "Plaid bank sync…",
+                    detail: "Asking the server to pull latest data from linked banks"
+                )
+            }
+
             // Step 1: trigger Plaid → SQLite (may 429 under local cooldown)
             let plaidResult = try await requestPlaidSync()
 
+            // Human-readable Plaid step for the final summary
+            let plaidLine: String
+            let plaidWasWarning: Bool
             switch plaidResult {
-            case .synced, .rateLimited, .busy:
-                // Load both months from SQLite regardless of Plaid outcome above
-                try await pullAndUpsertMonths(months)
-
+            case .synced:
+                plaidLine = "Plaid: synced successfully"
+                plaidWasWarning = false
+            case .rateLimited(let retryHint):
+                plaidLine = "Plaid: rate-limited (skipped bank pull)"
+                    + (retryHint.map { " — \($0)" } ?? "")
+                plaidWasWarning = true
+            case .busy:
+                plaidLine = "Plaid: already running on server (skipped)"
+                plaidWasWarning = true
             case .failed(let message):
-                // Unexpected Plaid error: still try month pulls so the app stays usable
-                do {
-                    try await pullAndUpsertMonths(months)
-                    importError = "\(message) Loaded existing transactions from the server."
-                } catch {
-                    importError = message
+                plaidLine = "Plaid: failed — \(message)"
+                plaidWasWarning = true
+            }
+
+            await MainActor.run {
+                setSyncStatus(
+                    .running,
+                    title: "Downloading transactions…",
+                    detail: "\(plaidLine)\nFetching months: \(months.joined(separator: ", "))"
+                )
+            }
+
+            // Step 2: always try to load months (even if Plaid was limited/failed)
+            let pulled = try await pullAndUpsertMonths(months)
+            let monthLines = pulled.map { "\($0.month): \($0.count) row(s)" }.joined(separator: "\n")
+            let totalRows = pulled.reduce(0) { $0 + $1.count }
+
+            await MainActor.run {
+                let kind: SyncStatusKind = plaidWasWarning ? .warning : .success
+                let title: String
+                if case .synced = plaidResult {
+                    title = "Sync complete"
+                } else if case .failed = plaidResult {
+                    title = "Sync finished with Plaid error"
+                } else {
+                    title = "Sync complete (Plaid skipped)"
                 }
+                setSyncStatus(
+                    kind,
+                    title: title,
+                    detail: "\(plaidLine)\nLoaded \(totalRows) transaction row(s) into the app:\n\(monthLines)"
+                )
+                isSyncing = false
             }
         } catch {
-            importError = error.localizedDescription
+            await MainActor.run {
+                setSyncStatus(
+                    .failure,
+                    title: "Sync failed",
+                    detail: error.localizedDescription
+                )
+                isSyncing = false
+                importError = error.localizedDescription
+            }
         }
     }
 
-    // GET each month and merge into SwiftData
-    private func pullAndUpsertMonths(_ months: [String]) async throws {
+    // GET each month and merge into SwiftData; returns per-month counts for status UI
+    private func pullAndUpsertMonths(_ months: [String]) async throws -> [(month: String, count: Int)] {
+        var results: [(month: String, count: Int)] = []
         for month in months {
+            await MainActor.run {
+                setSyncStatus(
+                    .running,
+                    title: "Downloading \(month)…",
+                    detail: syncStatusDetail
+                )
+            }
             let data = try await requestTransactionsJSON(month: month)
-            try upsertTransactions(from: data)
+            let count = try await MainActor.run {
+                try upsertTransactions(from: data)
+            }
+            results.append((month, count))
         }
+        return results
     }
 
     // Outcome of POST /api/plaid/sync
@@ -319,7 +463,7 @@ struct AllTransactionsView: View {
         // 2xx — Plaid ran (or completed); transactions loaded via GET months
         case synced
         // 429 PLAID_SYNC_* cooldown / hourly cap — ignore and still pull JSON
-        case rateLimited
+        case rateLimited(retryHint: String?)
         // 409 SYNC_IN_FLIGHT — another sync running; still pull JSON
         case busy
         // Other HTTP / server error message
@@ -357,11 +501,25 @@ struct AllTransactionsView: View {
         )
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 0
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
 
         // Rate limit: do not treat as fatal — caller will GET /api/transactions
         if status == 429 {
-            return .rateLimited
+            // Prefer server message / retryAfterSec when present
+            var hint: String?
+            if let sec = json?["retryAfterSec"] as? Int {
+                let minutes = max(1, (sec + 59) / 60)
+                hint = "try again in ~\(minutes) min"
+            } else if let error = json?["error"] as? String {
+                hint = error
+            } else if let retryAfter = http?.value(forHTTPHeaderField: "Retry-After"),
+                      let sec = Int(retryAfter) {
+                let minutes = max(1, (sec + 59) / 60)
+                hint = "try again in ~\(minutes) min"
+            }
+            return .rateLimited(retryHint: hint)
         }
         // Sync already running — same fallback
         if status == 409 {
@@ -369,11 +527,10 @@ struct AllTransactionsView: View {
         }
 
         if !(200...299).contains(status) {
-            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = obj["error"] as? String {
-                return .failed("Plaid sync failed (\(status)): \(error)")
+            if let error = json?["error"] as? String {
+                return .failed(error)
             }
-            return .failed("Plaid sync failed (HTTP \(status))")
+            return .failed("HTTP \(status)")
         }
 
         return .synced
@@ -403,7 +560,9 @@ struct AllTransactionsView: View {
         return data
     }
 
-    private func upsertTransactions(from data: Data) throws {
+    // Returns how many rows were in the JSON payload (for Sync Status)
+    @discardableResult
+    private func upsertTransactions(from data: Data) throws -> Int {
         let export = try JSONDecoder().decode(ExportFile.self, from: data)
 
         for item in export.transactions {
@@ -449,6 +608,7 @@ struct AllTransactionsView: View {
 
         try modelContext.save()
         WidgetCenter.shared.reloadAllTimelines()
+        return export.transactions.count
     }
 
     private static func parseExportDate(_ string: String) -> Date? {
