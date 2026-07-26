@@ -1,0 +1,9 @@
+{
+  "id" : "9a3193b9-dbbf-422e-ab8d-0b3e35d2a9a7",
+  "targets" : [
+    {
+      "id" : "9854795d-7590-4604-8028-bf9b4173a11e",
+      "name" : "FinanceWidget"
+    }
+  ]
+}
