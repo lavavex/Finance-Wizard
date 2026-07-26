@@ -72,8 +72,10 @@ struct CategorySpendView: View {
                 } else {
                     CategorySpendChartView(
                         categories: snapshot.categories,
+                        totalSpend: snapshot.totalSpend,
                         format: chartFormat,
-                        compact: false
+                        compact: false,
+                        ultraCompact: false
                     )
                     // Give Charts room inside a List row
                     .frame(minHeight: chartHeight)
