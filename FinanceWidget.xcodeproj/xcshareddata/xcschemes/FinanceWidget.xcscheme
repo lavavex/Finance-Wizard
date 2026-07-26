@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2640"
+   LastUpgradeVersion = "1600"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -17,6 +17,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "20DF1AD430165D170007AB19"
                BuildableName = "FinanceWidget.app"
+               BlueprintName = "FinanceWidget"
                ReferencedContainer = "container:FinanceWidget.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -46,6 +47,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "20DF1AD430165D170007AB19"
             BuildableName = "FinanceWidget.app"
+            BlueprintName = "FinanceWidget"
             ReferencedContainer = "container:FinanceWidget.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -62,6 +64,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "20DF1AD430165D170007AB19"
             BuildableName = "FinanceWidget.app"
+            BlueprintName = "FinanceWidget"
             ReferencedContainer = "container:FinanceWidget.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
