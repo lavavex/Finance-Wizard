@@ -1,0 +1,24 @@
+# GitHub Pages (Jekyll) configuration
+# Repo → Settings → Pages → Source: Deploy from branch → main → /docs
+
+title: FinanceWidget
+description: Personal iOS finance tracker — app, widget, and finance-sync integration
+# Change this if your GitHub repo name is different from FinanceWidget
+baseurl: "/FinanceWidget"
+url: ""
+
+# Use the built-in Primer-like minimal theme via remote theme
+remote_theme: pages-themes/cayman@v0.2.0
+plugins:
+  - jekyll-remote-theme
+  - jekyll-relative-links
+
+relative_links:
+  enabled: true
+  collections: true
+
+markdown: kramdown
+highlighter: rouge
+
+# Shown in theme header
+show_downloads: false

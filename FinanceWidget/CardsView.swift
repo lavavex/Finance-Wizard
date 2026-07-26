@@ -63,11 +63,8 @@ struct CardsView: View {
                                 )
                             } label: {
                                 HStack(spacing: 12) {
-                                    // Card-style SF Symbol (not a merchant logo)
-                                    Image(systemName: CategorySymbol.name(forPaymentMethod: card.cardName))
-                                        .font(.title3)
-                                        .foregroundStyle(.tint)
-                                        .frame(width: 28, alignment: .center)
+                                    // Dark Mode–style bank app icon (drawn from payment method → bank)
+                                    BankIconView(paymentMethod: card.cardName, size: 36)
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(card.cardName)
                                             .font(.body)
