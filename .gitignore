@@ -10,3 +10,4 @@ build/
 # Optional secrets / local junk
 *.mov
 .env
+**/AuthKey_*.p8
