@@ -5,32 +5,34 @@
 //  Created by roberth on 7/26/26.
 //
 
-// Foundation types like Date and String
 import Foundation
-// SwiftData = Apple's local database for models (app + future widget)
 import SwiftData
 
 // A transaction saved on disk in the App Group store
-// @Model tells SwiftData to persist instances of this class
 @Model
 final class Transaction {
     // Stable id from finance-sync (Plaid/local). UNIQUE stops duplicate rows on re-sync
     @Attribute(.unique) var transactionId: String
 
-    // Merchant / vendor display name
     var title: String
     // Money value: negative = expense, positive = income in our app
     var amount: Double
-    // When the purchase happened
     var date: Date
-    // Budget category (Dining, Gas (Car), …) — later: category alerts
     var category: String
-    // Card / payment method — later: spend-by-card widget
     var paymentMethod: String
-    // Points multiplier (e.g. 5 = 5x). points ≈ abs(amount) * multiplier
     var multiplier: Double
 
-    // Create a new row (used when we insert the first time we see an id)
+    // Optional so older stores can migrate without requiring a value on every row.
+    // Treat nil as false in UI (see isCategoryLocked / isMultiplierLocked).
+    var categoryLocked: Bool?
+    var multiplierLocked: Bool?
+    var overrideSource: String?
+
+    /// Effective lock flag (nil → unlocked)
+    var isCategoryLocked: Bool { categoryLocked ?? false }
+    /// Effective lock flag (nil → unlocked)
+    var isMultiplierLocked: Bool { multiplierLocked ?? false }
+
     init(
         transactionId: String,
         title: String,
@@ -38,7 +40,10 @@ final class Transaction {
         date: Date,
         category: String,
         paymentMethod: String,
-        multiplier: Double
+        multiplier: Double,
+        categoryLocked: Bool = false,
+        multiplierLocked: Bool = false,
+        overrideSource: String? = nil
     ) {
         self.transactionId = transactionId
         self.title = title
@@ -47,5 +52,8 @@ final class Transaction {
         self.category = category
         self.paymentMethod = paymentMethod
         self.multiplier = multiplier
+        self.categoryLocked = categoryLocked
+        self.multiplierLocked = multiplierLocked
+        self.overrideSource = overrideSource
     }
 }

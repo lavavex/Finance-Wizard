@@ -20,6 +20,10 @@ struct ImportedTransaction: Decodable {
     let amount: Double
     let payment_method: String
     let multiplier: Double
+    // Present after classify / lock on finance-sync (optional for older exports)
+    let category_locked: Bool?
+    let multiplier_locked: Bool?
+    let override_source: String?
 }
 
 struct ExportFile: Decodable {
@@ -411,13 +415,20 @@ struct AllTransactionsView: View {
             )
             descriptor.fetchLimit = 1
 
+            let categoryLocked = item.category_locked ?? false
+            let multiplierLocked = item.multiplier_locked ?? false
+
             if let existing = try modelContext.fetch(descriptor).first {
                 existing.title = item.vendor
                 existing.amount = -item.amount
                 existing.date = date
+                // Server is source of truth after classify (locked fields preserved on Plaid sync)
                 existing.category = item.category
                 existing.paymentMethod = item.payment_method
                 existing.multiplier = item.multiplier
+                existing.categoryLocked = categoryLocked
+                existing.multiplierLocked = multiplierLocked
+                existing.overrideSource = item.override_source
             } else {
                 modelContext.insert(
                     Transaction(
@@ -427,7 +438,10 @@ struct AllTransactionsView: View {
                         date: date,
                         category: item.category,
                         paymentMethod: item.payment_method,
-                        multiplier: item.multiplier
+                        multiplier: item.multiplier,
+                        categoryLocked: categoryLocked,
+                        multiplierLocked: multiplierLocked,
+                        overrideSource: item.override_source
                     )
                 )
             }
