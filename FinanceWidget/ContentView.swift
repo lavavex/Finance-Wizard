@@ -96,19 +96,27 @@ struct AllTransactionsView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Total Spend — full period, ignores hidden cards
+                // Total Spend — tap to open category charts
                 Section {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Total Spend")
-                                .font(.headline)
-                            Text(period.displayName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    NavigationLink {
+                        CategorySpendView(period: period)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Total Spend")
+                                    .font(.headline)
+                                Text(period.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("Tap for category chart")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Text(totalSpend, format: .currency(code: "USD"))
+                                .font(.title2.bold())
+                                .foregroundStyle(.primary)
                         }
-                        Spacer()
-                        Text(totalSpend, format: .currency(code: "USD"))
-                            .font(.title2.bold())
                     }
                     Text("\(periodTransactions.count) transactions in period")
                         .font(.caption)
@@ -126,7 +134,12 @@ struct AllTransactionsView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(visibleTransactions) { transaction in
-                            TransactionRowView(transaction: transaction)
+                            // Tap row → full detail + edit category / multiplier
+                            NavigationLink {
+                                TransactionDetailView(transaction: transaction)
+                            } label: {
+                                TransactionRowView(transaction: transaction)
+                            }
                         }
                     }
                 }

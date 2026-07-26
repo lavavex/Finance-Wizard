@@ -20,6 +20,56 @@ struct CardSpendSummary: Identifiable {
     let transactionCount: Int
 }
 
+// One budget category’s total for charts
+struct CategorySpendSummary: Identifiable {
+    // Stable id = category name
+    var id: String { category }
+    // Budget category (Dining, Gas (Car), …)
+    let category: String
+    // Positive dollars spent in this category
+    let spent: Double
+    // How many transactions in this category
+    let transactionCount: Int
+}
+
+// Chart layout options (app + category widget)
+enum ChartFormat: String, CaseIterable, Identifiable, Sendable {
+    // Default: bars grow left → right, categories on Y axis
+    case horizontalBar
+    // Bars grow bottom → top, categories on X axis
+    case verticalBar
+    // Pie / donut style (sector marks)
+    case pie
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .horizontalBar: return "Horizontal bars"
+        case .verticalBar: return "Vertical bars"
+        case .pie: return "Pie"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .horizontalBar: return "chart.bar.xaxis"
+        case .verticalBar: return "chart.bar"
+        case .pie: return "chart.pie.fill"
+        }
+    }
+}
+
+// Snapshot for category charts (app screen + category widget)
+struct CategorySpendSnapshot {
+    let categories: [CategorySpendSummary]
+    let totalSpend: Double
+    let transactionCount: Int
+    let period: SnapshotPeriod
+    let isEmptyOrError: Bool
+    let message: String?
+}
+
 // Which calendar window totals use
 enum SnapshotPeriod: String, CaseIterable, Identifiable, Sendable {
     // Current calendar week (locale-aware start of week → now)
@@ -161,6 +211,78 @@ enum TransactionAnalytics {
     // Unique card names, sorted A–Z
     static func paymentMethods(in transactions: [Transaction]) -> [String] {
         Set(transactions.map { cardName(for: $0) }).sorted()
+    }
+
+    // Normalize empty category strings
+    static func categoryName(for transaction: Transaction) -> String {
+        transaction.category.isEmpty ? "Uncategorized" : transaction.category
+    }
+
+    // Per-category spend for charts (period should already be applied by caller)
+    static func categorySummaries(
+        from transactions: [Transaction],
+        categoryLimit: Int? = nil
+    ) -> [CategorySpendSummary] {
+        var spent: [String: Double] = [:]
+        var counts: [String: Int] = [:]
+        for transaction in transactions {
+            let cat = categoryName(for: transaction)
+            spent[cat, default: 0] += abs(transaction.amount)
+            counts[cat, default: 0] += 1
+        }
+
+        var list = spent.map { name, amount in
+            CategorySpendSummary(
+                category: name,
+                spent: amount,
+                transactionCount: counts[name] ?? 0
+            )
+        }
+        .sorted { $0.spent > $1.spent }
+
+        if let categoryLimit {
+            list = Array(list.prefix(categoryLimit))
+        }
+        return list
+    }
+
+    // Full category chart snapshot for a period
+    static func makeCategorySnapshot(
+        from allTransactions: [Transaction],
+        period: SnapshotPeriod,
+        categoryLimit: Int? = nil
+    ) -> CategorySpendSnapshot {
+        if allTransactions.isEmpty {
+            return CategorySpendSnapshot(
+                categories: [],
+                totalSpend: 0,
+                transactionCount: 0,
+                period: period,
+                isEmptyOrError: true,
+                message: "Open the app and tap Sync"
+            )
+        }
+
+        let inPeriodRows = inPeriod(allTransactions, period: period)
+        if inPeriodRows.isEmpty {
+            return CategorySpendSnapshot(
+                categories: [],
+                totalSpend: 0,
+                transactionCount: 0,
+                period: period,
+                isEmptyOrError: true,
+                message: "No spend in \(period.displayName.lowercased())"
+            )
+        }
+
+        return CategorySpendSnapshot(
+            categories: categorySummaries(from: inPeriodRows, categoryLimit: categoryLimit),
+            totalSpend: totalSpend(in: inPeriodRows),
+            transactionCount: inPeriodRows.count,
+            period: period,
+            isEmptyOrError: false,
+            message: nil
+        )
     }
 
     // Per-card spend for a transaction set (already period-filtered as needed)
@@ -316,6 +438,32 @@ enum SharedStore {
                 cards: [],
                 totalSpend: 0,
                 balance: 0,
+                transactionCount: 0,
+                period: period,
+                isEmptyOrError: true,
+                message: "Store error"
+            )
+        }
+    }
+
+    // Category chart widget / shared load
+    static func loadCategorySnapshot(
+        period: SnapshotPeriod = .month,
+        categoryLimit: Int = 8
+    ) -> CategorySpendSnapshot {
+        do {
+            let container = try makeContainer()
+            let context = ModelContext(container)
+            let all = try context.fetch(FetchDescriptor<Transaction>())
+            return TransactionAnalytics.makeCategorySnapshot(
+                from: all,
+                period: period,
+                categoryLimit: categoryLimit
+            )
+        } catch {
+            return CategorySpendSnapshot(
+                categories: [],
+                totalSpend: 0,
                 transactionCount: 0,
                 period: period,
                 isEmptyOrError: true,
