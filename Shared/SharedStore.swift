@@ -402,7 +402,51 @@ enum SharedStore {
             groupContainer: .identifier(appGroupID)
         )
 
-        return try ModelContainer(for: schema, configurations: [configuration])
+        do {
+            return try ModelContainer(for: schema, configurations: [configuration])
+        } catch {
+            // Schema changed (e.g. new fields) and lightweight migration failed.
+            // Delete the App Group store and create a fresh empty one so the app launches.
+            // User can Sync again to re-download transactions.
+            print("SwiftData open failed, resetting store: \(error)")
+            deletePersistentStoreFiles()
+            return try ModelContainer(for: schema, configurations: [configuration])
+        }
+    }
+
+    // Remove FinanceTransactions.store (+ WAL/SHM) from the App Group container
+    private static func deletePersistentStoreFiles() {
+        guard let root = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) else { return }
+
+        let support = root
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+
+        let base = support.appendingPathComponent(storeName)
+        let candidates = [
+            base.appendingPathExtension("store"),
+            URL(fileURLWithPath: base.path + ".store"),
+            support.appendingPathComponent("\(storeName).store"),
+            support.appendingPathComponent("\(storeName).store-shm"),
+            support.appendingPathComponent("\(storeName).store-wal"),
+            support.appendingPathComponent("\(storeName).store-journal")
+        ]
+
+        // Also sweep any file that starts with the store name (covers -shm/-wal variants)
+        if let files = try? FileManager.default.contentsOfDirectory(
+            at: support,
+            includingPropertiesForKeys: nil
+        ) {
+            for file in files where file.lastPathComponent.hasPrefix(storeName) {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+
+        for url in candidates {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     // Unique payment method names currently in the store

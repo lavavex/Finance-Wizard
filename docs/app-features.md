@@ -41,11 +41,12 @@ Each row shows:
 | Field | Editable? |
 |-------|-----------|
 | Title, amount, date, card, id | Read-only |
-| **Category** | Yes (preset picker + free text) |
+| **Category** | Yes (server categories + free text) |
 | **Points multiplier** | Yes |
+| Learn / same card / apply matching | Toggles for classify API |
 | Points estimate | Derived (abs(amount) × multiplier) |
 
-Saves to SwiftData on this device. A later **Sync** from finance-sync may overwrite category/multiplier if the server still has old values.
+**Save** calls `POST /api/transactions/{id}/classify`, then updates local SwiftData and marks category/multiplier locked. With **learn**, the server remembers a vendor rule for future Plaid rows.
 
 ## Tab: By Card
 

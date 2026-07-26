@@ -101,6 +101,30 @@ Response shape (simplified):
 }
 ```
 
+### POST `/api/transactions/{transaction_id}/classify`
+
+Pushed when the user **Save**s category/multiplier on a transaction detail screen.
+
+```json
+{
+  "category": "Coffee",
+  "multiplier": 3,
+  "learn": true,
+  "scopePaymentMethod": false,
+  "applyToMatching": false
+}
+```
+
+| Field | Default in app | Meaning |
+|-------|----------------|---------|
+| `learn` | true | Store vendor rule for future Plaid rows |
+| `scopePaymentMethod` | false | Limit rule / bulk to same card |
+| `applyToMatching` | false | Also fix other matching rows on server |
+
+Server locks the row so later Plaid syncs do not overwrite. Transaction JSON may include `category_locked`, `multiplier_locked`, `override_source`.
+
+Also: `GET /api/categories` for the picker (falls back to a built-in list if unreachable).
+
 ### Not called by default (by design)
 
 - `POST /api/transactions/mark-exported` — shared flag with other consumers (e.g. Mac budget export). Avoid until ownership is clear.

@@ -114,7 +114,9 @@ struct CategorySpendChartView: View {
             }
 
         case .pie:
-            Chart(categories) { item in
+            // Build chart first, then attach the right legend API
+            // (.hidden uses Visibility; position uses a different overload)
+            let pie = Chart(categories) { item in
                 SectorMark(
                     angle: .value("Spent", item.spent),
                     innerRadius: .ratio(ultraCompact ? 0.50 : (compact ? 0.45 : 0.5)),
@@ -123,8 +125,15 @@ struct CategorySpendChartView: View {
                 .foregroundStyle(by: .value("Category", item.category))
                 .cornerRadius(ultraCompact ? 2 : 3)
             }
-            // Legend eats vertical space — hide on small
-            .chartLegend(ultraCompact ? .hidden : (compact ? .bottom : .trailing))
+
+            if ultraCompact {
+                // Small widget: no legend (not enough room)
+                pie.chartLegend(.hidden)
+            } else if compact {
+                pie.chartLegend(position: .bottom, alignment: .center)
+            } else {
+                pie.chartLegend(position: .trailing, alignment: .center)
+            }
         }
     }
 
