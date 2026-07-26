@@ -15,12 +15,22 @@ struct CategorySpendView: View {
 
     // Period to analyze (matches list filters when passed in)
     @State private var period: SnapshotPeriod
+    /// Which week/month to chart
+    @State private var referenceDate: Date
     // Chart geometry (default horizontal bars)
     @State private var chartFormat: ChartFormat = .horizontalBar
 
     // Caller can seed the same period as the list you came from
-    init(period: SnapshotPeriod = .month) {
+    init(
+        period: SnapshotPeriod = .month,
+        referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
+    ) {
         _period = State(initialValue: period)
+        _referenceDate = State(initialValue: referenceDate)
+    }
+
+    private var periodLabel: String {
+        period.filterLabel(referenceDate: referenceDate)
     }
 
     // Snapshot built with shared analytics
@@ -28,6 +38,7 @@ struct CategorySpendView: View {
         TransactionAnalytics.makeCategorySnapshot(
             from: transactions,
             period: period,
+            referenceDate: referenceDate,
             categoryLimit: nil
         )
     }
@@ -40,7 +51,7 @@ struct CategorySpendView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Total Spend")
                             .font(.headline)
-                        Text(period.displayName)
+                        Text(periodLabel)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -110,15 +121,12 @@ struct CategorySpendView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Picker("Period", selection: $period) {
-                        ForEach(SnapshotPeriod.allCases) { option in
-                            Text(option.displayName).tag(option)
-                        }
-                    }
-                } label: {
-                    Label(period.displayName, systemImage: "calendar")
-                }
+                PeriodFilterMenu(
+                    period: $period,
+                    referenceDate: $referenceDate,
+                    transactions: transactions,
+                    showTitle: true
+                )
             }
         }
     }

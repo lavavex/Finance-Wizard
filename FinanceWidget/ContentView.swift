@@ -75,6 +75,8 @@ struct AllTransactionsView: View {
 
     // Same filter concepts as the widget
     @State private var period: SnapshotPeriod = .month
+    /// Which week/month to show (any day in that period; months use month start).
+    @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
     @State private var sort: TransactionSort = .dateNewest
     // Cards hidden from the list (does not change Total Spend header)
     @State private var hiddenCards: Set<String> = []
@@ -84,6 +86,7 @@ struct AllTransactionsView: View {
         TransactionAnalytics.filter(
             transactions,
             period: period,
+            referenceDate: referenceDate,
             excludedCards: hiddenCards,
             sort: sort
         )
@@ -91,7 +94,11 @@ struct AllTransactionsView: View {
 
     // Period-only set (for totals — hide cards does not apply)
     private var periodTransactions: [Transaction] {
-        TransactionAnalytics.inPeriod(transactions, period: period)
+        TransactionAnalytics.inPeriod(transactions, period: period, referenceDate: referenceDate)
+    }
+
+    private var periodLabel: String {
+        period.filterLabel(referenceDate: referenceDate)
     }
 
     // Big number: all cards in the period
@@ -136,13 +143,13 @@ struct AllTransactionsView: View {
                 // Total Spend — tap to open category charts
                 Section {
                     NavigationLink {
-                        CategorySpendView(period: period)
+                        CategorySpendView(period: period, referenceDate: referenceDate)
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Total Spend")
                                     .font(.headline)
-                                Text(period.displayName)
+                                Text(periodLabel)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 Text("Tap for category chart")
@@ -155,7 +162,7 @@ struct AllTransactionsView: View {
                                 .foregroundStyle(.primary)
                         }
                     }
-                    Text("\(periodTransactions.count) transactions in period")
+                    Text("\(periodTransactions.count) transactions in \(periodLabel.lowercased())")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if !hiddenCards.isEmpty {
@@ -197,16 +204,13 @@ struct AllTransactionsView: View {
                     .disabled(isSyncing)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    // Period
-                    Menu {
-                        Picker("Period", selection: $period) {
-                            ForEach(SnapshotPeriod.allCases) { option in
-                                Text(option.displayName).tag(option)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "calendar")
-                    }
+                    // Period + which month (when Month is selected)
+                    PeriodFilterMenu(
+                        period: $period,
+                        referenceDate: $referenceDate,
+                        transactions: transactions,
+                        showTitle: false
+                    )
 
                     // Sort
                     Menu {
@@ -278,7 +282,7 @@ struct AllTransactionsView: View {
             return "No transactions yet. Tap Sync or Import."
         }
         if periodTransactions.isEmpty {
-            return "No transactions in \(period.displayName.lowercased())."
+            return "No transactions in \(periodLabel.lowercased())."
         }
         return "All cards in this period are hidden. Show some cards to see the list."
     }

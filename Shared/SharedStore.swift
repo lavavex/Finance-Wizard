@@ -72,21 +72,46 @@ struct CategorySpendSnapshot {
 
 // Which calendar window totals use
 enum SnapshotPeriod: String, CaseIterable, Identifiable, Sendable {
-    // Current calendar week (locale-aware start of week → now)
+    // Calendar week containing `referenceDate` (locale-aware week start → end)
     case week
-    // Current calendar month (1st of month → now)
+    // Calendar month containing `referenceDate` (1st → last day)
     case month
     // No date filter — every saved transaction
     case all
 
     var id: String { rawValue }
 
-    // Short label for pickers and headers
+    // Short label for period pickers (not a specific month name)
     var displayName: String {
         switch self {
         case .week: return "This week"
-        case .month: return "This month"
+        case .month: return "Month"
         case .all: return "All time"
+        }
+    }
+
+    /// Header label for the active filter (e.g. "June 2026", "This month", "Jul 20–26")
+    func filterLabel(
+        referenceDate: Date = Date(),
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        switch self {
+        case .all:
+            return "All time"
+        case .month:
+            if calendar.isDate(referenceDate, equalTo: now, toGranularity: .month) {
+                return "This month"
+            }
+            let formatter = DateFormatter()
+            formatter.locale = .current
+            formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+            return formatter.string(from: referenceDate)
+        case .week:
+            if calendar.isDate(referenceDate, equalTo: now, toGranularity: .weekOfYear) {
+                return "This week"
+            }
+            return widgetLabel(now: referenceDate, calendar: calendar)
         }
     }
 
@@ -167,26 +192,62 @@ enum TransactionAnalytics {
         transaction.paymentMethod.isEmpty ? "Unknown" : transaction.paymentMethod
     }
 
-    // First moment of the current week / month, or distant past for “all”
+    // First moment of the week / month containing `now`, or nil for “all”
     static func startDate(for period: SnapshotPeriod, now: Date = Date()) -> Date? {
-        let calendar = Calendar.current
+        dateInterval(for: period, referenceDate: now)?.start
+    }
+
+    /// Inclusive start / exclusive end for week or month; nil for all-time.
+    /// `referenceDate` picks which week/month (any day inside that period works).
+    static func dateInterval(
+        for period: SnapshotPeriod,
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
+    ) -> DateInterval? {
         switch period {
         case .week:
-            return calendar.dateInterval(of: .weekOfYear, for: now)?.start
+            return calendar.dateInterval(of: .weekOfYear, for: referenceDate)
         case .month:
-            return calendar.dateInterval(of: .month, for: now)?.start
+            return calendar.dateInterval(of: .month, for: referenceDate)
         case .all:
-            // nil means “no lower bound”
             return nil
         }
     }
 
-    // Keep transactions in the selected period (does not hide cards)
-    static func inPeriod(_ transactions: [Transaction], period: SnapshotPeriod) -> [Transaction] {
-        guard let start = startDate(for: period) else {
+    /// Start of the calendar month that contains `date`.
+    static func monthStart(for date: Date, calendar: Calendar = .current) -> Date {
+        calendar.dateInterval(of: .month, for: date)?.start ?? date
+    }
+
+    /// Month starts that appear in the data (newest first), always including the current month.
+    static func availableMonthStarts(
+        in transactions: [Transaction],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [Date] {
+        var components = Set<DateComponents>()
+        for transaction in transactions {
+            components.insert(calendar.dateComponents([.year, .month], from: transaction.date))
+        }
+        components.insert(calendar.dateComponents([.year, .month], from: now))
+
+        return components
+            .compactMap { calendar.date(from: $0) }
+            .sorted(by: >)
+    }
+
+    // Keep transactions in the selected period (does not hide cards).
+    // For month/week, only rows inside that calendar interval are kept
+    // (so “June” does not accidentally include July).
+    static func inPeriod(
+        _ transactions: [Transaction],
+        period: SnapshotPeriod,
+        referenceDate: Date = Date()
+    ) -> [Transaction] {
+        guard let interval = dateInterval(for: period, referenceDate: referenceDate) else {
             return transactions
         }
-        return transactions.filter { $0.date >= start }
+        return transactions.filter { $0.date >= interval.start && $0.date < interval.end }
     }
 
     // Drop transactions whose card is in the hide list
@@ -199,10 +260,11 @@ enum TransactionAnalytics {
     static func filter(
         _ transactions: [Transaction],
         period: SnapshotPeriod,
+        referenceDate: Date = Date(),
         excludedCards: Set<String> = [],
         sort: TransactionSort = .dateNewest
     ) -> [Transaction] {
-        let byPeriod = inPeriod(transactions, period: period)
+        let byPeriod = inPeriod(transactions, period: period, referenceDate: referenceDate)
         let byCard = excludingCards(byPeriod, excludedCards: excludedCards)
         return sorted(byCard, by: sort)
     }
@@ -324,6 +386,7 @@ enum TransactionAnalytics {
     static func makeCategorySnapshot(
         from allTransactions: [Transaction],
         period: SnapshotPeriod,
+        referenceDate: Date = Date(),
         categoryLimit: Int? = nil
     ) -> CategorySpendSnapshot {
         if allTransactions.isEmpty {
@@ -337,7 +400,7 @@ enum TransactionAnalytics {
             )
         }
 
-        let inPeriodRows = inPeriod(allTransactions, period: period)
+        let inPeriodRows = inPeriod(allTransactions, period: period, referenceDate: referenceDate)
         if inPeriodRows.isEmpty {
             return CategorySpendSnapshot(
                 categories: [],
@@ -345,7 +408,7 @@ enum TransactionAnalytics {
                 transactionCount: 0,
                 period: period,
                 isEmptyOrError: true,
-                message: "No spend in \(period.displayName.lowercased())"
+                message: "No spend in \(period.filterLabel(referenceDate: referenceDate).lowercased())"
             )
         }
 
