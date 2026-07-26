@@ -2,8 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Required so App Store knows icons live in the AppIcon asset catalog -->
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<!-- Export compliance: app does not use custom/non-exempt encryption -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
+		<!-- Needed for http:// local finance-sync during TestFlight on home network -->
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 		<key>NSAllowsLocalNetworking</key>
