@@ -2,9 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Required so App Store knows icons live in the AppIcon asset catalog -->
+	<!-- Matches Icon Composer file Mika.icon (App Icon name in target settings) -->
 	<key>CFBundleIconName</key>
-	<string>AppIcon</string>
+	<string>Mika</string>
 	<!-- Export compliance: app does not use custom/non-exempt encryption -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
