@@ -1,0 +1,12 @@
+# Xcode user-specific
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# macOS
+.DS_Store
+
+# Optional secrets / local junk
+*.mov
+.env
