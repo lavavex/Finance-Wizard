@@ -15,18 +15,32 @@ struct CardsView: View {
 
     // Shared period filter (week / month / all time)
     @State private var period: SnapshotPeriod = .month
+    /// Which week/month to show
+    @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
     // How rows inside a card are sorted
     @State private var sort: TransactionSort = .dateNewest
 
+    private var periodLabel: String {
+        period.filterLabel(referenceDate: referenceDate)
+    }
+
     // Cards for the current period (no hide list on this tab — show every card)
     private var cardSummaries: [CardSpendSummary] {
-        let inPeriod = TransactionAnalytics.inPeriod(transactions, period: period)
+        let inPeriod = TransactionAnalytics.inPeriod(
+            transactions,
+            period: period,
+            referenceDate: referenceDate
+        )
         return TransactionAnalytics.cardSummaries(from: inPeriod, cardLimit: nil)
     }
 
     // Full-period total spend (all cards)
     private var periodTotalSpend: Double {
-        let inPeriod = TransactionAnalytics.inPeriod(transactions, period: period)
+        let inPeriod = TransactionAnalytics.inPeriod(
+            transactions,
+            period: period,
+            referenceDate: referenceDate
+        )
         return TransactionAnalytics.totalSpend(in: inPeriod)
     }
 
@@ -36,13 +50,13 @@ struct CardsView: View {
                 // Summary header — tap for category chart
                 Section {
                     NavigationLink {
-                        CategorySpendView(period: period)
+                        CategorySpendView(period: period, referenceDate: referenceDate)
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Total Spend")
                                     .font(.headline)
-                                Text(period.displayName)
+                                Text(periodLabel)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 Text("Tap for category chart")
@@ -60,7 +74,7 @@ struct CardsView: View {
                 // One row per card — tap to see its transactions
                 Section("Cards") {
                     if cardSummaries.isEmpty {
-                        Text("No cards in this period. Sync data or pick another range.")
+                        Text("No cards in \(periodLabel.lowercased()). Sync data or pick another range.")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(cardSummaries) { card in
@@ -69,6 +83,7 @@ struct CardsView: View {
                                 CardDetailView(
                                     cardName: card.cardName,
                                     period: period,
+                                    referenceDate: referenceDate,
                                     sort: sort
                                 )
                             } label: {
@@ -93,17 +108,14 @@ struct CardsView: View {
             }
             .navigationTitle("By Card")
             .toolbar {
-                // Period filter (same options as widget / all-transactions tab)
+                // Period + month filter
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("Period", selection: $period) {
-                            ForEach(SnapshotPeriod.allCases) { option in
-                                Text(option.displayName).tag(option)
-                            }
-                        }
-                    } label: {
-                        Label(period.displayName, systemImage: "calendar")
-                    }
+                    PeriodFilterMenu(
+                        period: $period,
+                        referenceDate: $referenceDate,
+                        transactions: transactions,
+                        showTitle: true
+                    )
                 }
                 // Sort used when you open a card’s transactions
                 ToolbarItem(placement: .topBarLeading) {
@@ -128,15 +140,25 @@ struct CardDetailView: View {
     let cardName: String
     // Period inherited from the cards list
     let period: SnapshotPeriod
+    // Which week/month (from the cards list)
+    let referenceDate: Date
     // Sort inherited from the cards list
     let sort: TransactionSort
 
     // All transactions; we filter in memory with shared helpers
     @Query private var transactions: [Transaction]
 
+    private var periodLabel: String {
+        period.filterLabel(referenceDate: referenceDate)
+    }
+
     // Rows for this card + period + sort
     private var cardRows: [Transaction] {
-        let inPeriod = TransactionAnalytics.inPeriod(transactions, period: period)
+        let inPeriod = TransactionAnalytics.inPeriod(
+            transactions,
+            period: period,
+            referenceDate: referenceDate
+        )
         let forCard = inPeriod.filter {
             TransactionAnalytics.cardName(for: $0) == cardName
         }
@@ -156,7 +178,7 @@ struct CardDetailView: View {
                     Text(cardSpend, format: .currency(code: "USD"))
                         .font(.headline)
                 }
-                Text("\(period.displayName) · \(cardRows.count) transactions")
+                Text("\(periodLabel) · \(cardRows.count) transactions")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

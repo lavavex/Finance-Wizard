@@ -45,7 +45,8 @@ struct TransactionDetailView: View {
     @State private var multiplierText: String = ""
     // Push options (map to classify API body)
     @State private var learn = true
-    @State private var scopePaymentMethod = false
+    // Default on: points multipliers are per-card (Freedom 5x ≠ Apple Card 1x)
+    @State private var scopePaymentMethod = true
     @State private var applyToMatching = false
     // Categories from server (or fallback)
     @State private var categoryOptions: [String] = KnownCategory.defaultNames
@@ -149,11 +150,17 @@ struct TransactionDetailView: View {
             Section {
                 Toggle("Remember for this vendor (learn)", isOn: $learn)
                 Toggle("Only same card/account", isOn: $scopePaymentMethod)
+                    // Bulk apply always stays on this card so multipliers never jump cards
+                    .disabled(applyToMatching)
                 Toggle("Apply to other matching transactions", isOn: $applyToMatching)
+                    .onChange(of: applyToMatching) { _, isOn in
+                        // Matching updates always include the multiplier — lock to this card
+                        if isOn { scopePaymentMethod = true }
+                    }
             } header: {
                 Text("Server options")
             } footer: {
-                Text("Learn stores a rule for future purchases. Apply to matching also updates other existing rows on the server (and locally when possible).")
+                Text("Learn stores a rule for future purchases. Apply to matching only updates other rows on the same card so points multipliers never copy across cards.")
             }
 
             Section("Points (estimate)") {
@@ -258,13 +265,17 @@ struct TransactionDetailView: View {
         defer { isSaving = false }
 
         do {
+            // When bulk-applying, always scope to this card so the multiplier
+            // never lands on the same vendor charged to a different card.
+            let cardScoped = scopePaymentMethod || applyToMatching
+
             // 1) Push to finance-sync (locks + optional learn / bulk apply on server)
             try await FinanceSyncAPI.classify(
                 transactionId: transaction.transactionId,
                 category: trimmedCategory,
                 multiplier: multiplier,
                 learn: learn,
-                scopePaymentMethod: scopePaymentMethod,
+                scopePaymentMethod: cardScoped,
                 applyToMatching: applyToMatching
             )
 
@@ -275,7 +286,7 @@ struct TransactionDetailView: View {
             transaction.multiplierLocked = true
             transaction.overrideSource = "user"
 
-            // 3) Optionally mirror bulk apply on device for same vendor (and card if scoped)
+            // 3) Mirror bulk apply on device — same vendor + same card only
             var localExtra = 0
             if applyToMatching {
                 localExtra = applyLocalMatching(
@@ -288,7 +299,7 @@ struct TransactionDetailView: View {
             WidgetCenter.shared.reloadAllTimelines()
 
             if localExtra > 0 {
-                saveStatusMessage = "Saved. Updated \(localExtra + 1) local transactions."
+                saveStatusMessage = "Saved. Updated \(localExtra + 1) local transactions on this card."
             } else {
                 saveStatusMessage = "Saved to device and server"
             }
@@ -303,7 +314,8 @@ struct TransactionDetailView: View {
         }
     }
 
-    // Best-effort local bulk update for matching vendors after server applyToMatching
+    // Local bulk update for matching vendors on the *same card* only.
+    // Multipliers are per payment method — never copy Freedom 5x onto Apple Card, etc.
     @discardableResult
     private func applyLocalMatching(category: String, multiplier: Double) -> Int {
         let vendor = transaction.title
@@ -314,10 +326,9 @@ struct TransactionDetailView: View {
             if row.transactionId == transaction.transactionId { continue }
             // Same merchant name (simple equality; server uses looser matching)
             guard row.title.caseInsensitiveCompare(vendor) == .orderedSame else { continue }
-            if scopePaymentMethod,
-               row.paymentMethod.caseInsensitiveCompare(card) != .orderedSame {
-                continue
-            }
+            // Always same card for bulk multiplier/category apply
+            guard row.paymentMethod.caseInsensitiveCompare(card) == .orderedSame else { continue }
+
             row.category = category
             row.multiplier = multiplier
             row.categoryLocked = true
