@@ -270,11 +270,23 @@ enum TransactionAnalytics {
         }
         .sorted { $0.spent > $1.spent }
 
+        return limitCategorySummaries(sorted, to: categoryLimit)
+    }
+
+    /// Keep the top spend rows; roll the rest into a single "Other" bucket.
+    /// Used for bar charts (raw categories) and pie (after color-group merge).
+    static func limitCategorySummaries(
+        _ items: [CategorySpendSummary],
+        to categoryLimit: Int?
+    ) -> [CategorySpendSummary] {
+        // Already sorted highest → lowest by callers; re-sort to be safe
+        let sorted = items.sorted { $0.spent > $1.spent }
+
         guard let categoryLimit, sorted.count > categoryLimit else {
             return sorted
         }
 
-        // Keep top (limit - 1) categories; merge the rest into Other
+        // Keep top (limit - 1) rows; merge the rest into Other
         let keepCount = max(1, categoryLimit - 1)
         let head = Array(sorted.prefix(keepCount))
         let tail = sorted.dropFirst(keepCount)
@@ -283,6 +295,20 @@ enum TransactionAnalytics {
 
         if otherSpent <= 0 {
             return Array(sorted.prefix(categoryLimit))
+        }
+
+        // If "Other" is already in the head, fold the tail into that row
+        if let otherIndex = head.firstIndex(where: {
+            $0.category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "other"
+        }) {
+            var merged = head
+            let existing = merged[otherIndex]
+            merged[otherIndex] = CategorySpendSummary(
+                category: existing.category,
+                spent: existing.spent + otherSpent,
+                transactionCount: existing.transactionCount + otherCount
+            )
+            return merged.sorted { $0.spent > $1.spent }
         }
 
         return head + [
@@ -542,10 +568,12 @@ enum SharedStore {
         }
     }
 
-    // Category chart widget / shared load
+    // Category chart widget / shared load.
+    // Pass categoryLimit: nil for “all categories” (pie loads full data, then
+    // merges by color and applies the family limit on the final slices).
     static func loadCategorySnapshot(
         period: SnapshotPeriod = .month,
-        categoryLimit: Int = 8
+        categoryLimit: Int? = 8
     ) -> CategorySpendSnapshot {
         do {
             let container = try makeContainer()

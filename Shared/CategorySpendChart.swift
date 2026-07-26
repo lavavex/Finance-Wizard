@@ -2,8 +2,9 @@
 //  CategorySpendChart.swift
 //  FinanceWidget
 //
-//  Category spend charts. Pie labels use SectorMark.annotation so they are
-//  always attached to the correct slice (no hand-rolled angle math).
+//  Category spend charts.
+//  Bar icons/$ are BarMark.annotations so they stay locked to the correct bar.
+//  Pie uses two separate Chart views for label position.
 //
 
 import SwiftUI
@@ -15,18 +16,43 @@ struct CategorySpendChartView: View {
     var format: ChartFormat = .horizontalBar
     var compact: Bool = false
     var ultraCompact: Bool = false
-
-    private let palette: [Color] = [
-        .blue, .orange, .green, .pink, .purple,
-        .teal, .indigo, .mint, .cyan, .yellow, .red, .brown
-    ]
+    /// Max pie slices after Apple Card color merge (bars use pre-limited `categories`).
+    var pieSliceLimit: Int? = nil
 
     private var categoryNames: [String] { categories.map(\.category) }
+
+    // Fixed Apple Card–style colors per category name (not by bar index)
     private var paletteColors: [Color] {
-        categories.indices.map { palette[$0 % palette.count] }
+        CategoryStyle.colors(for: categoryNames)
     }
 
     private var totalText: String { dollarString(totalSpend) }
+
+    /// Highest spend first (individual categories — bars / default)
+    private var orderedCategories: [CategorySpendSummary] { categories }
+
+    /// Pie: merge same-color categories first, then apply slice limit.
+    /// (Limiting raw categories first was collapsing 6 rows into ~4 color slices.)
+    private var pieCombinedCategories: [CategorySpendSummary] {
+        let combined = CategoryStyle.combineByColor(categories)
+        return TransactionAnalytics.limitCategorySummaries(combined, to: pieSliceLimit)
+    }
+
+    /// Explicit category order for bar scales (highest spend first)
+    private var categoryDomain: [String] {
+        orderedCategories.map(\.category)
+    }
+
+    /// Largest bar value — used so X/Y value scales start at 0 (not negative).
+    /// Leading annotations were expanding the domain below zero and centering bars.
+    private var maxSpent: Double {
+        max(orderedCategories.map(\.spent).max() ?? 0, 1)
+    }
+
+    /// Domain 0…max with a little headroom for trailing / top $ labels
+    private var spendDomain: ClosedRange<Double> {
+        0...(maxSpent * 1.18)
+    }
 
     var body: some View {
         if categories.isEmpty {
@@ -58,10 +84,7 @@ struct CategorySpendChartView: View {
     // MARK: - Helpers
 
     private func color(for category: String) -> Color {
-        guard let index = categories.firstIndex(where: { $0.category == category }) else {
-            return .secondary
-        }
-        return palette[index % palette.count]
+        CategoryStyle.color(for: category)
     }
 
     private func dollarString(_ value: Double) -> String {
@@ -82,19 +105,29 @@ struct CategorySpendChartView: View {
     }
 
     // MARK: - Horizontal bars
+    // Icons + $ are annotations on each BarMark → always the correct row.
+    // No separate icon column (those drifted / reversed against the plot).
 
     private var horizontalBars: some View {
         VStack(alignment: .leading, spacing: ultraCompact ? 4 : 6) {
             totalSpendHeader
 
             applyCategoryColors(
-                Chart(categories) { item in
+                Chart(orderedCategories) { item in
                     BarMark(
                         x: .value("Spent", item.spent),
                         y: .value("Category", item.category)
                     )
                     .foregroundStyle(by: .value("Category", item.category))
                     .cornerRadius(ultraCompact ? 3 : 4)
+                    // Icon locked to this bar
+                    .annotation(position: .leading, alignment: .trailing, spacing: 6) {
+                        Image(systemName: CategorySymbol.name(forCategory: item.category))
+                            .font(ultraCompact ? .system(size: 12, weight: .semibold) : .body.weight(.semibold))
+                            .foregroundStyle(color(for: item.category))
+                            .accessibilityLabel(item.category)
+                    }
+                    // $ locked to this bar
                     .annotation(position: .trailing, alignment: .leading, spacing: 4) {
                         Text(dollarString(item.spent))
                             .font(ultraCompact ? .system(size: 9, weight: .semibold) : .caption2.weight(.semibold))
@@ -104,6 +137,10 @@ struct CategorySpendChartView: View {
                     }
                 }
                 .chartLegend(.hidden)
+                .chartYScale(domain: categoryDomain)
+                // Force spend axis to start at $0 — never negative / centered
+                .chartXScale(domain: spendDomain)
+                .chartYAxis(.hidden)
                 .chartXAxis {
                     if ultraCompact {
                         AxisMarks(values: .automatic(desiredCount: 2)) { _ in
@@ -113,21 +150,11 @@ struct CategorySpendChartView: View {
                         AxisMarks(format: .currency(code: "USD").precision(.fractionLength(0)))
                     }
                 }
-                .chartYAxis {
-                    AxisMarks(values: .automatic) { value in
-                        // Named anchors only (no custom UnitPoint)
-                        AxisValueLabel(anchor: .leading) {
-                            if let name = value.as(String.self) {
-                                Image(systemName: CategorySymbol.name(forCategory: name))
-                                    .font(ultraCompact ? .system(size: 12, weight: .semibold) : .body.weight(.semibold))
-                                    .foregroundStyle(color(for: name))
-                                    .accessibilityLabel(name)
-                            }
-                        }
-                    }
-                }
                 .chartPlotStyle { plot in
-                    plot.padding(.trailing, ultraCompact ? 28 : 40)
+                    // Visual inset for icons/$ only — does not expand the value domain
+                    plot
+                        .padding(.leading, ultraCompact ? 22 : 28)
+                        .padding(.trailing, ultraCompact ? 32 : 44)
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,28 +162,38 @@ struct CategorySpendChartView: View {
     }
 
     // MARK: - Vertical bars
+    // Icon + $ as bottom annotations on each BarMark → always the correct column.
 
     private var verticalBars: some View {
-        VStack(alignment: .leading, spacing: ultraCompact ? 4 : 8) {
+        VStack(alignment: .leading, spacing: ultraCompact ? 4 : 6) {
             totalSpendHeader
 
             applyCategoryColors(
-                Chart(categories) { item in
+                Chart(orderedCategories) { item in
                     BarMark(
                         x: .value("Category", item.category),
                         y: .value("Spent", item.spent)
                     )
                     .foregroundStyle(by: .value("Category", item.category))
                     .cornerRadius(ultraCompact ? 3 : 4)
-                    .annotation(position: .top, alignment: .center, spacing: 2) {
-                        Text(dollarString(item.spent))
-                            .font(ultraCompact ? .system(size: 8, weight: .semibold) : .caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
+                    .annotation(position: .bottom, alignment: .center, spacing: 4) {
+                        VStack(spacing: ultraCompact ? 2 : 3) {
+                            Image(systemName: CategorySymbol.name(forCategory: item.category))
+                                .font(ultraCompact ? .system(size: 11, weight: .semibold) : .body.weight(.semibold))
+                                .foregroundStyle(color(for: item.category))
+                            Text(dollarString(item.spent))
+                                .font(ultraCompact ? .system(size: 8, weight: .semibold) : .caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.55)
+                        }
+                        .accessibilityLabel("\(item.category), \(dollarString(item.spent))")
                     }
                 }
                 .chartLegend(.hidden)
+                .chartXScale(domain: categoryDomain)
+                // Force spend axis to start at $0 — never negative / centered
+                .chartYScale(domain: spendDomain)
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     if ultraCompact {
@@ -168,81 +205,86 @@ struct CategorySpendChartView: View {
                     }
                 }
                 .chartPlotStyle { plot in
-                    plot.padding(.top, ultraCompact ? 14 : 18)
+                    plot.padding(.bottom, ultraCompact ? 30 : 40)
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            HStack(spacing: 0) {
-                ForEach(categories) { item in
-                    Image(systemName: CategorySymbol.name(forCategory: item.category))
-                        .font(ultraCompact ? .system(size: 12, weight: .semibold) : .body.weight(.semibold))
-                        .foregroundStyle(color(for: item.category))
-                        .frame(maxWidth: .infinity)
-                        .accessibilityLabel(item.category)
-                }
-            }
         }
     }
 
     // MARK: - Pie
-    //
-    // Two *separate* Chart views in a ZStack (NOT two SectorMark series in one Chart —
-    // that doubles the angle sum and collapses the pie).
-    //
-    // Chart A: full colored donut (no annotations)
-    // Chart B: invisible thinner band closer to center + annotations (pulls labels inward)
-    // Both use the same data/order so slices match angularly.
+    // Layer order: colored ring → icons (masked to each wedge) → $ amounts
+    // (unmasked so text stays fully readable) → center total.
 
-    /// Visible donut hole (also used for clip shape)
     private var pieInnerRatio: CGFloat { 0.50 }
-
-    /// Invisible label band — near the middle of the visible ring
-    /// (hole 0.50 → rim 1.0). Not too outer, not too inner.
+    /// Thin clear band where Chart places the overlay annotation (mid-ring).
     private var pieLabelInner: CGFloat { 0.64 }
     private var pieLabelOuter: CGFloat { 0.84 }
 
     private var pieChart: some View {
-        ZStack {
-            // A) Visible pie — no annotations (full size, clean geometry)
-            applyCategoryColors(
-                Chart(categories) { item in
-                    SectorMark(
-                        angle: .value("Spent", item.spent),
-                        innerRadius: .ratio(pieInnerRatio),
-                        outerRadius: .ratio(1.0),
-                        angularInset: 1.5
-                    )
-                    .foregroundStyle(by: .value("Category", item.category))
-                    .cornerRadius(3)
-                }
-                .chartLegend(.hidden)
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
-                .chartPlotStyle { $0.padding(0) }
-            )
+        // Merge Dining+Coffee, Shopping+Groceries, etc. into one slice per color
+        let slices = pieCombinedCategories
+        let sliceNames = slices.map(\.category)
+        let sliceColors = CategoryStyle.colors(for: sliceNames)
+        let sliceTotal = max(slices.reduce(0) { $0 + $1.spent }, 0.0001)
 
-            // B) Label layer only — own Chart so angles stay a full 360° pie
-            Chart(categories) { item in
+        return ZStack {
+            // Colored donut only
+            Chart(slices) { item in
                 SectorMark(
                     angle: .value("Spent", item.spent),
-                    innerRadius: .ratio(pieLabelInner),
-                    outerRadius: .ratio(pieLabelOuter),
+                    innerRadius: .ratio(pieInnerRatio),
+                    outerRadius: .ratio(1.0),
                     angularInset: 1.5
                 )
-                // Fully transparent — only exists so annotation centroid is mid-inner ring
-                .foregroundStyle(.clear)
-                .annotation(position: .overlay) {
-                    pieSegmentWatermark(for: item)
-                }
+                .foregroundStyle(by: .value("Category", item.category))
+                .cornerRadius(3)
             }
+            .chartForegroundStyleScale(domain: sliceNames, range: sliceColors)
             .chartLegend(.hidden)
             .chartXAxis(.hidden)
             .chartYAxis(.hidden)
             .chartPlotStyle { $0.padding(0) }
+
+            // Icons only — each masked to its own sector so they cut at the wedge edge
+            ForEach(slices) { item in
+                let share = item.spent / sliceTotal
+                if share >= (ultraCompact ? 0.05 : 0.04) {
+                    pieLabelChart(slices: slices) { sector in
+                        if sector.id == item.id {
+                            pieSegmentIcon(for: item, share: share)
+                        }
+                    }
+                    .compositingGroup()
+                    .mask {
+                        // Same SectorMark layout as the colored pie → edges match
+                        Chart(slices) { sector in
+                            SectorMark(
+                                angle: .value("Spent", sector.spent),
+                                innerRadius: .ratio(pieInnerRatio),
+                                outerRadius: .ratio(1.0),
+                                angularInset: 1.5
+                            )
+                            .foregroundStyle(sector.id == item.id ? Color.white : Color.clear)
+                            .cornerRadius(3)
+                        }
+                        .chartLegend(.hidden)
+                        .chartXAxis(.hidden)
+                        .chartYAxis(.hidden)
+                        .chartPlotStyle { $0.padding(0) }
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+
+            // $ amounts — same sector centers, no wedge mask (text must stay whole)
+            pieLabelChart(slices: slices) { item in
+                let share = item.spent / sliceTotal
+                if share >= (ultraCompact ? 0.05 : 0.04) {
+                    pieSegmentAmount(for: item)
+                }
+            }
             .allowsHitTesting(false)
-            // Clip watermarks to the visible donut ring (slight cut inside + outside)
-            .clipShape(DonutClipShape(innerRatio: pieInnerRatio), style: FillStyle(eoFill: true))
 
             // Grand total in the hole
             Text(totalText)
@@ -257,57 +299,53 @@ struct CategorySpendChartView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Icon behind (watermark); amount in front on the z-axis.
-    @ViewBuilder
-    private func pieSegmentWatermark(for item: CategorySpendSummary) -> some View {
-        let share = item.spent / max(totalSpend, 0.0001)
-        if share < (ultraCompact ? 0.05 : 0.04) {
-            EmptyView()
-        } else {
-            let iconSize: CGFloat = ultraCompact
-                ? (share > 0.25 ? 28 : 22)
-                : (share > 0.25 ? 34 : 28)
-
-            ZStack {
-                Image(systemName: CategorySymbol.name(forCategory: item.category))
-                    .font(.system(size: iconSize, weight: .medium))
-                    .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(Color.white.opacity(ultraCompact ? 0.40 : 0.46))
-
-                Text(dollarString(item.spent))
-                    .font(ultraCompact ? .system(size: 11, weight: .bold) : .system(size: 13, weight: .bold))
-                    .foregroundStyle(Color.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                    .shadow(color: .black.opacity(0.55), radius: 1.5, y: 0.5)
+    /// Clear mid-ring Chart used only to place annotations on true sector centers.
+    private func pieLabelChart<Content: View>(
+        slices: [CategorySpendSummary],
+        @ViewBuilder annotation: @escaping (CategorySpendSummary) -> Content
+    ) -> some View {
+        Chart(slices) { sector in
+            SectorMark(
+                angle: .value("Spent", sector.spent),
+                innerRadius: .ratio(pieLabelInner),
+                outerRadius: .ratio(pieLabelOuter),
+                angularInset: 1.5
+            )
+            .foregroundStyle(.clear)
+            .annotation(position: .overlay) {
+                annotation(sector)
             }
+        }
+        .chartLegend(.hidden)
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+        .chartPlotStyle { $0.padding(0) }
+    }
+
+    /// Category icon (clipped by sector mask).
+    @ViewBuilder
+    private func pieSegmentIcon(for item: CategorySpendSummary, share: Double) -> some View {
+        let iconSize: CGFloat = ultraCompact
+            ? (share > 0.3 ? 30 : 24)
+            : (share > 0.3 ? 36 : 30)
+
+        Image(systemName: CategorySymbol.name(forCategory: item.category))
+            .font(.system(size: iconSize, weight: .medium))
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(Color.white.opacity(ultraCompact ? 0.40 : 0.48))
+            .accessibilityHidden(true)
+    }
+
+    /// Dollar label drawn above icons — not sector-masked.
+    @ViewBuilder
+    private func pieSegmentAmount(for item: CategorySpendSummary) -> some View {
+        Text(dollarString(item.spent))
+            .font(ultraCompact ? .system(size: 11, weight: .bold) : .system(size: 13, weight: .bold))
+            .foregroundStyle(Color.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.55)
+            .shadow(color: .black.opacity(0.55), radius: 1.5, y: 0.5)
             .fixedSize()
             .accessibilityLabel("\(item.category), \(dollarString(item.spent))")
-        }
-    }
-}
-
-// Donut-shaped clip: outer circle minus inner hole (even-odd fill)
-private struct DonutClipShape: Shape {
-    var innerRatio: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let outer = min(rect.width, rect.height) / 2
-        let inner = outer * innerRatio
-        var path = Path()
-        path.addEllipse(in: CGRect(
-            x: center.x - outer,
-            y: center.y - outer,
-            width: outer * 2,
-            height: outer * 2
-        ))
-        path.addEllipse(in: CGRect(
-            x: center.x - inner,
-            y: center.y - inner,
-            width: inner * 2,
-            height: inner * 2
-        ))
-        return path
     }
 }

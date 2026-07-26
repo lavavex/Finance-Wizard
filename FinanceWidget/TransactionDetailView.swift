@@ -25,7 +25,7 @@ enum KnownCategory: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var systemImage: String {
-        CategorySymbol.name(forCategory: rawValue)
+        CategoryStyle.symbolName(for: rawValue)
     }
 
     static var defaultNames: [String] {
@@ -66,9 +66,9 @@ struct TransactionDetailView: View {
             // Read-only identity / money
             Section {
                 HStack(spacing: 12) {
-                    Image(systemName: CategorySymbol.name(forCategory: categoryText.isEmpty ? transaction.category : categoryText))
+                    Image(systemName: CategoryStyle.symbolName(for: categoryText.isEmpty ? transaction.category : categoryText))
                         .font(.largeTitle)
-                        .foregroundStyle(.tint)
+                        .foregroundStyle(CategoryStyle.color(for: categoryText.isEmpty ? transaction.category : categoryText))
                         .frame(width: 44)
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -119,7 +119,7 @@ struct TransactionDetailView: View {
             Section {
                 Picker("Category", selection: categoryPickerBinding) {
                     ForEach(categoryOptions, id: \.self) { name in
-                        Label(name, systemImage: CategorySymbol.name(forCategory: name))
+                        Label(name, systemImage: CategoryStyle.symbolName(for: name))
                             .tag(Optional(name))
                     }
                     Label("Custom…", systemImage: "pencil")
