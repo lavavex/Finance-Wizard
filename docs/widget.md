@@ -7,11 +7,14 @@ title: Widget
 
 ## Overview
 
-Home Screen widget kind: **`FinanceHomeWidget`**.
+Two Home Screen widgets are registered:
 
-- Display name: **Total Spend**
-- Sizes: systemSmall, systemMedium, systemLarge
-- Data: SwiftData App Group via `SharedStore.loadSnapshot`
+| Widget | Kind | Default view |
+|--------|------|----------------|
+| **Total Spend** | `FinanceHomeWidget` | Total + spend by **card** |
+| **Spend by Category** | `CategorySpendWidget` | Total + **category** chart (horizontal bars) |
+
+Both read SwiftData via the App Group (`SharedStore`).
 
 ## What it shows
 
@@ -51,9 +54,15 @@ Implemented as `FinanceWidgetConfigIntent` in `Widget/AppIntent.swift`.
 4. Place small/medium/large  
 5. Edit to set week/month and hide cards  
 
+## Spend by Category widget
+
+- Edit Widget: **Time range** (week/month) + **Chart style** (horizontal bars / vertical bars / pie)
+- Default chart style: **Horizontal bars**
+- Uses `CategorySpendChartView` from `Shared/`
+
 ## Template files not registered
 
-`WidgetControl.swift` and `WidgetLiveActivity.swift` may still exist from the Xcode template but are **not** registered in `WidgetBundle` (only `FinanceHomeWidget` is).
+`WidgetControl.swift` and `WidgetLiveActivity.swift` may still exist from the Xcode template but are **not** registered in `WidgetBundle`.
 
 ## Empty states
 

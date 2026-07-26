@@ -40,21 +40,28 @@ struct FinanceProvider: AppIntentTimelineProvider {
     }
 
     func snapshot(for configuration: FinanceWidgetConfigIntent, in context: Context) async -> FinanceEntry {
-        makeEntry(for: configuration)
+        makeEntry(for: configuration, family: context.family)
     }
 
     func timeline(for configuration: FinanceWidgetConfigIntent, in context: Context) async -> Timeline<FinanceEntry> {
-        let entry = makeEntry(for: configuration)
+        let entry = makeEntry(for: configuration, family: context.family)
         let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
         return Timeline(entries: [entry], policy: .after(next))
     }
 
-    private func makeEntry(for configuration: FinanceWidgetConfigIntent) -> FinanceEntry {
-        // Hide cards only affects the per-card list; totalSpend stays full period total
+    private func makeEntry(for configuration: FinanceWidgetConfigIntent, family: WidgetFamily) -> FinanceEntry {
+        // Small square: only enough rows to fit without clipping
+        let cardLimit: Int
+        switch family {
+        case .systemSmall: cardLimit = 2
+        case .systemMedium: cardLimit = 4
+        default: cardLimit = 8
+        }
+
         let snapshot = SharedStore.loadSnapshot(
             period: configuration.period.snapshotPeriod,
             excludedCards: configuration.excludedCardNames,
-            cardLimit: 8
+            cardLimit: cardLimit
         )
         return FinanceEntry(date: Date(), snapshot: snapshot)
     }
@@ -74,57 +81,102 @@ struct FinanceWidgetView: View {
         }
     }
 
-    // Compact: Total Spend + period + amount + optional top cards
+    // Short period label for tight layouts
+    private var periodShort: String {
+        switch entry.snapshot.period {
+        case .week: return "Week"
+        case .month: return "Month"
+        case .all: return "All"
+        }
+    }
+
+    // Compact currency ($1,234 not $1,234.00) for narrow width
+    private var totalText: String {
+        entry.snapshot.totalSpend.formatted(
+            .currency(code: "USD").precision(.fractionLength(0))
+        )
+    }
+
+    // Small square: header + total + at most 2 card rows — no overflow
     private var smallLayout: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Total Spend")
-                .font(.caption.weight(.semibold))
-            Text(entry.snapshot.period.displayName)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            // Single-line header
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("Total Spend")
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 2)
+                Text(periodShort)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             if entry.snapshot.isEmptyOrError {
                 Text(entry.snapshot.message ?? "No data")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.85)
                 Spacer(minLength: 0)
             } else {
-                // Full-period total (not reduced by hidden cards)
-                Text(entry.snapshot.totalSpend, format: .currency(code: "USD"))
-                    .font(.headline.weight(.bold))
-                    .minimumScaleFactor(0.7)
+                // Big total — scales down rather than wrapping
+                Text(totalText)
+                    .font(.title3.weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.45)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                ForEach(entry.snapshot.cards.prefix(3)) { card in
-                    HStack {
-                        Text(card.cardName)
-                            .font(.caption2)
+                // Fixed number of compact rows
+                VStack(spacing: 2) {
+                    ForEach(entry.snapshot.cards.prefix(2)) { card in
+                        HStack(spacing: 4) {
+                            Text(card.cardName)
+                                .font(.system(size: 11, weight: .regular))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(
+                                card.spent.formatted(
+                                    .currency(code: "USD").precision(.fractionLength(0))
+                                )
+                            )
+                            .font(.system(size: 11, weight: .semibold))
                             .lineLimit(1)
-                        Spacer()
-                        Text(card.spent, format: .currency(code: "USD"))
-                            .font(.caption2.weight(.medium))
+                            .minimumScaleFactor(0.7)
+                            .layoutPriority(1)
+                        }
                     }
                 }
+
                 Spacer(minLength: 0)
             }
         }
+        // Keep content inside the widget chrome
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // Wider layout
+    // Wider layout (medium / large)
     private var mediumLayout: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Total Spend")
                         .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                     Text(entry.snapshot.period.displayName)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Spacer()
+                Spacer(minLength: 4)
                 if !entry.snapshot.isEmptyOrError {
-                    Text(entry.snapshot.totalSpend, format: .currency(code: "USD"))
+                    Text(totalText)
                         .font(.title3.weight(.bold))
-                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .layoutPriority(1)
                 }
             }
 
@@ -132,24 +184,35 @@ struct FinanceWidgetView: View {
                 Text(entry.snapshot.message ?? "No data yet")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(3)
                 Spacer(minLength: 0)
             } else {
-                ForEach(entry.snapshot.cards.prefix(family == .systemLarge ? 8 : 5)) { card in
-                    HStack {
+                let rowLimit = family == .systemLarge ? 8 : 4
+                ForEach(entry.snapshot.cards.prefix(rowLimit)) { card in
+                    HStack(spacing: 6) {
                         Text(card.cardName)
                             .font(.caption)
                             .lineLimit(1)
-                        Spacer()
-                        Text(card.spent, format: .currency(code: "USD"))
-                            .font(.caption.weight(.semibold))
+                            .truncationMode(.tail)
+                        Spacer(minLength: 4)
+                        Text(
+                            card.spent.formatted(
+                                .currency(code: "USD").precision(.fractionLength(0...2))
+                            )
+                        )
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .layoutPriority(1)
                     }
                 }
                 Spacer(minLength: 0)
                 Text("\(entry.snapshot.transactionCount) transactions")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -178,11 +241,11 @@ struct FinanceHomeWidget: Widget {
         date: .now,
         snapshot: FinanceSnapshot(
             cards: [
-                CardSpendSummary(cardName: "Chase Freedom", spent: 210.12, transactionCount: 10),
-                CardSpendSummary(cardName: "Prime Visa", spent: 88.40, transactionCount: 5)
+                CardSpendSummary(cardName: "Chase Freedom Unlimited", spent: 1210.12, transactionCount: 10),
+                CardSpendSummary(cardName: "Blue Cash Everyday® Card from American Express", spent: 88.40, transactionCount: 5)
             ],
-            totalSpend: 298.52,
-            balance: -298.52,
+            totalSpend: 1298.52,
+            balance: -1298.52,
             transactionCount: 40,
             period: .month,
             isEmptyOrError: false,

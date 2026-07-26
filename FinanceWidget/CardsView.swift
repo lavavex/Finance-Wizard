@@ -33,18 +33,28 @@ struct CardsView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Summary header
+                // Summary header — tap for category chart
                 Section {
-                    HStack {
-                        Text("Total Spend")
-                            .font(.headline)
-                        Spacer()
-                        Text(periodTotalSpend, format: .currency(code: "USD"))
-                            .font(.title3.bold())
+                    NavigationLink {
+                        CategorySpendView(period: period)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Total Spend")
+                                    .font(.headline)
+                                Text(period.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("Tap for category chart")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Text(periodTotalSpend, format: .currency(code: "USD"))
+                                .font(.title3.bold())
+                                .foregroundStyle(.primary)
+                        }
                     }
-                    Text(period.displayName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 // One row per card — tap to see its transactions
@@ -157,7 +167,12 @@ struct CardDetailView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(cardRows) { transaction in
-                        TransactionRowView(transaction: transaction)
+                        // Tap row → full detail + edit category / multiplier
+                        NavigationLink {
+                            TransactionDetailView(transaction: transaction)
+                        } label: {
+                            TransactionRowView(transaction: transaction)
+                        }
                     }
                 }
             }

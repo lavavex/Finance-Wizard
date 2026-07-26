@@ -12,6 +12,7 @@ Main list of expenses with filters shared conceptually with the widget.
 ### Header
 
 - **Total Spend** — sum of absolute amounts for the selected **period** (all cards).
+- **Tap Total Spend** → **Categories** screen with switchable charts (default **horizontal bars**; also vertical bars and pie) plus a numeric breakdown.
 - Hiding cards does **not** change this total.
 - Count of transactions in the period.
 
@@ -34,6 +35,17 @@ Each row shows:
 - Category · payment method  
 - Date  
 - Amount (signed) + points multiplier  
+
+**Tap a row** → **Transaction detail** (`TransactionDetailView`):
+
+| Field | Editable? |
+|-------|-----------|
+| Title, amount, date, card, id | Read-only |
+| **Category** | Yes (preset picker + free text) |
+| **Points multiplier** | Yes |
+| Points estimate | Derived (abs(amount) × multiplier) |
+
+Saves to SwiftData on this device. A later **Sync** from finance-sync may overwrite category/multiplier if the server still has old values.
 
 ## Tab: By Card
 

@@ -12,9 +12,10 @@ import SwiftUI
 @main
 struct FinanceWidgetBundle: WidgetBundle {
     var body: some Widget {
-        // Home Screen widget that reads shared SwiftData
+        // Total Spend by card (list + total)
         FinanceHomeWidget()
+        // Spend by category charts (default horizontal bars)
+        CategorySpendWidget()
         // Template Control / Live Activity widgets are left out for now
-        // (files can stay in the folder; they just are not registered)
     }
 }
