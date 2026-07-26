@@ -13,7 +13,11 @@ http://openwindow.local:8787
 
 Change anytime in **Settings** (no rebuild required).
 
-## What Sync does (app button)
+## What Sync does (app menu)
+
+Toolbar **Sync** opens a menu:
+
+### Sync recent months (default)
 
 ```text
 1. POST /api/plaid/sync
@@ -26,19 +30,35 @@ Change anytime in **Settings** (no rebuild required).
 
 2. For each of [currentMonth, previousMonth] as YYYY-MM:
      GET /api/transactions?month=YYYY-MM
-     upsert into SwiftData
+     upsert expenses into SwiftData
 
-3. Reload widget timelines
+3. For each of [currentMonth, previousMonth] as YYYY-MM:
+     GET /api/income?month=YYYY-MM
+     upsert income into SwiftData (separate model; not in spend)
+
+4. Reload widget timelines
 ```
 
-### Months
+### Sync everything
+
+Same Plaid step, then **unfiltered** pulls of the full portal tables:
+
+```text
+2. GET /api/transactions          (no month)
+3. GET /api/income                (no month)
+4. Upsert all rows + reload widgets
+```
+
+Use this after a schema reset or when you want history beyond the last two months.
+
+### Months (recent sync only)
 
 Computed at runtime with the device calendar:
 
 - **Current month** — e.g. `2026-07`
 - **Previous month** — e.g. `2026-06`
 
-Shown in Settings under **Months pulled**.
+Shown in Settings under **Recent months**.
 
 ## Rate limits (Plaid)
 
@@ -101,6 +121,56 @@ Response shape (simplified):
 }
 ```
 
+### GET `/api/income`
+
+Separate **income** stream. Does **not** affect Total Spend, category charts, card breakdowns, Excel expense mirror, or budget expense export.
+
+| Param | App usage |
+|-------|-----------|
+| `month=YYYY-MM` | Same current + previous months as expenses |
+| `year` | Not used by default Sync |
+| `includePending` | Omitted (server default: pending off) |
+
+Response shape (finance-sync `IncomeApiResponse` / `IncomeRow`):
+
+```json
+{
+  "ok": true,
+  "kind": "income",
+  "count": 6,
+  "total": 2200.46,
+  "filters": { "month": "2026-07", "year": null, "includePending": false },
+  "categories": ["Payroll", "Direct Deposit", "Interest", "Refund", "Other Income"],
+  "income": [
+    {
+      "transaction_id": "...",
+      "date": "2026-07-01",
+      "source": "QuikTrip",
+      "category": "Payroll",
+      "amount": 317.73,
+      "account_name": "CHASE COLLEGE",
+      "account_mask": "2667",
+      "source_institution": null,
+      "raw_name": "QuikTrip",
+      "pfc": null,
+      "pending": false,
+      "kind": "income",
+      "updated_at": "2026-07-26T22:27:12.461Z"
+    }
+  ]
+}
+```
+
+| Field | Notes |
+|-------|--------|
+| `amount` | Always **positive** (money in) |
+| `source` | Display name (employer / payer) |
+| `transaction_id` | Stable Plaid/import primary key |
+| `total` | Server sum for this filter |
+| Categories | Payroll, Direct Deposit, Interest, Refund, Other Income |
+
+Internal transfers excluded server-side. Income is **read-only** from the app (no classify API). Pull is **soft-failed** so expense sync still completes if income fails.
+
 ### POST `/api/transactions/{transaction_id}/classify`
 
 Pushed when the user **Save**s category/multiplier on a transaction detail screen.
@@ -145,6 +215,8 @@ Also: `GET /api/categories` for the picker (falls back to a built-in list if unr
 curl -s "http://openwindow.local:8787/api/status" | head
 
 curl -s "http://openwindow.local:8787/api/transactions?month=$(date +%Y-%m)" | head
+
+curl -s "http://openwindow.local:8787/api/income?month=$(date +%Y-%m)" | head
 ```
 
 If hostname fails, use the PC LAN IP in Settings (e.g. `http://10.0.0.135:8787`).

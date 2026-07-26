@@ -15,7 +15,8 @@ final class Transaction {
     @Attribute(.unique) var transactionId: String
 
     var title: String
-    // Money value: negative = expense, positive = income in our app
+    // Money value for expenses: stored negative (API sends positive expense amounts)
+    // Income lives in the separate `Income` model and is never mixed into spend.
     var amount: Double
     var date: Date
     var category: String

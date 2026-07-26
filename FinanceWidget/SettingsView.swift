@@ -45,8 +45,13 @@ struct SettingsView: View {
 
                 // What Sync will request
                 Section {
-                    LabeledContent("Months pulled") {
+                    LabeledContent("Recent months") {
                         Text(AppSettings.syncMonthsDescription())
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Sync everything") {
+                        Text("All expenses + income")
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
                     }
@@ -59,7 +64,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Sync behavior")
                 } footer: {
-                    Text("Sync always asks the server for the current calendar month and the previous month. There is no hardcoded month in the app.")
+                    Text("On the Transactions tab, open Sync → “Sync recent months” (current + previous) or “Sync everything” (unfiltered GET /api/transactions and GET /api/income). Income is never included in Total Spend.")
                 }
 
                 if didSave {

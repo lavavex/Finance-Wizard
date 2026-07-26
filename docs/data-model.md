@@ -5,7 +5,7 @@ title: Data model
 
 # Data model
 
-## SwiftData: `Transaction`
+## SwiftData: `Transaction` (expenses)
 
 Defined in `Shared/Transaction.swift`.
 
@@ -19,7 +19,7 @@ Defined in `Shared/Transaction.swift`.
 | `paymentMethod` | `String` | Card / account name |
 | `multiplier` | `Double` | Points rate (e.g. 5 = 5x) |
 
-### Amount sign convention
+### Amount sign convention (expenses)
 
 | Source (API/file) | In app |
 |-------------------|--------|
@@ -27,18 +27,45 @@ Defined in `Shared/Transaction.swift`.
 | Display “Total Spend” | Sum of `abs(amount)` over the period |
 | Signed balance helpers | Sum of `amount` as stored |
 
+## SwiftData: `Income`
+
+Defined in `Shared/Income.swift`. **Separate model** so spend analytics never include money-in. Maps 1:1 to finance-sync `IncomeRow`.
+
+| Property | Type | API field | Notes |
+|----------|------|-----------|--------|
+| `transactionId` | `String` | `transaction_id` | **Unique** Plaid/import id |
+| `source` | `String` | `source` | Employer / payer display name |
+| `amount` | `Double` | `amount` | **Always positive** (money in) |
+| `date` | `Date` | `date` | `YYYY-MM-DD` |
+| `category` | `String` | `category` | Payroll, Direct Deposit, Interest, Refund, Other Income |
+| `accountName` | `String?` | `account_name` | e.g. CHASE COLLEGE |
+| `accountMask` | `String?` | `account_mask` | last4 |
+| `sourceInstitution` | `String?` | `source_institution` | e.g. Chase |
+| `rawName` | `String?` | `raw_name` | Bank description |
+| `pfc` | `String?` | `pfc` | Plaid PFC detailed |
+| `pending` | `Bool` | `pending` | Default false |
+| `kind` | `String` | `kind` | Always `"income"` |
+| `updatedAt` | `String?` | `updated_at` | ISO timestamp |
+
+| Rule | |
+|------|---|
+| Affects Total Spend? | **No** |
+| In category / card charts? | **No** |
+| Editable from app? | **No** (read-only) |
+| Source API | `GET /api/income?month=YYYY-MM` |
+
 ## JSON DTOs (not persisted as-is)
 
 In `ContentView.swift`:
 
-- `ImportedTransaction` — one object inside `transactions[]`
-- `ExportFile` — root with `transactions` array  
+- `ImportedTransaction` / `ExportFile` — expenses (`transactions[]`)
+- `ImportedIncome` / `IncomeExportFile` — income (`income[]`, plus `total`, `categories`, …)
 
-JSON field names use snake_case (`transaction_id`, `payment_method`) to match the API.
+JSON field names use snake_case (`transaction_id`, `account_name`, `payment_method`) to match the API.
 
 ## Upsert rules
 
-On Sync or Import:
+On Sync or Import (expenses):
 
 1. Decode `ExportFile`.
 2. For each row, fetch by `transactionId`.
@@ -46,6 +73,13 @@ On Sync or Import:
 4. **Missing** → insert.  
 5. `modelContext.save()`.
 6. `WidgetCenter.shared.reloadAllTimelines()`.
+
+On Sync (income):
+
+1. Decode `IncomeExportFile` (`IncomeApiResponse`).
+2. For each `IncomeRow`, upsert by `transaction_id` → `transactionId`.
+3. Map `source`, `account_name`, `account_mask`, etc.; amount stays positive.
+4. Save + reload timelines.
 
 Re-syncing the same month does **not** duplicate rows.
 

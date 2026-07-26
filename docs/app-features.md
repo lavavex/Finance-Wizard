@@ -11,16 +11,23 @@ Main list of expenses with filters shared conceptually with the widget.
 
 ### Header
 
-- **Total Spend** — sum of absolute amounts for the selected **period** (all cards).
+- **Total Spend** — sum of absolute amounts for the selected **period** (expenses only; all cards).
+- **Total Income** — sum of income amounts for the same period (`GET /api/income`; always positive; **not** in spend).
+- **Net** — income − spend for the period (informational only).
 - **Tap Total Spend** → **Categories** screen with switchable charts (default **horizontal bars**; also vertical bars and pie) plus a numeric breakdown.
-- Hiding cards does **not** change this total.
-- Count of transactions in the period.
+- Hiding cards does **not** change spend or income totals.
+- Counts of expenses and income rows in the period.
+
+### Lists
+
+- **Income** section — `source`, category, account, amount (read-only detail). Categories: Payroll, Direct Deposit, Interest, Refund, Other Income.
+- **Expenses** section — same as before (classify / category edit on tap).
 
 ### Toolbar
 
 | Control | Action |
 |---------|--------|
-| **Sync** | Plaid pull on PC + import current & previous months |
+| **Sync** | Menu: **Sync recent months** (current + previous) or **Sync everything** (full expense + income tables) |
 | Calendar | Period: This week / This month / All time |
 | Sort | Date, amount, name |
 | Eye slash | Hide cards from the **list only** |

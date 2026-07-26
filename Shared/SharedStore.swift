@@ -525,7 +525,9 @@ enum SharedStore {
 
     // Build a ModelContainer both app and widget can open
     static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
-        let schema = Schema([Transaction.self])
+        // Expenses + income share one App Group store; keep them as separate models
+        // so spend analytics never accidentally include income.
+        let schema = Schema([Transaction.self, Income.self])
 
         if inMemory {
             let configuration = ModelConfiguration(
@@ -548,7 +550,7 @@ enum SharedStore {
         } catch {
             // Schema changed (e.g. new fields) and lightweight migration failed.
             // Delete the App Group store and create a fresh empty one so the app launches.
-            // User can Sync again to re-download transactions.
+            // User can Sync again to re-download transactions + income.
             print("SwiftData open failed, resetting store: \(error)")
             deletePersistentStoreFiles()
             return try ModelContainer(for: schema, configurations: [configuration])
