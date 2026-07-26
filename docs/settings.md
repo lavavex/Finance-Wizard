@@ -36,7 +36,7 @@ http://127.0.0.1:8787
 | **Months pulled** | Current + previous `YYYY-MM` (live) |
 | **Active URL** | Normalized URL Sync will call |
 
-There is **no** hardcoded month in the app.
+There is **no** hardcoded month in the app. Sync also pulls **income** for those months (`GET /api/income`); income is never part of Total Spend.
 
 ## Implementation
 

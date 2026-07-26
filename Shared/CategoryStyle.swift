@@ -101,6 +101,17 @@ enum CategoryStyle {
             return "theatermasks.fill"
         case let c where matches(c, ["coffee"]):
             return "cup.and.saucer.fill"
+        // Income categories (GET /api/income — Payroll, Direct Deposit, Interest, Refund, Other Income)
+        case let c where matches(c, ["payroll", "paycheck", "salary", "wages"]):
+            return "banknote.fill"
+        case let c where matches(c, ["direct deposit", "mobile deposit", "check deposit"]):
+            return "building.columns.fill"
+        case let c where matches(c, ["interest"]):
+            return "percent"
+        case let c where matches(c, ["refund", "refunds", "return"]):
+            return "arrow.uturn.backward.circle.fill"
+        case let c where matches(c, ["other income", "income", "bonus", "promo"]):
+            return "dollarsign.circle.fill"
         case let c where matches(c, ["miscellaneous", "misc", "other", "uncategorized"]):
             return "ellipsis.circle.fill"
         default:

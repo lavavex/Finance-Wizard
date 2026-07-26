@@ -30,6 +30,40 @@ struct ExportFile: Decodable {
     let transactions: [ImportedTransaction]
 }
 
+// Income stream from GET /api/income — shape matches finance-sync IncomeApiResponse / IncomeRow
+struct ImportedIncome: Decodable {
+    let transaction_id: String
+    let date: String
+    let month_name: String?
+    let year: Int?
+    /// Employer / payer / short label (display name)
+    let source: String
+    let category: String
+    /// Always > 0 (money in)
+    let amount: Double
+    let account_name: String?
+    let account_mask: String?
+    let source_institution: String?
+    let raw_name: String?
+    let pfc: String?
+    let pending: Bool?
+    let kind: String?
+    let updated_at: String?
+}
+
+struct IncomeExportFile: Decodable {
+    let ok: Bool?
+    let kind: String?
+    let count: Int?
+    /// Server sum of amounts in this response (prefer for month-filtered pull)
+    let total: Double?
+    let categories: [String]?
+    // Optional so empty payloads without the key still decode
+    let income: [ImportedIncome]?
+
+    var rows: [ImportedIncome] { income ?? [] }
+}
+
 // MARK: - Root: three tabs
 
 struct ContentView: View {
@@ -60,6 +94,7 @@ struct ContentView: View {
 
 struct AllTransactionsView: View {
     @Query private var transactions: [Transaction]
+    @Query private var incomeRows: [Income]
     @Environment(\.modelContext) private var modelContext
 
     @State private var isImporting = false
@@ -97,13 +132,37 @@ struct AllTransactionsView: View {
         TransactionAnalytics.inPeriod(transactions, period: period, referenceDate: referenceDate)
     }
 
+    // Income for the same period filter (never mixed into spend)
+    private var periodIncome: [Income] {
+        IncomeAnalytics.inPeriod(incomeRows, period: period, referenceDate: referenceDate)
+    }
+
+    private var visibleIncome: [Income] {
+        IncomeAnalytics.filter(
+            incomeRows,
+            period: period,
+            referenceDate: referenceDate,
+            sort: sort
+        )
+    }
+
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
     }
 
-    // Big number: all cards in the period
+    // Big number: all cards in the period (expenses only)
     private var totalSpend: Double {
         TransactionAnalytics.totalSpend(in: periodTransactions)
+    }
+
+    // Money earned in the period (GET /api/income; always positive)
+    private var totalIncome: Double {
+        IncomeAnalytics.totalEarned(in: periodIncome)
+    }
+
+    // Optional net: earned − spent for the same period (instruct “net” example)
+    private var periodNet: Double {
+        totalIncome - totalSpend
     }
 
     // Cards available to hide (from full store, so you can hide even if not in period)
@@ -140,7 +199,7 @@ struct AllTransactionsView: View {
                     }
                 }
 
-                // Total Spend — tap to open category charts
+                // Totals — spend from expenses only; income is a separate stream
                 Section {
                     NavigationLink {
                         CategorySpendView(period: period, referenceDate: referenceDate)
@@ -162,17 +221,58 @@ struct AllTransactionsView: View {
                                 .foregroundStyle(.primary)
                         }
                     }
-                    Text("\(periodTransactions.count) transactions in \(periodLabel.lowercased())")
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Total Income")
+                                .font(.headline)
+                            Text(periodLabel)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(totalIncome, format: .currency(code: "USD"))
+                            .font(.title2.bold())
+                            .foregroundStyle(.green)
+                    }
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Net")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Income − spend")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(periodNet, format: .currency(code: "USD"))
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(periodNet >= 0 ? .green : .primary)
+                    }
+                    Text("\(periodTransactions.count) expenses · \(periodIncome.count) income in \(periodLabel.lowercased())")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if !hiddenCards.isEmpty {
-                        Text("Hiding \(hiddenCards.count) card(s) from the list only")
+                        Text("Hiding \(hiddenCards.count) card(s) from the expense list only")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                Section("Transactions") {
+                Section("Income") {
+                    if visibleIncome.isEmpty {
+                        Text(incomeEmptyMessage)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(visibleIncome) { row in
+                            NavigationLink {
+                                IncomeDetailView(income: row)
+                            } label: {
+                                IncomeRowView(income: row)
+                            }
+                        }
+                    }
+                }
+
+                Section("Expenses") {
                     if visibleTransactions.isEmpty {
                         Text(emptyMessage)
                             .foregroundStyle(.secondary)
@@ -191,17 +291,26 @@ struct AllTransactionsView: View {
             .navigationTitle("Finances")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Task { await syncFromServer() }
-                    } label: {
-                        if isSyncing {
-                            // Show progress in the toolbar while a sync is running
-                            ProgressView()
-                        } else {
+                    if isSyncing {
+                        ProgressView()
+                    } else {
+                        // Quick sync (2 months) + full history pull
+                        Menu {
+                            Button {
+                                Task { await syncFromServer(scope: .recent) }
+                            } label: {
+                                Label("Sync recent months", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            Button {
+                                Task { await syncFromServer(scope: .everything) }
+                            } label: {
+                                Label("Sync everything", systemImage: "arrow.down.circle")
+                            }
+                        } label: {
                             Text("Sync")
                         }
+                        .disabled(isSyncing)
                     }
-                    .disabled(isSyncing)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     // Period + which month (when Month is selected)
@@ -279,12 +388,19 @@ struct AllTransactionsView: View {
 
     private var emptyMessage: String {
         if transactions.isEmpty {
-            return "No transactions yet. Tap Sync or Import."
+            return "No expenses yet. Tap Sync or Import."
         }
         if periodTransactions.isEmpty {
-            return "No transactions in \(periodLabel.lowercased())."
+            return "No expenses in \(periodLabel.lowercased())."
         }
         return "All cards in this period are hidden. Show some cards to see the list."
+    }
+
+    private var incomeEmptyMessage: String {
+        if incomeRows.isEmpty {
+            return "No income yet. Tap Sync to pull from the portal."
+        }
+        return "No income in \(periodLabel.lowercased())."
     }
 
     private func toggleHidden(_ card: String) {
@@ -354,19 +470,45 @@ struct AllTransactionsView: View {
         syncStatusDetail = detail
     }
 
+    /// How much history to download after the Plaid bank pull
+    private enum SyncScope {
+        /// Current + previous calendar month only (default quick sync)
+        case recent
+        /// Unfiltered GET /api/transactions + GET /api/income (full portal tables)
+        case everything
+
+        var statusLabel: String {
+            switch self {
+            case .recent: return "recent months"
+            case .everything: return "everything"
+            }
+        }
+    }
+
     // Sync button flow:
     // 1) Ask the PC to pull from Plaid into SQLite (once; no fixed month)
-    // 2) GET + upsert current month AND previous month
-    // 3) If Plaid is rate-limited (429) or busy (409), still do those GETs
-    // 4) Surface each step in Sync Status
-    private func syncFromServer() async {
+    // 2) GET + upsert expenses (recent months, or all rows if scope == .everything)
+    // 3) GET + upsert income the same way (separate stream; not in spend)
+    // 4) If Plaid is rate-limited (429) or busy (409), still do those GETs
+    // 5) Surface each step in Sync Status
+    private func syncFromServer(scope: SyncScope = .recent) async {
         await MainActor.run {
             isSyncing = true
-            setSyncStatus(.running, title: "Starting sync…", detail: "Connecting to \(apiBaseURL)")
+            setSyncStatus(
+                .running,
+                title: "Starting \(scope.statusLabel) sync…",
+                detail: "Connecting to \(apiBaseURL)"
+            )
         }
 
-        // Always pull these two calendar months (not hardcoded)
-        let months = AppSettings.currentAndPreviousMonths()
+        // Recent = two months; everything = no month filter on the GETs
+        let months: [String]? = scope == .recent ? AppSettings.currentAndPreviousMonths() : nil
+        let rangeLabel: String = {
+            if let months {
+                return months.joined(separator: ", ")
+            }
+            return "all rows (no month filter)"
+        }()
 
         do {
             await MainActor.run {
@@ -402,31 +544,65 @@ struct AllTransactionsView: View {
             await MainActor.run {
                 setSyncStatus(
                     .running,
-                    title: "Downloading transactions…",
-                    detail: "\(plaidLine)\nFetching months: \(months.joined(separator: ", "))"
+                    title: "Downloading expenses…",
+                    detail: "\(plaidLine)\nScope: \(scope.statusLabel)\nFetching: \(rangeLabel)"
                 )
             }
 
-            // Step 2: always try to load months (even if Plaid was limited/failed)
-            let pulled = try await pullAndUpsertMonths(months)
-            let monthLines = pulled.map { "\($0.month): \($0.count) row(s)" }.joined(separator: "\n")
+            // Step 2: expenses (month list or full table)
+            let pulled = try await pullAndUpsertExpenses(months: months)
+            let monthLines = pulled.map { "\($0.label): \($0.count) expense(s)" }.joined(separator: "\n")
             let totalRows = pulled.reduce(0) { $0 + $1.count }
 
             await MainActor.run {
-                let kind: SyncStatusKind = plaidWasWarning ? .warning : .success
+                setSyncStatus(
+                    .running,
+                    title: "Downloading income…",
+                    detail: "\(plaidLine)\nScope: \(scope.statusLabel)\nFetching: \(rangeLabel)"
+                )
+            }
+
+            // Step 3: income stream — soft-fail so expenses still land
+            let incomeResult = await pullAndUpsertIncomeSoft(months: months)
+            let incomeLines: String
+            let totalIncomeRows: Int
+            let incomeWarning: String?
+            switch incomeResult {
+            case .ok(let pulled):
+                incomeLines = pulled.map { "\($0.label): \($0.count) income" }.joined(separator: "\n")
+                totalIncomeRows = pulled.reduce(0) { $0 + $1.count }
+                incomeWarning = nil
+            case .failed(let message):
+                incomeLines = "Income pull failed"
+                totalIncomeRows = 0
+                incomeWarning = message
+            }
+
+            await MainActor.run {
+                let hadWarning = plaidWasWarning || incomeWarning != nil
+                let kind: SyncStatusKind = hadWarning ? .warning : .success
                 let title: String
-                if case .synced = plaidResult {
-                    title = "Sync complete"
+                if case .synced = plaidResult, incomeWarning == nil {
+                    title = scope == .everything ? "Sync everything complete" : "Sync complete"
                 } else if case .failed = plaidResult {
                     title = "Sync finished with Plaid error"
+                } else if incomeWarning != nil {
+                    title = "Sync complete (income issue)"
                 } else {
                     title = "Sync complete (Plaid skipped)"
                 }
-                setSyncStatus(
-                    kind,
-                    title: title,
-                    detail: "\(plaidLine)\nLoaded \(totalRows) transaction row(s) into the app:\n\(monthLines)"
-                )
+                var detail = """
+                Scope: \(scope.statusLabel)
+                \(plaidLine)
+                Expenses: \(totalRows) row(s)
+                \(monthLines)
+                Income: \(totalIncomeRows) row(s)
+                \(incomeLines)
+                """
+                if let incomeWarning {
+                    detail += "\nIncome error: \(incomeWarning)"
+                }
+                setSyncStatus(kind, title: title, detail: detail)
                 isSyncing = false
             }
         } catch {
@@ -442,24 +618,83 @@ struct AllTransactionsView: View {
         }
     }
 
-    // GET each month and merge into SwiftData; returns per-month counts for status UI
-    private func pullAndUpsertMonths(_ months: [String]) async throws -> [(month: String, count: Int)] {
-        var results: [(month: String, count: Int)] = []
-        for month in months {
+    // GET expenses for each month, or one unfiltered GET when months == nil
+    private func pullAndUpsertExpenses(months: [String]?) async throws -> [(label: String, count: Int)] {
+        if let months {
+            var results: [(label: String, count: Int)] = []
+            for month in months {
+                await MainActor.run {
+                    setSyncStatus(
+                        .running,
+                        title: "Downloading expenses \(month)…",
+                        detail: syncStatusDetail
+                    )
+                }
+                let data = try await requestTransactionsJSON(month: month)
+                let count = try await MainActor.run {
+                    try upsertTransactions(from: data)
+                }
+                results.append((month, count))
+            }
+            return results
+        }
+
+        await MainActor.run {
+            setSyncStatus(
+                .running,
+                title: "Downloading all expenses…",
+                detail: syncStatusDetail
+            )
+        }
+        let data = try await requestTransactionsJSON(month: nil)
+        let count = try await MainActor.run {
+            try upsertTransactions(from: data)
+        }
+        return [("all", count)]
+    }
+
+    private enum IncomePullResult {
+        case ok([(label: String, count: Int)])
+        case failed(String)
+    }
+
+    // GET income for each month, or one unfiltered GET when months == nil (soft-fail)
+    private func pullAndUpsertIncomeSoft(months: [String]?) async -> IncomePullResult {
+        do {
+            if let months {
+                var results: [(label: String, count: Int)] = []
+                for month in months {
+                    await MainActor.run {
+                        setSyncStatus(
+                            .running,
+                            title: "Downloading income \(month)…",
+                            detail: syncStatusDetail
+                        )
+                    }
+                    let data = try await requestIncomeJSON(month: month)
+                    let count = try await MainActor.run {
+                        try upsertIncome(from: data)
+                    }
+                    results.append((month, count))
+                }
+                return .ok(results)
+            }
+
             await MainActor.run {
                 setSyncStatus(
                     .running,
-                    title: "Downloading \(month)…",
+                    title: "Downloading all income…",
                     detail: syncStatusDetail
                 )
             }
-            let data = try await requestTransactionsJSON(month: month)
+            let data = try await requestIncomeJSON(month: nil)
             let count = try await MainActor.run {
-                try upsertTransactions(from: data)
+                try upsertIncome(from: data)
             }
-            results.append((month, count))
+            return .ok([("all", count)])
+        } catch {
+            return .failed(error.localizedDescription)
         }
-        return results
     }
 
     // Outcome of POST /api/plaid/sync
@@ -540,31 +775,58 @@ struct AllTransactionsView: View {
         return .synced
     }
 
-    // GET /api/transactions?month=YYYY-MM — SQLite snapshot (no Plaid call, no rate limit)
-    private func requestTransactionsJSON(month: String) async throws -> Data {
+    // GET /api/transactions — optional month=YYYY-MM (nil = full expense table)
+    private func requestTransactionsJSON(month: String?) async throws -> Data {
         var components = URLComponents(string: "\(apiBaseURL)/api/transactions")
-        components?.queryItems = [
-            URLQueryItem(name: "month", value: month)
-        ]
+        if let month {
+            components?.queryItems = [URLQueryItem(name: "month", value: month)]
+        }
         guard let url = components?.url else {
             throw URLError(.badURL)
         }
 
         let (data, response) = try await URLSession.shared.data(from: url)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let scope = month.map { "month \($0)" } ?? "all"
             throw NSError(
                 domain: "FinanceWidget",
                 code: http.statusCode,
                 userInfo: [
                     NSLocalizedDescriptionKey:
-                        "Server returned \(http.statusCode) for transactions (\(month))"
+                        "Server returned \(http.statusCode) for transactions (\(scope))"
                 ]
             )
         }
         return data
     }
 
-    // Returns how many rows were in the JSON payload (for Sync Status)
+    // GET /api/income — optional month=YYYY-MM (nil = full income table; pending off by default)
+    private func requestIncomeJSON(month: String?) async throws -> Data {
+        var components = URLComponents(string: "\(apiBaseURL)/api/income")
+        if let month {
+            components?.queryItems = [URLQueryItem(name: "month", value: month)]
+        }
+        // includePending defaults to false on the server
+        guard let url = components?.url else {
+            throw URLError(.badURL)
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let scope = month.map { "month \($0)" } ?? "all"
+            throw NSError(
+                domain: "FinanceWidget",
+                code: http.statusCode,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Server returned \(http.statusCode) for income (\(scope))"
+                ]
+            )
+        }
+        return data
+    }
+
+    // Returns how many expense rows were in the JSON payload (for Sync Status)
     @discardableResult
     private func upsertTransactions(from data: Data) throws -> Int {
         let export = try JSONDecoder().decode(ExportFile.self, from: data)
@@ -615,6 +877,71 @@ struct AllTransactionsView: View {
         return export.transactions.count
     }
 
+    // Upsert income rows from IncomeRow JSON. Amounts stay positive (earned).
+    // Read-only on the app side — no classify/edit/mark-exported API for income.
+    @discardableResult
+    private func upsertIncome(from data: Data) throws -> Int {
+        let export = try JSONDecoder().decode(IncomeExportFile.self, from: data)
+        let rows = export.rows
+
+        for item in rows {
+            // Skip non-income discriminators if a mixed payload ever appears
+            if let kind = item.kind, kind != "income" { continue }
+            guard !item.transaction_id.isEmpty,
+                  let date = Self.parseExportDate(item.date) else { continue }
+
+            let targetId = item.transaction_id
+            var descriptor = FetchDescriptor<Income>(
+                predicate: #Predicate { $0.transactionId == targetId }
+            )
+            descriptor.fetchLimit = 1
+
+            // API amounts are always > 0; abs() guards against a bad row looking like spend
+            let amount = abs(item.amount)
+            let source = item.source.isEmpty ? (item.raw_name ?? "Income") : item.source
+            let category = item.category.isEmpty ? "Other Income" : item.category
+            let kind = item.kind ?? "income"
+            let pending = item.pending ?? false
+
+            if let existing = try modelContext.fetch(descriptor).first {
+                existing.source = source
+                existing.amount = amount
+                existing.date = date
+                existing.category = category
+                existing.accountName = item.account_name
+                existing.accountMask = item.account_mask
+                existing.sourceInstitution = item.source_institution
+                existing.rawName = item.raw_name
+                existing.pfc = item.pfc
+                existing.pending = pending
+                existing.kind = kind
+                existing.updatedAt = item.updated_at
+            } else {
+                modelContext.insert(
+                    Income(
+                        transactionId: targetId,
+                        source: source,
+                        amount: amount,
+                        date: date,
+                        category: category,
+                        accountName: item.account_name,
+                        accountMask: item.account_mask,
+                        sourceInstitution: item.source_institution,
+                        rawName: item.raw_name,
+                        pfc: item.pfc,
+                        pending: pending,
+                        kind: kind,
+                        updatedAt: item.updated_at
+                    )
+                )
+            }
+        }
+
+        try modelContext.save()
+        WidgetCenter.shared.reloadAllTimelines()
+        return rows.count
+    }
+
     private static func parseExportDate(_ string: String) -> Date? {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -625,7 +952,136 @@ struct AllTransactionsView: View {
     }
 }
 
+// MARK: - Income list row + detail (read-only — no classify API for income)
+
+struct IncomeRowView: View {
+    let income: Income
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: CategoryStyle.symbolName(for: income.category))
+                .font(.title3)
+                .foregroundStyle(.green)
+                .frame(width: 28, alignment: .center)
+                .accessibilityLabel(income.category)
+
+            VStack(alignment: .leading, spacing: 4) {
+                // Display: source (employer / payer)
+                Text(income.source)
+                    .font(.body)
+                Text("\(income.category) · \(income.accountDisplay)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(income.date, style: .date)
+                    if income.pending {
+                        Text("Pending")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(income.amount, format: .currency(code: "USD"))
+                .foregroundStyle(.green)
+        }
+    }
+}
+
+struct IncomeDetailView: View {
+    let income: Income
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: 12) {
+                    Image(systemName: CategoryStyle.symbolName(for: income.category))
+                        .font(.largeTitle)
+                        .foregroundStyle(.green)
+                        .frame(width: 44)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(income.source)
+                            .font(.title3.weight(.semibold))
+                        Text(income.amount, format: .currency(code: "USD"))
+                            .font(.title2.bold())
+                            .foregroundStyle(.green)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section("Details") {
+                LabeledContent("Date") {
+                    Text(income.date, style: .date)
+                }
+                LabeledContent("Category") {
+                    Text(income.category)
+                }
+                if let accountName = income.accountName, !accountName.isEmpty {
+                    LabeledContent("Account") {
+                        HStack(spacing: 8) {
+                            BankIconView(paymentMethod: income.iconKey, size: 24)
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(accountName)
+                                if let mask = income.accountMask, !mask.isEmpty {
+                                    Text("···\(mask)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .multilineTextAlignment(.trailing)
+                        }
+                    }
+                } else if let institution = income.sourceInstitution, !institution.isEmpty {
+                    LabeledContent("Institution") {
+                        HStack(spacing: 8) {
+                            BankIconView(paymentMethod: institution, size: 24)
+                            Text(institution)
+                        }
+                    }
+                }
+                if income.pending {
+                    LabeledContent("Status") {
+                        Text("Pending")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                if let rawName = income.rawName, !rawName.isEmpty, rawName != income.source {
+                    LabeledContent("Bank description") {
+                        Text(rawName)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+                if let pfc = income.pfc, !pfc.isEmpty {
+                    LabeledContent("Plaid category") {
+                        Text(pfc)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                LabeledContent("ID") {
+                    Text(income.transactionId)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            Section {
+                Text("Income is separate from expenses and is not included in Total Spend, category charts, or budget export. Read-only from the app.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Income")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 #Preview {
     ContentView()
-        .modelContainer(for: Transaction.self, inMemory: true)
+        .modelContainer(for: [Transaction.self, Income.self], inMemory: true)
 }
