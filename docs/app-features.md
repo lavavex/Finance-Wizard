@@ -66,9 +66,9 @@ Single hub for payment methods and credit tracking:
 | **Paid this period** | Card bill payments (excluded from Total Spend) |
 | **Cards list** | Primary: balance + limit; secondary: spend + paid; utilization bar |
 | **Payments list** | Bill payments for the period |
-| **Card detail** | Rename card (e.g. “Chase Freedom”), balance/limit, payments, purchases |
+| **Card detail** | Rename card, balance/limit, payments, purchases |
 
-Open a card → **Card name** field to nickname it (stored on device). Clear and save to restore the Plaid label (“Credit Card ···0820”).
+Open a card → **Card name** to nickname it (per account / last four). Save the bank label again to restore the default.
 
 Period + sort controls apply across the tab. Transfers and card bill payments stay out of Transactions totals.
 
@@ -98,18 +98,9 @@ Implemented in `Shared/SharedStore.swift` as `TransactionAnalytics` + `SnapshotP
 Maps **category** → SF Symbol in `Shared/CategorySymbol.swift`.
 
 ### Cards / banks
-Card faces use:
-
-1. **Plaid bank logo + brand color** (`/institutions/get_by_id` optional metadata) — cached on Sync.  
-2. **Product-colored plastic face** from your nickname or **Card art** pick (Freedom blue, Sapphire navy, …).
-
-| Example nickname / art pick | Look |
-|-----------------------------|------|
-| Chase Freedom / Unlimited / Flex | Blue face + Chase logo when Plaid provides it |
-| Sapphire Preferred / Reserve | Navy / black face |
-| Amex Gold / Platinum / Blue Cash | Gold / silver / blue |
-
-**Not** scraped product photos from Chase.com (copyright). Apps that show Freedom/Sapphire photography typically license those assets or use a paid enrichment partner.
+- **One row per linked account** (Plaid `account_id` / last four) so multiple Chase cards stay separate.  
+- **Logo** = institution logo from Plaid on Sync (not product photography).  
+- **Rename** per account on the card detail screen.
 
 ## What the app does *not* do (yet)
 

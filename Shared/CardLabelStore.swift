@@ -2,7 +2,7 @@
 //  CardLabelStore.swift
 //  Finance Wizard
 //
-//  User-chosen display names for credit cards / payment methods.
+//  User-chosen display names for cards / payment methods.
 //  Keys: "account:<plaid account_id>" or "method:<raw payment method string>".
 //
 
@@ -10,7 +10,6 @@ import Foundation
 
 enum CardLabelStore {
     private static let labelsKey = "card.customLabels"
-    private static let productsKey = "card.productStyles"
 
     // MARK: - Display name
 
@@ -38,40 +37,6 @@ enum CardLabelStore {
             return custom
         }
         return fallback ?? paymentMethod
-    }
-
-    // MARK: - Card product art
-
-    /// Explicit product pick, else infer from nickname / payment method text.
-    static func product(
-        accountId: String?,
-        paymentMethod: String,
-        displayName: String
-    ) -> CardProduct {
-        if let accountId, let raw = getProduct(key: accountKey(accountId)),
-           let product = CardProduct(rawValue: raw) {
-            return product
-        }
-        if let raw = getProduct(key: methodKey(paymentMethod)),
-           let product = CardProduct(rawValue: raw) {
-            return product
-        }
-        // Infer from nickname first (user typed “Chase Freedom”), then raw method
-        let fromName = CardProduct.resolve(from: displayName)
-        if fromName != .generic { return fromName }
-        return CardProduct.resolve(from: paymentMethod)
-    }
-
-    static func setProduct(_ product: CardProduct?, accountId: String?, paymentMethod: String) {
-        let key: String = {
-            if let accountId, !accountId.isEmpty { return accountKey(accountId) }
-            return methodKey(paymentMethod)
-        }()
-        if let product, product != .generic {
-            setProductValue(product.rawValue, key: key)
-        } else {
-            removeProduct(key: key)
-        }
     }
 
     // MARK: - Write names
@@ -112,12 +77,7 @@ enum CardLabelStore {
         UserDefaults.standard.dictionary(forKey: labelsKey) as? [String: String] ?? [:]
     }
 
-    private static func productMap() -> [String: String] {
-        UserDefaults.standard.dictionary(forKey: productsKey) as? [String: String] ?? [:]
-    }
-
     private static func getLabel(key: String) -> String? { labelMap()[key] }
-    private static func getProduct(key: String) -> String? { productMap()[key] }
 
     private static func setLabelValue(_ value: String, key: String) {
         var map = labelMap()
@@ -129,17 +89,5 @@ enum CardLabelStore {
         var map = labelMap()
         map.removeValue(forKey: key)
         UserDefaults.standard.set(map, forKey: labelsKey)
-    }
-
-    private static func setProductValue(_ value: String, key: String) {
-        var map = productMap()
-        map[key] = value
-        UserDefaults.standard.set(map, forKey: productsKey)
-    }
-
-    private static func removeProduct(key: String) {
-        var map = productMap()
-        map.removeValue(forKey: key)
-        UserDefaults.standard.set(map, forKey: productsKey)
     }
 }
