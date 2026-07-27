@@ -27,11 +27,11 @@ Main list of expenses with filters shared conceptually with the widget.
 
 | Control | Action |
 |---------|--------|
-| **Sync** | Menu: **Sync recent months** (current + previous) or **Sync everything** (full expense + income tables) |
+| **Sync** | Menu: **Sync now** (Plaid incremental), **Full re-sync** (reset cursors), **Link bank account** |
 | Calendar | Period: This week / This month / All time |
 | Sort | Date, amount, name |
 | Eye slash | Hide cards from the **list only** |
-| **Import** | Pick finance-sync JSON from Files |
+| **Import** | Pick optional JSON export from Files |
 
 ### Rows
 
@@ -48,12 +48,12 @@ Each row shows:
 | Field | Editable? |
 |-------|-----------|
 | Title, amount, date, card, id | Read-only |
-| **Category** | Yes (server categories + free text) |
+| **Category** | Yes (built-in list + free text) |
 | **Points multiplier** | Yes |
-| Learn / same card / apply matching | Toggles for classify API |
+| Learn / same card / apply matching | Local rules only |
 | Points estimate | Derived (abs(amount) × multiplier) |
 
-**Save** calls `POST /api/transactions/{id}/classify`, then updates local SwiftData and marks category/multiplier locked. With **learn**, the server remembers a vendor rule for future Plaid rows.
+**Save** updates SwiftData and locks category/multiplier so later Plaid syncs do not overwrite them. With **learn**, a local vendor rule is stored for future Plaid rows.
 
 ## Tab: By Card
 
@@ -106,5 +106,5 @@ Optional: add Asset Catalog images named `BankChase`, `BankAmex`, `BankAmazon`, 
 
 - Apple Card direct API / CSV import  
 - Budget limits / overspend alerts  
-- `mark-exported` acknowledgment to finance-sync  
-- Cloud sync between phones (data is local + optional re-Sync from PC)  
+- Multi-device cloud sync (data is local + re-Sync from Plaid)  
+- Hosted backend for Plaid secrets (BYO keys on device)  

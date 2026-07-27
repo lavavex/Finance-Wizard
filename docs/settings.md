@@ -5,45 +5,38 @@ title: Settings
 
 # Settings
 
-## Sync server
+## Plaid developer account
 
 | Field | Description |
 |-------|-------------|
-| Text field | Base URL of finance-sync, **no path** |
-| **Save server URL** | Writes to `UserDefaults` (`serverBaseURL`) |
-| **Reset to default** | `http://openwindow.local:8787` |
+| **client_id** | From [Plaid Dashboard → Keys](https://dashboard.plaid.com/developers/keys) |
+| **secret** | Environment-specific secret (stored in **Keychain**) |
+| **Environment** | Sandbox / Development / Production |
+| **Save credentials** | Writes client_id + env to `UserDefaults`, secret to Keychain |
 
-Rules when saving:
+## Linked banks
 
-- Trim whitespace  
-- Strip trailing `/`  
-- Empty → default  
+| Action | Description |
+|--------|-------------|
+| **Link bank account** | Opens Plaid Link; exchanges public_token; stores Item |
+| Swipe **Unlink** | Deletes local access token; best-effort `POST /item/remove` |
 
-Examples:
-
-```text
-http://openwindow.local:8787
-http://10.0.0.135:8787
-http://127.0.0.1:8787
-```
-
-(Simulator on the same Mac can often use hostname or `127.0.0.1` if the portal binds appropriately.)
-
-## Sync behavior (read-only info)
+## Status
 
 | Label | Meaning |
 |-------|---------|
-| **Months pulled** | Current + previous `YYYY-MM` (live) |
-| **Active URL** | Normalized URL Sync will call |
-
-There is **no** hardcoded month in the app. Sync also pulls **income** for those months (`GET /api/income`); income is never part of Total Spend.
+| Credentials | Configured vs missing |
+| Environment | Active Plaid host |
+| Linked items | Count of stored Items |
+| API host | Hostname for the selected environment |
 
 ## Implementation
 
 | Piece | Location |
 |-------|----------|
-| Keys / helpers | `FinanceWizard/AppSettings.swift` |
+| Credentials | `FinanceWizard/Plaid/PlaidCredentialsStore.swift` |
+| Items / cursors | `FinanceWizard/Plaid/PlaidItemStore.swift` |
+| Keychain | `FinanceWizard/Plaid/PlaidKeychain.swift` |
 | UI | `FinanceWizard/SettingsView.swift` |
-| Persistence | `@AppStorage` / `UserDefaults` |
 
-Settings are **device-local** (not in the App Group, not synced to the widget config).
+Credentials are **device-local** (not in the App Group).

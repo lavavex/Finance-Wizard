@@ -29,65 +29,43 @@ title: Troubleshooting
 2. Team selected for both targets.  
 3. Clean build folder, delete app from device/simulator, reinstall.  
 
-## Sync / network
+## Plaid / Sync
 
-### Sync fails immediately / cannot connect
+### “Add your Plaid client_id and secret in Settings”
 
-- Is finance-sync running on the PC?  
-- Correct URL in **Settings**?  
-- Same LAN / VPN / hostname resolution (`openwindow.local`)?  
-- Local Network permission allowed?  
-- ATS / local HTTP allowed for cleartext?  
+Save credentials under **Settings → Plaid developer account**. Use the secret that matches the selected **Environment** (Sandbox secret with Sandbox env).
 
-Test from Mac:
+### Link fails immediately
 
-```bash
-curl -sS "http://YOUR_HOST:8787/api/status"
-```
+- Confirm client_id + secret + environment match the dashboard.  
+- Sandbox only works with Sandbox secret.  
+- Check the Sync Status / error text for Plaid `error_code`.  
 
-### Sync “works” but data never changes
+### OAuth bank never returns to the app
 
-- Plaid may be rate-limited (429) — app still GETs SQLite; PC may not have new bank data yet.  
-- Wait for cooldown or check portal status `plaidSyncRate`.  
-- Confirm months in Settings match the months you expect on the server.  
+Some Production / Development institutions require a **redirect URI** + Universal Links. Sandbox test banks (e.g. First Platypus Bank) do not need OAuth. For real OAuth banks, register a redirect URI in the Plaid dashboard and configure Associated Domains.
 
-### 409 on Plaid sync
+### Sync says no banks linked
 
-Another sync is running. App should still GET transactions. Retry later if Plaid refresh is required.
+**Settings → Link bank account** first, then **Sync → Sync now**.
 
-## Widget
+### Sync works but list is empty
 
-### Widget empty after Sync
+- Wait a few seconds after first link (initial product ready).  
+- Try **Full re-sync**.  
+- Confirm the linked Item still appears under Settings.  
+- Pending transactions are skipped by default.
 
-1. Sync from the **app** (not only widget scheme).  
-2. Same App Group on both targets.  
-3. Edit widget / remove and re-add.  
-4. Wait for timeline reload or reboot simulator.  
+### Categories wrong after sync
 
-### Hide cards empties Total Spend
+Edit the transaction → **Save** with **learn** on. Future syncs respect locks and local vendor rules.
 
-That would be a bug — Total Spend must ignore hide list. Expected: total stays, list shrinks.
+### Duplicates
 
-### Hide cards list empty in Edit Widget
+Should not happen if upsert by `transactionId` works. If you reset Plaid Items and re-link, new transaction ids can appear as new rows.
 
-Sync first so payment methods exist in the store; the intent query reads `SharedStore.allPaymentMethods()`.
+## Widget empty
 
-## Data oddities
-
-### Duplicate transactions
-
-Should not happen if upsert by `transactionId` works. If IDs change on the server, new rows appear — check finance-sync id stability.
-
-### Amounts look doubled or wrong sign
-
-API expenses are positive; app stores negative. Total Spend uses absolute value. If you re-import with different conventions, wipe the app or clear the store.
-
-### Wrong month of data
-
-Sync always pulls **current + previous** calendar months in the device time zone. Older history needs a server-side export or a future app feature.
-
-## Getting more diagnostics
-
-- Read the in-app alert text on Sync failure.  
-- Server logs on finance-sync.  
-- `curl` the same URLs the app uses with the Settings base URL.  
+1. Run the **app**, Sync, then add the widget.  
+2. Confirm App Group id matches on both targets.  
+3. Delete and re-add the widget after major model changes.

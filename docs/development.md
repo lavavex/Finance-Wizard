@@ -9,7 +9,7 @@ title: Development
 
 - macOS + Xcode  
 - Git  
-- Optional: finance-sync on LAN for Sync testing  
+- Optional: Plaid Sandbox keys for Sync testing  
 - Optional: GitHub CLI / SSH keys for remote  
 
 ## Opening & building
@@ -60,11 +60,12 @@ git push -u origin main
 
 See also: [GitHub Pages setup](github-pages.md).
 
-## Testing Sync without Plaid spam
+## Testing Sync (Sandbox)
 
-1. First Sync may call Plaid.  
-2. Immediate second Sync should hit **429** and still refresh months via GET.  
-3. Confirm list updates and no hard error on cooldown.  
+1. Use Sandbox keys + First Platypus Bank (`user_good` / `pass_good`).  
+2. First **Sync now** may take a few seconds while product data becomes ready.  
+3. Second **Sync now** should be incremental (cursor) and return few or no new rows.  
+4. **Full re-sync** clears cursors and re-pulls history.  
 
 ## Previews
 

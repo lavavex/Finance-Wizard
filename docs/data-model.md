@@ -11,7 +11,7 @@ Defined in `Shared/Transaction.swift`.
 
 | Property | Type | Notes |
 |----------|------|--------|
-| `transactionId` | `String` | **Unique** — finance-sync / Plaid id |
+| `transactionId` | `String` | **Unique** — Plaid `transaction_id` |
 | `title` | `String` | Merchant / vendor |
 | `amount` | `Double` | **Expenses stored negative** in the app |
 | `date` | `Date` | Parsed from `YYYY-MM-DD` |
@@ -29,30 +29,30 @@ Defined in `Shared/Transaction.swift`.
 
 ## SwiftData: `Income`
 
-Defined in `Shared/Income.swift`. **Separate model** so spend analytics never include money-in. Maps 1:1 to finance-sync `IncomeRow`.
+Defined in `Shared/Income.swift`. **Separate model** so spend analytics never include money-in. Populated when Plaid `amount < 0` (money in).
 
-| Property | Type | API field | Notes |
-|----------|------|-----------|--------|
-| `transactionId` | `String` | `transaction_id` | **Unique** Plaid/import id |
-| `source` | `String` | `source` | Employer / payer display name |
-| `amount` | `Double` | `amount` | **Always positive** (money in) |
-| `date` | `Date` | `date` | `YYYY-MM-DD` |
-| `category` | `String` | `category` | Payroll, Direct Deposit, Interest, Refund, Other Income |
-| `accountName` | `String?` | `account_name` | e.g. CHASE COLLEGE |
-| `accountMask` | `String?` | `account_mask` | last4 |
-| `sourceInstitution` | `String?` | `source_institution` | e.g. Chase |
-| `rawName` | `String?` | `raw_name` | Bank description |
-| `pfc` | `String?` | `pfc` | Plaid PFC detailed |
-| `pending` | `Bool` | `pending` | Default false |
-| `kind` | `String` | `kind` | Always `"income"` |
-| `updatedAt` | `String?` | `updated_at` | ISO timestamp |
+| Property | Type | Notes |
+|----------|------|--------|
+| `transactionId` | `String` | **Unique** Plaid `transaction_id` |
+| `source` | `String` | Employer / payer / merchant display name |
+| `amount` | `Double` | **Always positive** (money in) |
+| `date` | `Date` | `YYYY-MM-DD` |
+| `category` | `String` | Payroll, Direct Deposit, Interest, Refund, Other Income |
+| `accountName` | `String?` | Account display name |
+| `accountMask` | `String?` | last4 |
+| `sourceInstitution` | `String?` | Institution / account label |
+| `rawName` | `String?` | Bank description |
+| `pfc` | `String?` | Plaid PFC detailed |
+| `pending` | `Bool` | Default false |
+| `kind` | `String` | Always `"income"` |
+| `updatedAt` | `String?` | Optional timestamp |
 
 | Rule | |
 |------|---|
 | Affects Total Spend? | **No** |
 | In category / card charts? | **No** |
 | Editable from app? | **No** (read-only) |
-| Source API | `GET /api/income?month=YYYY-MM` |
+| Source | Plaid `/transactions/sync` (negative amounts) |
 
 ## JSON DTOs (not persisted as-is)
 
@@ -65,23 +65,20 @@ JSON field names use snake_case (`transaction_id`, `account_name`, `payment_meth
 
 ## Upsert rules
 
-On Sync or Import (expenses):
+On **Plaid Sync** (`PlaidSyncEngine`):
 
-1. Decode `ExportFile`.
-2. For each row, fetch by `transactionId`.
-3. **Exists** → update fields.  
-4. **Missing** → insert.  
-5. `modelContext.save()`.
-6. `WidgetCenter.shared.reloadAllTimelines()`.
+1. For each linked Item, page through `/transactions/sync`.  
+2. Expenses (`amount ≥ 0`) → upsert `Transaction` (stored negative); honor category/multiplier locks.  
+3. Income (`amount < 0`) → upsert `Income` (stored positive).  
+4. Removed ids → delete local rows.  
+5. Persist cursor; `modelContext.save()`; reload widgets.
 
-On Sync (income):
+On **JSON Import** (optional offline file):
 
-1. Decode `IncomeExportFile` (`IncomeApiResponse`).
-2. For each `IncomeRow`, upsert by `transaction_id` → `transactionId`.
-3. Map `source`, `account_name`, `account_mask`, etc.; amount stays positive.
-4. Save + reload timelines.
+1. Decode `ExportFile` / optional income payload.  
+2. Upsert by `transactionId` the same way as before.
 
-Re-syncing the same month does **not** duplicate rows.
+Re-syncing does **not** duplicate rows when Plaid ids are stable.
 
 ## App Group store
 

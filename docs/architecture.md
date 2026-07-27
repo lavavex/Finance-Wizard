@@ -11,7 +11,7 @@ Two separate products share one Xcode project and the same App Group store:
 
 | Target | Product | Bundle ID | Responsibility |
 |--------|---------|-----------|----------------|
-| **FinanceWizard** | Finance Wizard (iOS app) | `net.roberth.FinanceWizard` | UI, Sync, import, settings, filters |
+| **FinanceWizard** | Finance Wizard (iOS app) | `net.roberth.FinanceWizard` | UI, Plaid Link, sync, settings |
 | **WidgetExtension** | Widget extension (`.appex`) | `net.roberth.FinanceWizard.Widget` | Home Screen **Total Spend** (and category) widgets |
 
 The app embeds the widget extension (Embed Foundation Extensions build phase). They ship together but are signed and built as separate targets.
@@ -21,7 +21,8 @@ App Group (shared store): `group.net.roberth.FinanceWizard`
 ## Source folders
 
 ```text
-FinanceWizard/          Main app (SwiftUI screens, sync, settings)
+FinanceWizard/          Main app (SwiftUI + Plaid client)
+  Plaid/                Credentials, Link, /transactions/sync
 Shared/                 Model + store + filters (BOTH targets)
 Widget/                 WidgetKit UI + configuration intents
 docs/                   This documentation (GitHub Pages)
@@ -34,17 +35,22 @@ SwiftData `@Model` types and `ModelConfiguration(groupContainer:)` must match **
 ## Runtime data flow
 
 ```text
+User saves Plaid client_id + secret (Keychain)
+    │
+    ▼
+Link bank → /link/token/create → Plaid Link → /item/public_token/exchange
+    │
+    ▼
+access_token stored on device (per Item)
+    │
+    ▼
 User taps Sync
     │
     ▼
-POST {server}/api/plaid/sync     ──► PC pulls Plaid → SQLite
-    │                                 (429/409 → continue anyway)
-    ▼
-GET  {server}/api/transactions?month=CURRENT
-GET  {server}/api/transactions?month=PREVIOUS
+/transactions/sync (cursor) for each Item  ──► Plaid API (HTTPS)
     │
     ▼
-Upsert by transactionId into SwiftData (App Group)
+Upsert expenses + income into SwiftData (App Group)
     │
     ▼
 @Query refreshes app UI
@@ -60,38 +66,30 @@ Widget reads SharedStore.loadSnapshot(...)
 TabView
 ├── Transactions   (AllTransactionsView)
 │     filters: period, sort, hide cards (list only)
-│     toolbar: Sync, Import
+│     toolbar: Sync (Plaid), Import, filters
 ├── By Card        (CardsView → CardDetailView)
 │     period + sort; per-card totals and rows
 └── Settings       (SettingsView)
-      server URL, months info
+      Plaid keys, environment, linked banks
 ```
 
 ## Persistence
 
 | Concern | Technology |
 |---------|------------|
-| Transactions | **SwiftData** `@Model` |
-| Store location | **App Group** container via `ModelConfiguration(groupContainer:)` |
-| App settings (server URL) | **UserDefaults** / `@AppStorage` |
-| Widget config (period, hide cards) | **Widget configuration intent** (per widget instance) |
+| Transactions / income | **SwiftData** `@Model` in App Group |
+| Plaid secret + access tokens | **Keychain** |
+| Client id, env, cursors, vendor rules | **UserDefaults** |
+| Widget config (period, hide cards) | **Widget configuration intent** |
 
 See [Data model](data-model.md).
 
-## Server dependency (finance-sync)
+## No home server
 
-The iOS app is a **client**. Bank linking, Plaid credentials, and SQLite live on the PC portal.
-
-| On the PC | On the phone |
-|-----------|----------------|
-| Plaid Link / tokens | No bank passwords |
-| Rate limits for Plaid | Handles 429 by still GETting JSON |
-| Port 8787 HTTP API | Configurable base URL in Settings |
-
-Details: [Sync & API](sync-and-api.md).
+Bank linking and transaction pull run **on the phone** against Plaid. There is no finance-sync PC portal in this architecture.
 
 ## Security notes
 
-- Default API is **HTTP on LAN** — not for public internet without TLS + auth.
-- No API key in the current contract (trusted network only).
-- App Group isolates shared data to your app + extension, not other apps.
+- Plaid **secret on device** is intentional for a personal BYO-key app; do not ship this pattern as a multi-user commercial product without a backend.  
+- HTTPS only to `*.plaid.com`.  
+- App Group isolates shared data to your app + extension.

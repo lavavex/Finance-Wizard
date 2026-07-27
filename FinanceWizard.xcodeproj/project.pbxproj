@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 110;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -456,7 +456,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Finance Wizard";
 				INFOPLIST_KEY_CFBundleIconName = Mika;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Load transactions from finance-sync on your home PC.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Finance Wizard may use the local network only if you import data from another device on your LAN.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -507,7 +507,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Finance Wizard";
 				INFOPLIST_KEY_CFBundleIconName = Mika;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Load transactions from finance-sync on your home PC.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Finance Wizard may use the local network only if you import data from another device on your LAN.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

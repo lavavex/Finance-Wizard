@@ -2,7 +2,7 @@
 # Repo → Settings → Pages → Source: Deploy from branch → main → /docs
 
 title: Finance Wizard
-description: Personal iOS finance tracker — app, widget, and finance-sync integration
+description: Personal iOS finance tracker — Plaid Link, SwiftData, and Home Screen widgets
 # Must match the GitHub repository name (this repo is Finance-Wizard)
 baseurl: "/Finance-Wizard"
 url: ""
