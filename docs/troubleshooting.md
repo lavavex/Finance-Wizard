@@ -25,7 +25,7 @@ title: Troubleshooting
 
 **Fix:**
 
-1. Both targets have `group.net.roberth.FinanceWidget`.  
+1. Both targets have `group.net.roberth.FinanceWizard`.  
 2. Team selected for both targets.  
 3. Clean build folder, delete app from device/simulator, reinstall.  
 

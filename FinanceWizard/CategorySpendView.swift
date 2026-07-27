@@ -1,6 +1,6 @@
 //
 //  CategorySpendView.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  Full-screen category spend charts opened from “Total Spend”.
 //

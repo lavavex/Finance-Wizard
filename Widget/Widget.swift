@@ -19,7 +19,7 @@ struct FinanceEntry: TimelineEntry {
 
 // Supplies placeholder, snapshot, and timeline entries using the user's config
 struct FinanceProvider: AppIntentTimelineProvider {
-    typealias Intent = FinanceWidgetConfigIntent
+    typealias Intent = FinanceWizardConfigIntent
 
     func placeholder(in context: Context) -> FinanceEntry {
         FinanceEntry(
@@ -40,17 +40,17 @@ struct FinanceProvider: AppIntentTimelineProvider {
         )
     }
 
-    func snapshot(for configuration: FinanceWidgetConfigIntent, in context: Context) async -> FinanceEntry {
+    func snapshot(for configuration: FinanceWizardConfigIntent, in context: Context) async -> FinanceEntry {
         makeEntry(for: configuration, family: context.family)
     }
 
-    func timeline(for configuration: FinanceWidgetConfigIntent, in context: Context) async -> Timeline<FinanceEntry> {
+    func timeline(for configuration: FinanceWizardConfigIntent, in context: Context) async -> Timeline<FinanceEntry> {
         let entry = makeEntry(for: configuration, family: context.family)
         let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
         return Timeline(entries: [entry], policy: .after(next))
     }
 
-    private func makeEntry(for configuration: FinanceWidgetConfigIntent, family: WidgetFamily) -> FinanceEntry {
+    private func makeEntry(for configuration: FinanceWizardConfigIntent, family: WidgetFamily) -> FinanceEntry {
         // Small can show more rows with tight typography; medium/large get longer lists
         let cardLimit: Int
         switch family {
@@ -69,7 +69,7 @@ struct FinanceProvider: AppIntentTimelineProvider {
 }
 
 // The SwiftUI view drawn on the Home Screen
-struct FinanceWidgetView: View {
+struct FinanceWizardView: View {
     var entry: FinanceEntry
     @Environment(\.widgetFamily) private var family
 
@@ -228,10 +228,10 @@ struct FinanceHomeWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(
             kind: kind,
-            intent: FinanceWidgetConfigIntent.self,
+            intent: FinanceWizardConfigIntent.self,
             provider: FinanceProvider()
         ) { entry in
-            FinanceWidgetView(entry: entry)
+            FinanceWizardView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Total Spend")

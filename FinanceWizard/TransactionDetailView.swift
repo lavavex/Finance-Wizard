@@ -1,6 +1,6 @@
 //
 //  TransactionDetailView.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  Tap a transaction → view details, edit category / multiplier, push to server.
 //

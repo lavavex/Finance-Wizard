@@ -1,6 +1,6 @@
 //
 //  Income.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  Income rows from finance-sync GET /api/income.
 //  Separate stream from expenses — never included in Total Spend or category charts.

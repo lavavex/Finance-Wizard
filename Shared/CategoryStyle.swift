@@ -1,6 +1,6 @@
 //
 //  CategoryStyle.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  App-wide category colors inspired by Apple Card / Wallet spending colors.
 //  Same category → same color in charts, lists, and transaction rows.

@@ -10,7 +10,7 @@ import SwiftUI
 import WidgetKit
 
 struct WidgetControl: ControlWidget {
-    static let kind: String = "net.roberth.FinanceWidget.Widget"
+    static let kind: String = "net.roberth.FinanceWizard.Widget"
 
     var body: some ControlWidgetConfiguration {
         AppIntentControlConfiguration(

@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  Root tabs: All transactions (with filters) + By Card.
 //
@@ -789,7 +789,7 @@ struct AllTransactionsView: View {
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             let scope = month.map { "month \($0)" } ?? "all"
             throw NSError(
-                domain: "FinanceWidget",
+                domain: "Finance Wizard",
                 code: http.statusCode,
                 userInfo: [
                     NSLocalizedDescriptionKey:
@@ -815,7 +815,7 @@ struct AllTransactionsView: View {
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             let scope = month.map { "month \($0)" } ?? "all"
             throw NSError(
-                domain: "FinanceWidget",
+                domain: "Finance Wizard",
                 code: http.statusCode,
                 userInfo: [
                     NSLocalizedDescriptionKey:

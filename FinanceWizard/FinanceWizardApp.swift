@@ -1,6 +1,6 @@
 //
-//  FinanceWidgetApp.swift
-//  FinanceWidget
+//  FinanceWizardApp.swift
+//  Finance Wizard
 //
 //  Created by roberth on 7/26/26.
 //
@@ -12,7 +12,7 @@ import SwiftData
 
 // @main marks this as the program starting point
 @main
-struct FinanceWidgetApp: App {
+struct FinanceWizardApp: App {
     // The live database the whole UI reads/writes through
     private let container: ModelContainer
 

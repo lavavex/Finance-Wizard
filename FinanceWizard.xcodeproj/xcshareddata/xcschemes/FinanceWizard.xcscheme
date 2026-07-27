@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "20DF1AD430165D170007AB19"
-               BuildableName = "FinanceWidget.app"
-               BlueprintName = "FinanceWidget"
-               ReferencedContainer = "container:FinanceWidget.xcodeproj">
+               BuildableName = "FinanceWizard.app"
+               BlueprintName = "FinanceWizard"
+               ReferencedContainer = "container:FinanceWizard.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -46,9 +46,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "20DF1AD430165D170007AB19"
-            BuildableName = "FinanceWidget.app"
-            BlueprintName = "FinanceWidget"
-            ReferencedContainer = "container:FinanceWidget.xcodeproj">
+            BuildableName = "FinanceWizard.app"
+            BlueprintName = "FinanceWizard"
+            ReferencedContainer = "container:FinanceWizard.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -63,9 +63,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "20DF1AD430165D170007AB19"
-            BuildableName = "FinanceWidget.app"
-            BlueprintName = "FinanceWidget"
-            ReferencedContainer = "container:FinanceWidget.xcodeproj">
+            BuildableName = "FinanceWizard.app"
+            BlueprintName = "FinanceWizard"
+            ReferencedContainer = "container:FinanceWizard.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
