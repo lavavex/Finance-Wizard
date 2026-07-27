@@ -22,6 +22,7 @@ struct BankIconView: View {
         InstitutionLogoCache.logoImage(institutionID: institutionId)
             ?? InstitutionLogoCache.logoImage(institutionName: institutionName)
             ?? InstitutionLogoCache.logoImage(institutionName: paymentMethod)
+            ?? InstitutionLogoCache.logoImage(institutionName: displayName)
     }
 
     private var brandColor: Color {

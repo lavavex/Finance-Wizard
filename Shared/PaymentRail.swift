@@ -74,10 +74,13 @@ enum PaymentRail: String, CaseIterable, Identifiable, Codable, Sendable {
             "online transfer", "xfer ",
             "zelle", "venmo cashout", // peer rails (not debit card)
             "real time payment", "rtp ",
-            "fednow"
+            "fednow",
+            // Fintech ACH bill-pay labels (X Money EPAY → credit card)
+            "epay", "e-pay", "epmt"
         ]
         for n in needles where lower.contains(n) { return true }
         if lower.hasPrefix("ach") { return true }
+        if lower == "epay" || lower == "e-pay" || lower == "epmt" { return true }
         return false
     }
 

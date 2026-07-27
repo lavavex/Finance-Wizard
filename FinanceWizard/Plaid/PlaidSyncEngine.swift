@@ -77,6 +77,7 @@ enum PlaidSyncEngine {
         var report = PlaidSyncReport()
 
         // Drop older rows that were stored as spend/income but look like transfers/payments
+        VendorRulesStore.removeBillPayMisrules()
         report.cleanedLegacy = cleanLegacyMisclassifiedRows(modelContext: modelContext)
 
         for item in items {
@@ -193,12 +194,31 @@ enum PlaidSyncEngine {
         do {
             institutionId = try await PlaidAPIClient.itemInstitutionID(accessToken: item.accessToken)
             if let institutionId {
-                if let branding = try? await PlaidAPIClient.institutionBranding(institutionID: institutionId) {
+                do {
+                    let branding = try await PlaidAPIClient.institutionBranding(institutionID: institutionId)
                     InstitutionLogoCache.store(
                         institutionID: branding.institutionID,
-                        name: branding.name,
+                        name: branding.name ?? item.institutionName,
                         logoBase64: branding.logoBase64,
                         primaryColorHex: branding.primaryColorHex
+                    )
+                    // Also index under the Link display name (e.g. "Chase") when Plaid’s name differs
+                    if branding.name?.caseInsensitiveCompare(item.institutionName) != .orderedSame {
+                        InstitutionLogoCache.store(
+                            institutionID: branding.institutionID,
+                            name: item.institutionName,
+                            logoBase64: branding.logoBase64,
+                            primaryColorHex: branding.primaryColorHex
+                        )
+                    }
+                    if branding.logoBase64 == nil || branding.logoBase64?.isEmpty == true {
+                        report.warnings.append(
+                            "\(item.institutionName): Plaid returned no logo for \(institutionId)."
+                        )
+                    }
+                } catch {
+                    report.warnings.append(
+                        "\(item.institutionName) logo: \(error.localizedDescription)"
                     )
                 }
             }
@@ -516,9 +536,27 @@ enum PlaidSyncEngine {
         let amount = abs(tx.amount)
         // Prefer the credit account name when the txn is on the card itself
         let onCredit = (accountType ?? "").lowercased() == "credit"
-        let cardName = onCredit ? paymentMethod : inferCardName(from: title) ?? paymentMethod
+        let maskFromTitle = CreditAnalytics.extractMask(from: title)
+        let cardName: String = {
+            if onCredit { return paymentMethod }
+            if let mask = maskFromTitle {
+                // Prefer a real linked credit account label when mask matches
+                if let match = findCreditAccount(mask: mask, modelContext: modelContext) {
+                    return match.plaidDisplayName
+                }
+                return inferCardName(from: title) ?? "Card ···\(mask)"
+            }
+            return inferCardName(from: title) ?? paymentMethod
+        }()
         let sourceAccount = onCredit ? nil : paymentMethod
-        let creditAccountId = onCredit ? tx.account_id : nil
+        let creditAccountId: String? = {
+            if onCredit { return tx.account_id }
+            if let mask = maskFromTitle,
+               let match = findCreditAccount(mask: mask, modelContext: modelContext) {
+                return match.accountId
+            }
+            return nil
+        }()
 
         if let existing = try? modelContext.fetch(descriptor).first {
             existing.amount = amount
@@ -541,6 +579,14 @@ enum PlaidSyncEngine {
                     institutionName: institutionName
                 )
             )
+        }
+    }
+
+    @MainActor
+    private static func findCreditAccount(mask: String, modelContext: ModelContext) -> BankAccount? {
+        let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        return all.first { account in
+            account.isCredit && account.mask == mask
         }
     }
 
@@ -572,21 +618,16 @@ enum PlaidSyncEngine {
             existing.date = date
             existing.paymentMethod = paymentMethod
             existing.plaidPaymentChannel = channel
-            // Always keep bill payments in this category unless the user locked a different one
-            if !existing.isCategoryLocked
-                || TransactionAnalytics.isExcludedFromSpendCategory(existing.category) {
-                existing.category = category
-                existing.categoryLocked = true
-            }
-            if !existing.isMultiplierLocked {
-                existing.multiplier = 0
-            }
+            // Bill pays always use this category (fixes mis-learns like EPAY → Shopping)
+            existing.category = category
+            existing.categoryLocked = true
+            existing.multiplier = 0
+            existing.multiplierLocked = true
             if !existing.isPaymentRailLocked {
-                existing.paymentRail = rail.rawValue
+                // ACH bill-pay codes (EPAY) should not stay as debit
+                existing.paymentRail = looksLikeACHBillPay(title) ? PaymentRail.ach.rawValue : rail.rawValue
             }
-            if existing.overrideSource == nil {
-                existing.overrideSource = "credit-payment"
-            }
+            existing.overrideSource = "credit-payment"
         } else {
             modelContext.insert(
                 Transaction(
@@ -601,11 +642,17 @@ enum PlaidSyncEngine {
                     multiplierLocked: true,
                     overrideSource: "credit-payment",
                     plaidPaymentChannel: channel,
-                    paymentRail: rail.rawValue,
+                    paymentRail: (looksLikeACHBillPay(title) ? PaymentRail.ach : rail).rawValue,
                     paymentRailLocked: false
                 )
             )
         }
+    }
+
+    private static func looksLikeACHBillPay(_ title: String) -> Bool {
+        let lower = title.lowercased()
+        return lower == "epay" || lower.contains("epay") || lower.contains("ach pmt")
+            || lower.contains("ach payment") || lower.contains("e-pay")
     }
 
     /// Best-effort card label from a payment description.
