@@ -80,6 +80,29 @@ On **JSON Import** (optional offline file):
 
 Re-syncing does **not** duplicate rows when Plaid ids are stable.
 
+## SwiftData: `BankAccount`
+
+Plaid account snapshot (`Shared/BankAccount.swift`). Used for credit utilization.
+
+| Property | Notes |
+|----------|--------|
+| `accountId` | Unique Plaid account id |
+| `type` | `credit`, `depository`, … |
+| `currentBalance` | Owed amount for credit |
+| `creditLimit` | Limit when reported |
+| `utilization` | computed: balance ÷ limit |
+
+## SwiftData: `CreditCardPayment`
+
+Card bill payments only (`Shared/CreditCardPayment.swift`). Never counted in Total Spend.
+
+| Property | Notes |
+|----------|--------|
+| `transactionId` | Unique |
+| `amount` | Positive dollars paid |
+| `cardName` | Display label for the card |
+| `sourceAccount` | Optional funding account |
+
 ## App Group store
 
 `Shared/SharedStore.swift`:
@@ -87,6 +110,7 @@ Re-syncing does **not** duplicate rows when Plaid ids are stable.
 ```text
 groupContainer: .identifier("group.net.roberth.FinanceWizard")
 store name: FinanceTransactions
+schema: Transaction, Income, BankAccount, CreditCardPayment
 ```
 
 Both app and widget call `SharedStore.makeContainer()`.

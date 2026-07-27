@@ -2,7 +2,8 @@
 //  PlaidSyncEngine.swift
 //  Finance Wizard
 //
-//  Pulls /transactions/sync for every linked Item and upserts into SwiftData.
+//  Pulls /transactions/sync + /accounts/get for every linked Item.
+//  Transfers / credit-card payments never enter Total Spend or Income.
 //
 
 import Foundation
@@ -13,8 +14,11 @@ struct PlaidSyncReport: Sendable {
     var itemLines: [String] = []
     var expensesUpserted: Int = 0
     var incomeUpserted: Int = 0
+    var creditPaymentsUpserted: Int = 0
     var removed: Int = 0
     var skippedTransfers: Int = 0
+    var cleanedLegacy: Int = 0
+    var accountsUpdated: Int = 0
     var warnings: [String] = []
 
     var summary: String {
@@ -22,14 +26,23 @@ struct PlaidSyncReport: Sendable {
         lines.append(contentsOf: itemLines)
         lines.append("Expenses upserted: \(expensesUpserted)")
         lines.append("Income upserted: \(incomeUpserted)")
-        if removed > 0 { lines.append("Removed: \(removed)") }
+        lines.append("Card payments tracked: \(creditPaymentsUpserted)")
         if skippedTransfers > 0 { lines.append("Skipped transfers: \(skippedTransfers)") }
+        if cleanedLegacy > 0 { lines.append("Removed mis-filed transfers: \(cleanedLegacy)") }
+        if accountsUpdated > 0 { lines.append("Accounts refreshed: \(accountsUpdated)") }
+        if removed > 0 { lines.append("Removed by bank: \(removed)") }
         if !warnings.isEmpty {
             lines.append("Warnings:")
             lines.append(contentsOf: warnings.map { "• \($0)" })
         }
         return lines.joined(separator: "\n")
     }
+}
+
+private struct AccountMeta {
+    var label: String
+    var type: String
+    var subtype: String
 }
 
 enum PlaidSyncEngine {
@@ -61,6 +74,9 @@ enum PlaidSyncEngine {
 
         var report = PlaidSyncReport()
 
+        // Drop older rows that were stored as spend/income but look like transfers/payments
+        report.cleanedLegacy = cleanLegacyMisclassifiedRows(modelContext: modelContext)
+
         for item in items {
             progress?("Syncing \(item.institutionName)…")
             do {
@@ -72,10 +88,12 @@ enum PlaidSyncEngine {
                 )
                 report.expensesUpserted += itemReport.expensesUpserted
                 report.incomeUpserted += itemReport.incomeUpserted
+                report.creditPaymentsUpserted += itemReport.creditPaymentsUpserted
                 report.removed += itemReport.removed
                 report.skippedTransfers += itemReport.skippedTransfers
+                report.accountsUpdated += itemReport.accountsUpdated
                 report.itemLines.append(
-                    "\(item.institutionName): +\(itemReport.expensesUpserted) exp / +\(itemReport.incomeUpserted) inc"
+                    "\(item.institutionName): +\(itemReport.expensesUpserted) exp / +\(itemReport.incomeUpserted) inc / \(itemReport.creditPaymentsUpserted) card pmts"
                 )
             } catch {
                 report.warnings.append("\(item.institutionName): \(error.localizedDescription)")
@@ -99,10 +117,9 @@ enum PlaidSyncEngine {
     ) async throws -> PlaidSyncReport {
         var report = PlaidSyncReport()
         var cursor: String? = item.transactionsCursor.isEmpty ? nil : item.transactionsCursor
-        // If pagination fails mid-way, restart from this page’s starting cursor
         var pageStartCursor = cursor
         var hasMore = true
-        var accountLabels: [String: String] = [:]
+        var accountMeta: [String: AccountMeta] = [:]
         var safety = 0
 
         while hasMore {
@@ -120,7 +137,6 @@ enum PlaidSyncEngine {
                     cursor: cursor
                 )
             } catch {
-                // Mutation during pagination — restart from pageStartCursor
                 if case PlaidAPIError.http(_, let code, _) = error,
                    code == "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION" {
                     cursor = pageStartCursor
@@ -129,12 +145,13 @@ enum PlaidSyncEngine {
                 throw error
             }
 
-            // Map account_id → display payment method
             if let accounts = page.accounts {
                 for account in accounts {
-                    accountLabels[account.account_id] = accountDisplayName(
-                        account: account,
-                        institution: item.institutionName
+                    let label = accountDisplayName(account: account, institution: item.institutionName)
+                    accountMeta[account.account_id] = AccountMeta(
+                        label: label,
+                        type: account.type ?? "",
+                        subtype: account.subtype ?? ""
                     )
                 }
             }
@@ -144,7 +161,7 @@ enum PlaidSyncEngine {
                 applyTransaction(
                     tx,
                     item: item,
-                    accountLabels: accountLabels,
+                    accountMeta: accountMeta,
                     modelContext: modelContext,
                     report: &report
                 )
@@ -157,20 +174,27 @@ enum PlaidSyncEngine {
             }
 
             hasMore = page.has_more
-            if hasMore {
-                // Next page continues from next_cursor; keep original page start for retry
-                if pageStartCursor == cursor {
-                    // still on first page of this update batch
-                }
-                cursor = page.next_cursor
-            } else {
-                cursor = page.next_cursor
+            cursor = page.next_cursor
+            if !hasMore {
                 pageStartCursor = cursor
             }
         }
 
         if let cursor, !cursor.isEmpty {
             PlaidItemStore.updateCursor(itemID: item.id, cursor: cursor)
+        }
+
+        // Balances / credit limits
+        progress?("\(item.institutionName): balances…")
+        do {
+            let details = try await PlaidAPIClient.accountsGet(accessToken: item.accessToken)
+            report.accountsUpdated = upsertAccounts(
+                details,
+                item: item,
+                modelContext: modelContext
+            )
+        } catch {
+            report.warnings.append("\(item.institutionName) balances: \(error.localizedDescription)")
         }
 
         return report
@@ -182,7 +206,7 @@ enum PlaidSyncEngine {
     private static func applyTransaction(
         _ tx: PlaidTransaction,
         item: PlaidLinkedItem,
-        accountLabels: [String: String],
+        accountMeta: [String: AccountMeta],
         modelContext: ModelContext,
         report: inout PlaidSyncReport
     ) {
@@ -190,39 +214,72 @@ enum PlaidSyncEngine {
             ?? tx.original_description
             ?? "Transaction"
 
-        if PlaidCategoryMapper.isInternalTransfer(pfc: tx.personal_finance_category, name: title) {
-            report.skippedTransfers += 1
-            return
-        }
-
         guard let date = parseDate(tx.date) else { return }
 
-        let paymentMethod = accountLabels[tx.account_id] ?? item.paymentMethodLabel
-        let pfcDetailed = tx.personal_finance_category?.detailed
+        let meta = accountMeta[tx.account_id]
+        let paymentMethod = meta?.label ?? item.paymentMethodLabel
+        let accountType = meta?.type
+        let accountSubtype = meta?.subtype
 
-        // Plaid: positive amount = money out; negative = money in
-        if tx.amount >= 0 {
+        let kind = PlaidCategoryMapper.classify(
+            amount: tx.amount,
+            pfc: tx.personal_finance_category,
+            title: title,
+            accountType: accountType,
+            accountSubtype: accountSubtype
+        )
+
+        switch kind {
+        case .transfer:
+            // Ensure we don't leave a mis-filed spend/income row from an older sync
+            _ = deleteLocal(transactionID: tx.transaction_id, modelContext: modelContext)
+            report.skippedTransfers += 1
+            return
+
+        case .creditPayment:
+            // Remove from spend/income if previously mis-filed
+            _ = deleteLocalExpenseOrIncomeOnly(
+                transactionID: tx.transaction_id,
+                modelContext: modelContext
+            )
+            upsertCreditPayment(
+                tx: tx,
+                title: title,
+                date: date,
+                paymentMethod: paymentMethod,
+                accountType: accountType,
+                institutionName: item.institutionName,
+                modelContext: modelContext
+            )
+            report.creditPaymentsUpserted += 1
+
+        case .spending:
+            // Don't keep a parallel income row if type flipped
+            deleteIncomeOnly(transactionID: tx.transaction_id, modelContext: modelContext)
             upsertExpense(
                 tx: tx,
                 title: title,
                 date: date,
                 paymentMethod: paymentMethod,
-                pfcDetailed: pfcDetailed,
                 modelContext: modelContext
             )
             report.expensesUpserted += 1
-        } else {
+
+        case .income:
+            deleteExpenseOnly(transactionID: tx.transaction_id, modelContext: modelContext)
             upsertIncome(
                 tx: tx,
                 title: title,
                 date: date,
                 paymentMethod: paymentMethod,
-                pfcDetailed: pfcDetailed,
+                pfcDetailed: tx.personal_finance_category?.detailed,
                 modelContext: modelContext
             )
             report.incomeUpserted += 1
         }
     }
+
+    // MARK: - Upserts
 
     @MainActor
     private static func upsertExpense(
@@ -230,7 +287,6 @@ enum PlaidSyncEngine {
         title: String,
         date: Date,
         paymentMethod: String,
-        pfcDetailed: String?,
         modelContext: ModelContext
     ) {
         let targetId = tx.transaction_id
@@ -243,8 +299,6 @@ enum PlaidSyncEngine {
         let rule = VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod)
         let mappedCategory = rule?.category ?? defaultCategory
         let mappedMultiplier = rule?.multiplier ?? 1.0
-
-        // Store expenses as negative (app convention)
         let amount = -abs(tx.amount)
 
         if let existing = try? modelContext.fetch(descriptor).first {
@@ -252,7 +306,6 @@ enum PlaidSyncEngine {
             existing.amount = amount
             existing.date = date
             existing.paymentMethod = paymentMethod
-            // Respect user locks from local edits
             if !existing.isCategoryLocked {
                 existing.category = mappedCategory
             }
@@ -275,7 +328,6 @@ enum PlaidSyncEngine {
                 )
             )
         }
-        _ = pfcDetailed // reserved for future UI
     }
 
     @MainActor
@@ -299,8 +351,6 @@ enum PlaidSyncEngine {
         )
         let amount = abs(tx.amount)
         let pending = tx.pending ?? false
-
-        // Split payment method into name / mask if "Name ···1234"
         let parts = paymentMethod.components(separatedBy: " ···")
         let accountName = parts.first
         let accountMask = parts.count > 1 ? parts[1] : nil
@@ -338,22 +388,203 @@ enum PlaidSyncEngine {
     }
 
     @MainActor
+    private static func upsertCreditPayment(
+        tx: PlaidTransaction,
+        title: String,
+        date: Date,
+        paymentMethod: String,
+        accountType: String?,
+        institutionName: String,
+        modelContext: ModelContext
+    ) {
+        let targetId = tx.transaction_id
+        var descriptor = FetchDescriptor<CreditCardPayment>(
+            predicate: #Predicate { $0.transactionId == targetId }
+        )
+        descriptor.fetchLimit = 1
+
+        let amount = abs(tx.amount)
+        // Prefer the credit account name when the txn is on the card itself
+        let onCredit = (accountType ?? "").lowercased() == "credit"
+        let cardName = onCredit ? paymentMethod : inferCardName(from: title) ?? paymentMethod
+        let sourceAccount = onCredit ? nil : paymentMethod
+        let creditAccountId = onCredit ? tx.account_id : nil
+
+        if let existing = try? modelContext.fetch(descriptor).first {
+            existing.amount = amount
+            existing.date = date
+            existing.cardName = cardName
+            existing.sourceAccount = sourceAccount
+            existing.title = title
+            existing.creditAccountId = creditAccountId ?? existing.creditAccountId
+            existing.institutionName = institutionName
+        } else {
+            modelContext.insert(
+                CreditCardPayment(
+                    transactionId: targetId,
+                    amount: amount,
+                    date: date,
+                    cardName: cardName,
+                    sourceAccount: sourceAccount,
+                    title: title,
+                    creditAccountId: creditAccountId,
+                    institutionName: institutionName
+                )
+            )
+        }
+    }
+
+    /// Best-effort card label from a payment description.
+    private static func inferCardName(from title: String) -> String? {
+        let lower = title.lowercased()
+        let brands = [
+            ("apple card", "Apple Card"),
+            ("amex", "Amex"),
+            ("american express", "Amex"),
+            ("chase", "Chase"),
+            ("citi", "Citi"),
+            ("capital one", "Capital One"),
+            ("discover", "Discover"),
+            ("prime visa", "Prime Visa"),
+            ("wells fargo", "Wells Fargo")
+        ]
+        for (needle, label) in brands where lower.contains(needle) {
+            return label
+        }
+        return nil
+    }
+
+    @MainActor
+    private static func upsertAccounts(
+        _ details: [PlaidAccountDetail],
+        item: PlaidLinkedItem,
+        modelContext: ModelContext
+    ) -> Int {
+        var count = 0
+        for detail in details {
+            let name = detail.name ?? detail.official_name ?? item.institutionName
+            let type = detail.type ?? "other"
+            let current = detail.balances?.current ?? 0
+            let available = detail.balances?.available
+            let limit = detail.balances?.limit
+
+            var descriptor = FetchDescriptor<BankAccount>(
+                predicate: #Predicate { $0.accountId == detail.account_id }
+            )
+            descriptor.fetchLimit = 1
+
+            if let existing = try? modelContext.fetch(descriptor).first {
+                existing.itemId = item.id
+                existing.name = name
+                existing.officialName = detail.official_name
+                existing.mask = detail.mask
+                existing.type = type
+                existing.subtype = detail.subtype
+                existing.institutionName = item.institutionName
+                existing.currentBalance = current
+                existing.availableBalance = available
+                existing.creditLimit = limit
+                existing.lastSyncedAt = Date()
+            } else {
+                modelContext.insert(
+                    BankAccount(
+                        accountId: detail.account_id,
+                        itemId: item.id,
+                        name: name,
+                        officialName: detail.official_name,
+                        mask: detail.mask,
+                        type: type,
+                        subtype: detail.subtype,
+                        institutionName: item.institutionName,
+                        currentBalance: current,
+                        availableBalance: available,
+                        creditLimit: limit,
+                        lastSyncedAt: Date()
+                    )
+                )
+            }
+            count += 1
+        }
+        return count
+    }
+
+    // MARK: - Cleanup / delete helpers
+
+    /// Remove spend/income rows that look like transfers or card payments (legacy syncs).
+    @MainActor
+    private static func cleanLegacyMisclassifiedRows(modelContext: ModelContext) -> Int {
+        var removed = 0
+        if let expenses = try? modelContext.fetch(FetchDescriptor<Transaction>()) {
+            for row in expenses where PlaidCategoryMapper.looksLikeNonSpendTitle(row.title) {
+                modelContext.delete(row)
+                removed += 1
+            }
+        }
+        if let income = try? modelContext.fetch(FetchDescriptor<Income>()) {
+            for row in income where PlaidCategoryMapper.looksLikeNonSpendTitle(row.source) {
+                modelContext.delete(row)
+                removed += 1
+            }
+        }
+        return removed
+    }
+
+    @MainActor
     private static func deleteLocal(transactionID: String, modelContext: ModelContext) -> Bool {
-        var expenseDesc = FetchDescriptor<Transaction>(
+        var any = false
+        if deleteExpenseOnly(transactionID: transactionID, modelContext: modelContext) { any = true }
+        if deleteIncomeOnly(transactionID: transactionID, modelContext: modelContext) { any = true }
+        if deleteCreditPaymentOnly(transactionID: transactionID, modelContext: modelContext) { any = true }
+        return any
+    }
+
+    @MainActor
+    private static func deleteLocalExpenseOrIncomeOnly(
+        transactionID: String,
+        modelContext: ModelContext
+    ) -> Bool {
+        var any = false
+        if deleteExpenseOnly(transactionID: transactionID, modelContext: modelContext) { any = true }
+        if deleteIncomeOnly(transactionID: transactionID, modelContext: modelContext) { any = true }
+        return any
+    }
+
+    @MainActor
+    @discardableResult
+    private static func deleteExpenseOnly(transactionID: String, modelContext: ModelContext) -> Bool {
+        var desc = FetchDescriptor<Transaction>(
             predicate: #Predicate { $0.transactionId == transactionID }
         )
-        expenseDesc.fetchLimit = 1
-        if let row = try? modelContext.fetch(expenseDesc).first {
-            // Don’t delete user-locked rows? Still remove if bank removed it.
+        desc.fetchLimit = 1
+        if let row = try? modelContext.fetch(desc).first {
             modelContext.delete(row)
             return true
         }
+        return false
+    }
 
-        var incomeDesc = FetchDescriptor<Income>(
+    @MainActor
+    @discardableResult
+    private static func deleteIncomeOnly(transactionID: String, modelContext: ModelContext) -> Bool {
+        var desc = FetchDescriptor<Income>(
             predicate: #Predicate { $0.transactionId == transactionID }
         )
-        incomeDesc.fetchLimit = 1
-        if let row = try? modelContext.fetch(incomeDesc).first {
+        desc.fetchLimit = 1
+        if let row = try? modelContext.fetch(desc).first {
+            modelContext.delete(row)
+            return true
+        }
+        return false
+    }
+
+    @MainActor
+    @discardableResult
+    private static func deleteCreditPaymentOnly(transactionID: String, modelContext: ModelContext) -> Bool {
+        var desc = FetchDescriptor<CreditCardPayment>(
+            predicate: #Predicate { $0.transactionId == transactionID }
+        )
+        desc.fetchLimit = 1
+        if let row = try? modelContext.fetch(desc).first {
             modelContext.delete(row)
             return true
         }

@@ -2,52 +2,116 @@
 //  CardsView.swift
 //  Finance Wizard
 //
-//  Second tab: browse spend and transactions grouped by card.
+//  Cards hub: period spend by payment method, credit utilization, and card payments.
 //
 
 import SwiftUI
 import SwiftData
 
-// List of cards → drill into one card’s transactions
-struct CardsView: View {
-    // All saved transactions (same store as the rest of the app)
-    @Query private var transactions: [Transaction]
+// MARK: - Cards tab
 
-    // Shared period filter (week / month / all time)
+struct CardsView: View {
+    @Query private var transactions: [Transaction]
+    @Query(sort: \BankAccount.name) private var accounts: [BankAccount]
+    @Query(sort: \CreditCardPayment.date, order: .reverse) private var payments: [CreditCardPayment]
+
     @State private var period: SnapshotPeriod = .month
-    /// Which week/month to show
     @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
-    // How rows inside a card are sorted
     @State private var sort: TransactionSort = .dateNewest
 
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
     }
 
-    // Cards for the current period (no hide list on this tab — show every card)
-    private var cardSummaries: [CardSpendSummary] {
-        let inPeriod = TransactionAnalytics.inPeriod(
+    private var periodTransactions: [Transaction] {
+        TransactionAnalytics.inPeriod(
             transactions,
             period: period,
             referenceDate: referenceDate
         )
-        return TransactionAnalytics.cardSummaries(from: inPeriod, cardLimit: nil)
     }
 
-    // Full-period total spend (all cards)
+    private var cardSummaries: [CardSpendSummary] {
+        TransactionAnalytics.cardSummaries(from: periodTransactions, cardLimit: nil)
+    }
+
     private var periodTotalSpend: Double {
-        let inPeriod = TransactionAnalytics.inPeriod(
-            transactions,
-            period: period,
-            referenceDate: referenceDate
-        )
-        return TransactionAnalytics.totalSpend(in: inPeriod)
+        TransactionAnalytics.totalSpend(in: periodTransactions)
+    }
+
+    private var creditAccounts: [BankAccount] {
+        accounts.filter(\.isCredit)
+    }
+
+    private var periodPayments: [CreditCardPayment] {
+        CreditAnalytics.payments(in: payments, period: period, referenceDate: referenceDate)
+    }
+
+    private var totalOwed: Double {
+        creditAccounts.reduce(0) { $0 + max(0, $1.currentBalance) }
+    }
+
+    private var totalLimit: Double {
+        creditAccounts.compactMap(\.creditLimit).reduce(0, +)
+    }
+
+    private var totalUtilization: Double? {
+        guard totalLimit > 0 else { return nil }
+        return min(max(totalOwed / totalLimit, 0), 1)
+    }
+
+    private var totalPaidInPeriod: Double {
+        CreditAnalytics.totalPaid(in: periodPayments)
+    }
+
+    /// Payment-method rows from spend, plus credit accounts that had no spend this period.
+    private var unifiedCardRows: [UnifiedCardRow] {
+        var rows: [UnifiedCardRow] = cardSummaries.map { summary in
+            let credit = matchCreditAccount(toPaymentMethod: summary.cardName)
+            return UnifiedCardRow(
+                id: summary.cardName,
+                displayName: summary.cardName,
+                spent: summary.spent,
+                transactionCount: summary.transactionCount,
+                creditAccount: credit,
+                paidInPeriod: paidFor(paymentMethod: summary.cardName, credit: credit)
+            )
+        }
+
+        // Credit accounts with balance/limit but no matching spend row yet
+        let knownNames = Set(rows.map(\.displayName))
+        for account in creditAccounts {
+            let already = rows.contains { row in
+                if let c = row.creditAccount { return c.accountId == account.accountId }
+                return namesMatch(row.displayName, account.displayName)
+                    || namesMatch(row.displayName, account.name)
+            }
+            if already { continue }
+            // Avoid duplicate display names
+            if knownNames.contains(account.displayName) { continue }
+            rows.append(
+                UnifiedCardRow(
+                    id: account.accountId,
+                    displayName: account.displayName,
+                    spent: 0,
+                    transactionCount: 0,
+                    creditAccount: account,
+                    paidInPeriod: paidFor(paymentMethod: account.displayName, credit: account)
+                )
+            )
+        }
+
+        return rows.sorted {
+            // Credit cards with balance first by spend, then alpha
+            if $0.spent != $1.spent { return $0.spent > $1.spent }
+            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
     }
 
     var body: some View {
         NavigationStack {
             List {
-                // Summary header — tap for category chart
+                // MARK: Overview
                 Section {
                     NavigationLink {
                         CategorySpendView(period: period, referenceDate: referenceDate)
@@ -66,58 +130,102 @@ struct CardsView: View {
                             Spacer()
                             Text(periodTotalSpend, format: .currency(code: "USD"))
                                 .font(.title3.bold())
-                                .foregroundStyle(.primary)
                         }
+                    }
+
+                    if !creditAccounts.isEmpty || totalPaidInPeriod > 0 {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Credit balance")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(totalOwed, format: .currency(code: "USD"))
+                                        .font(.title3.weight(.semibold))
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("Limit")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(totalLimit > 0 ? totalLimit : 0, format: .currency(code: "USD"))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            if let util = totalUtilization {
+                                UtilizationBar(value: util, label: "Overall utilization")
+                            }
+
+                            HStack {
+                                Text("Paid in \(periodLabel.lowercased())")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(totalPaidInPeriod, format: .currency(code: "USD"))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Text("Overview")
+                } footer: {
+                    if creditAccounts.isEmpty {
+                        Text("Link credit cards and Sync to see balances, limits, and utilization.")
+                    } else {
+                        Text("Spend is purchases this period. Credit balance / limit come from Plaid on Sync. Bill payments don’t count as spend.")
                     }
                 }
 
-                // One row per card — tap to see its transactions
-                Section("Cards") {
-                    if cardSummaries.isEmpty {
+                // MARK: Cards
+                Section {
+                    if unifiedCardRows.isEmpty {
                         Text("No cards in \(periodLabel.lowercased()). Sync data or pick another range.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(cardSummaries) { card in
-                            // Push to a detail list for this payment method
+                        ForEach(unifiedCardRows) { row in
                             NavigationLink {
                                 CardDetailView(
-                                    cardName: card.cardName,
+                                    cardName: row.displayName,
                                     period: period,
                                     referenceDate: referenceDate,
-                                    sort: sort
+                                    sort: sort,
+                                    creditAccount: row.creditAccount,
+                                    periodPayments: paymentsMatching(
+                                        paymentMethod: row.displayName,
+                                        credit: row.creditAccount
+                                    )
                                 )
                             } label: {
-                                HStack(spacing: 12) {
-                                    // Dark Mode–style bank app icon (drawn from payment method → bank)
-                                    BankIconView(paymentMethod: card.cardName, size: 36)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(card.cardName)
-                                            .font(.body)
-                                        Text("\(card.transactionCount) transactions")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(card.spent, format: .currency(code: "USD"))
-                                        .font(.body.weight(.semibold))
-                                }
+                                UnifiedCardLabel(row: row)
                             }
                         }
                     }
+                } header: {
+                    Text("Cards")
+                }
+
+                // MARK: Payments
+                Section {
+                    if periodPayments.isEmpty {
+                        Text("No card payments in \(periodLabel.lowercased()).")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(periodPayments, id: \.transactionId) { payment in
+                            CreditPaymentRow(payment: payment)
+                        }
+                    }
+                } header: {
+                    Text("Payments · \(periodLabel)")
+                } footer: {
+                    Text("Paying a card bill is tracked here so it doesn’t inflate Total Spend or Income.")
                 }
             }
-            .navigationTitle("By Card")
+            .navigationTitle("Cards")
             .toolbar {
-                // Period + month filter
-                ToolbarItem(placement: .topBarTrailing) {
-                    PeriodFilterMenu(
-                        period: $period,
-                        referenceDate: $referenceDate,
-                        transactions: transactions,
-                        showTitle: true
-                    )
-                }
-                // Sort used when you open a card’s transactions
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
                         Picker("Sort", selection: $sort) {
@@ -129,30 +237,152 @@ struct CardsView: View {
                         Label("Sort", systemImage: "arrow.up.arrow.down")
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    PeriodFilterMenu(
+                        period: $period,
+                        referenceDate: $referenceDate,
+                        transactions: transactions,
+                        additionalDates: payments.map(\.date),
+                        showTitle: true
+                    )
+                }
             }
         }
     }
+
+    // MARK: Matching helpers
+
+    private func matchCreditAccount(toPaymentMethod name: String) -> BankAccount? {
+        creditAccounts.first { account in
+            namesMatch(name, account.displayName)
+                || namesMatch(name, account.name)
+                || name.localizedCaseInsensitiveContains(account.name)
+                || account.name.localizedCaseInsensitiveContains(name)
+                || fuzzyBrandMatch(name, account.name)
+        }
+    }
+
+    private func paidFor(paymentMethod: String, credit: BankAccount?) -> Double {
+        CreditAnalytics.totalPaid(
+            in: paymentsMatching(paymentMethod: paymentMethod, credit: credit)
+        )
+    }
+
+    private func paymentsMatching(
+        paymentMethod: String,
+        credit: BankAccount?
+    ) -> [CreditCardPayment] {
+        periodPayments.filter { payment in
+            if let credit, let id = payment.creditAccountId, id == credit.accountId {
+                return true
+            }
+            return namesMatch(payment.cardName, paymentMethod)
+                || payment.cardName.localizedCaseInsensitiveContains(paymentMethod)
+                || paymentMethod.localizedCaseInsensitiveContains(payment.cardName)
+                || fuzzyBrandMatch(payment.cardName, paymentMethod)
+        }
+    }
+
+    private func namesMatch(_ a: String, _ b: String) -> Bool {
+        a.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare(b.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
+    }
+
+    private func fuzzyBrandMatch(_ a: String, _ b: String) -> Bool {
+        let al = a.lowercased()
+        let bl = b.lowercased()
+        let brands = ["chase", "amex", "american express", "citi", "capital one", "discover", "apple card", "prime"]
+        for brand in brands {
+            if al.contains(brand) && bl.contains(brand) { return true }
+        }
+        return false
+    }
 }
 
-// Transactions for a single payment method
-struct CardDetailView: View {
-    // Card / payment method name to show
-    let cardName: String
-    // Period inherited from the cards list
-    let period: SnapshotPeriod
-    // Which week/month (from the cards list)
-    let referenceDate: Date
-    // Sort inherited from the cards list
-    let sort: TransactionSort
+// MARK: - Unified row model
 
-    // All transactions; we filter in memory with shared helpers
+private struct UnifiedCardRow: Identifiable {
+    let id: String
+    let displayName: String
+    let spent: Double
+    let transactionCount: Int
+    let creditAccount: BankAccount?
+    let paidInPeriod: Double
+}
+
+private struct UnifiedCardLabel: View {
+    let row: UnifiedCardRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                BankIconView(paymentMethod: row.displayName, size: 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.displayName)
+                        .font(.body.weight(.medium))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(row.spent, format: .currency(code: "USD"))
+                        .font(.body.weight(.semibold))
+                    if row.paidInPeriod > 0 {
+                        Text("Paid \(row.paidInPeriod.formatted(.currency(code: "USD")))")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
+
+            if let account = row.creditAccount {
+                if let util = account.utilization {
+                    UtilizationBar(value: util, label: nil)
+                } else if let limit = account.creditLimit, limit > 0 {
+                    Text("Balance \(max(0, account.currentBalance).formatted(.currency(code: "USD"))) of \(limit.formatted(.currency(code: "USD")))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if account.currentBalance > 0 {
+                    Text("Balance \(account.currentBalance.formatted(.currency(code: "USD")))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var subtitle: String {
+        var parts: [String] = []
+        if row.transactionCount > 0 {
+            parts.append("\(row.transactionCount) purchases")
+        }
+        if let account = row.creditAccount {
+            parts.append("Balance \(max(0, account.currentBalance).formatted(.currency(code: "USD")))")
+        } else if row.transactionCount == 0 {
+            parts.append("No purchases this period")
+        }
+        return parts.isEmpty ? "Card" : parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Card detail
+
+struct CardDetailView: View {
+    let cardName: String
+    let period: SnapshotPeriod
+    let referenceDate: Date
+    let sort: TransactionSort
+    var creditAccount: BankAccount? = nil
+    var periodPayments: [CreditCardPayment] = []
+
     @Query private var transactions: [Transaction]
 
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
     }
 
-    // Rows for this card + period + sort
     private var cardRows: [Transaction] {
         let inPeriod = TransactionAnalytics.inPeriod(
             transactions,
@@ -169,27 +399,68 @@ struct CardDetailView: View {
         TransactionAnalytics.totalSpend(in: cardRows)
     }
 
+    private var paidTotal: Double {
+        CreditAnalytics.totalPaid(in: periodPayments)
+    }
+
     var body: some View {
         List {
             Section {
                 HStack {
-                    Text("Total")
+                    Text("Spend")
                     Spacer()
                     Text(cardSpend, format: .currency(code: "USD"))
                         .font(.headline)
                 }
-                Text("\(periodLabel) · \(cardRows.count) transactions")
+                Text("\(periodLabel) · \(cardRows.count) purchases")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if let account = creditAccount {
+                    HStack {
+                        Text("Balance")
+                        Spacer()
+                        Text(max(0, account.currentBalance), format: .currency(code: "USD"))
+                            .font(.body.weight(.semibold))
+                    }
+                    if let limit = account.creditLimit, limit > 0 {
+                        HStack {
+                            Text("Limit")
+                            Spacer()
+                            Text(limit, format: .currency(code: "USD"))
+                                .foregroundStyle(.secondary)
+                        }
+                        if let util = account.utilization {
+                            UtilizationBar(value: util, label: "Utilization")
+                        }
+                    }
+                }
+
+                if paidTotal > 0 {
+                    HStack {
+                        Text("Paid this period")
+                        Spacer()
+                        Text(paidTotal, format: .currency(code: "USD"))
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.green)
+                    }
+                }
             }
 
-            Section("Transactions") {
+            if !periodPayments.isEmpty {
+                Section("Payments · \(periodLabel)") {
+                    ForEach(periodPayments, id: \.transactionId) { payment in
+                        CreditPaymentRow(payment: payment)
+                    }
+                }
+            }
+
+            Section("Purchases") {
                 if cardRows.isEmpty {
-                    Text("No transactions for this card in the selected period.")
+                    Text("No purchases for this card in the selected period.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(cardRows) { transaction in
-                        // Tap row → full detail + edit category / multiplier
                         NavigationLink {
                             TransactionDetailView(transaction: transaction)
                         } label: {
@@ -204,13 +475,12 @@ struct CardDetailView: View {
     }
 }
 
-// Shared row UI used on All Transactions and By Card detail
+// Shared row UI used on All Transactions and card detail
 struct TransactionRowView: View {
     let transaction: Transaction
 
     var body: some View {
         HStack(spacing: 12) {
-            // Category SF Symbol + Apple Card–style color
             Image(systemName: CategoryStyle.symbolName(for: transaction.category))
                 .font(.title3)
                 .foregroundStyle(CategoryStyle.color(for: transaction.category))
@@ -239,7 +509,82 @@ struct TransactionRowView: View {
     }
 }
 
+// MARK: - Shared credit UI pieces
+
+struct CreditPaymentRow: View {
+    let payment: CreditCardPayment
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundStyle(.green)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(payment.cardName)
+                    .font(.body.weight(.medium))
+                Text(payment.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(payment.date, style: .date)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Text(payment.amount, format: .currency(code: "USD"))
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.green)
+        }
+    }
+}
+
+struct UtilizationBar: View {
+    let value: Double
+    let label: String?
+
+    private var percent: Int {
+        Int((value * 100).rounded())
+    }
+
+    private var color: Color {
+        switch value {
+        case ..<0.30: return .green
+        case ..<0.70: return .orange
+        default: return .red
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                if let label {
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(percent)% used")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(color)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.15))
+                    Capsule()
+                        .fill(color.gradient)
+                        .frame(width: max(4, geo.size.width * value))
+                }
+            }
+            .frame(height: 8)
+        }
+    }
+}
+
 #Preview {
     CardsView()
-        .modelContainer(for: Transaction.self, inMemory: true)
+        .modelContainer(
+            for: [Transaction.self, BankAccount.self, CreditCardPayment.self],
+            inMemory: true
+        )
 }

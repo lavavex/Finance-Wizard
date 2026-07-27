@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  Finance Wizard
 //
-//  Root tabs: All transactions (with filters) + By Card.
+//  Root tabs: Transactions, Cards (spend + credit), Settings.
 //
 
 import SwiftUI
@@ -71,10 +71,10 @@ struct ContentView: View {
                     Label("Transactions", systemImage: "list.bullet")
                 }
 
-            // Tab 2: browse by payment method / card
+            // Tab 2: spend by card + credit utilization / payments
             CardsView()
                 .tabItem {
-                    Label("By Card", systemImage: "creditcard")
+                    Label("Cards", systemImage: "creditcard")
                 }
 
             // Tab 3: Plaid credentials + linked banks

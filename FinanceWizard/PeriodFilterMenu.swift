@@ -15,11 +15,15 @@ struct PeriodFilterMenu: View {
     @Binding var referenceDate: Date
     /// Used to build the list of months that have transactions.
     let transactions: [Transaction]
+    /// Extra dates (e.g. credit payments) so month picker isn’t empty on other tabs.
+    var additionalDates: [Date] = []
     /// Icon-only (transactions tab) vs labeled (cards / categories).
     var showTitle: Bool = true
 
     private var monthStarts: [Date] {
-        TransactionAnalytics.availableMonthStarts(in: transactions)
+        TransactionAnalytics.availableMonthStarts(
+            from: transactions.map(\.date) + additionalDates
+        )
     }
 
     private var labelText: String {

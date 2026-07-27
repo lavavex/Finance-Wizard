@@ -82,8 +82,11 @@ Plaid amount convention:
 
 - **Category** from `personal_finance_category` (mapped to Dining, Gas, …) unless a local learn rule or lock applies.  
 - **Payment method** from account name + mask (e.g. `Checking ···0000`) or institution name.  
-- Internal transfers / credit-card payments are skipped when PFC looks like an internal transfer.  
-- Pending rows are skipped by default.
+- **Transfers** (savings ↔ checking, internal moves) are **skipped** — never enter spend or income.  
+- **Credit card bill payments** are stored as `CreditCardPayment` for the Credit tab (payoff tracking), not as spend/income.  
+- **Credit balances / limits** come from `POST /accounts/get` on each Sync.  
+- Pending rows are skipped by default.  
+- Each Sync also cleans older expense/income rows whose titles look like transfers or card payments.
 
 ### Local locks & learn rules
 

@@ -55,13 +55,20 @@ Each row shows:
 
 **Save** updates SwiftData and locks category/multiplier so later Plaid syncs do not overwrite them. With **learn**, a local vendor rule is stored for future Plaid rows.
 
-## Tab: By Card
+## Tab: Cards
 
-1. Period picker (same week / month / all time).  
-2. List of cards with spend + transaction count for that period.  
-3. Tap a card → **Card detail**: only that card’s transactions, with sort.  
+Single hub for payment methods and credit tracking:
 
-Uses the same `TransactionAnalytics` helpers as the widget.
+| Element | Meaning |
+|---------|---------|
+| **Total Spend** | Purchases in the selected period (tap → category chart) |
+| **Credit balance / limit / utilization** | From Plaid balances on Sync |
+| **Paid this period** | Card bill payments (excluded from Total Spend) |
+| **Cards list** | Per card: purchase spend, balance, utilization, amount paid |
+| **Payments list** | Bill payments for the period |
+| **Card detail** | Spend total, credit snapshot, payments, purchase rows |
+
+Period + sort controls apply across the tab. Transfers and card bill payments stay out of Transactions totals.
 
 ## Tab: Settings
 
@@ -88,7 +95,7 @@ Implemented in `Shared/SharedStore.swift` as `TransactionAnalytics` + `SnapshotP
 ### Categories (transactions)
 Maps **category** → SF Symbol in `Shared/CategorySymbol.swift`.
 
-### Cards / banks (By Card tab)
+### Cards / banks
 iOS does **not** expose Wallet or bank-app icons to third-party apps.  
 `Shared/BankIcon.swift` draws **Dark Mode–style app icons** (rounded square + brand colors + monogram) from the payment method string:
 

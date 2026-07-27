@@ -63,7 +63,7 @@ Without the shared group, the widget cannot see transactions the app saves.
    - Sandbox institution: **First Platypus Bank**  
    - Username `user_good`, password `pass_good`  
 3. On **Transactions**, open **Sync → Sync now**.  
-4. List should fill; **By Card** should list payment methods.  
+4. List should fill; **Cards** should list payment methods and credit balances after Sync.  
 5. Add the **Total Spend** widget from the Home Screen gallery.
 
 ## 7. Optional: JSON file import
