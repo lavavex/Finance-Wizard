@@ -59,6 +59,8 @@ enum PlaidAPIClient {
             let country_codes: [String]
             let user: User
             let products: [String]
+            /// Credit APR / due dates when the institution supports Liabilities.
+            let required_if_supported_products: [String]
             let transactions: TransactionsOpts
             /// Optional OAuth app-to-app return (https Universal Link preferred in Production).
             let redirect_uri: String?
@@ -80,7 +82,8 @@ enum PlaidAPIClient {
 
             enum CodingKeys: String, CodingKey {
                 case client_id, secret, client_name, language, country_codes
-                case user, products, transactions, redirect_uri, hosted_link
+                case user, products, required_if_supported_products, transactions
+                case redirect_uri, hosted_link
             }
 
             func encode(to encoder: Encoder) throws {
@@ -92,6 +95,7 @@ enum PlaidAPIClient {
                 try c.encode(country_codes, forKey: .country_codes)
                 try c.encode(user, forKey: .user)
                 try c.encode(products, forKey: .products)
+                try c.encode(required_if_supported_products, forKey: .required_if_supported_products)
                 try c.encode(transactions, forKey: .transactions)
                 try c.encodeIfPresent(redirect_uri, forKey: .redirect_uri)
                 try c.encode(hosted_link, forKey: .hosted_link)
@@ -117,6 +121,7 @@ enum PlaidAPIClient {
             country_codes: ["US"],
             user: .init(client_user_id: userID),
             products: ["transactions"],
+            required_if_supported_products: ["liabilities"],
             transactions: .init(days_requested: 730),
             redirect_uri: oauthRedirect,
             hosted_link: .init(
@@ -441,6 +446,36 @@ enum PlaidAPIClient {
         return response.accounts
     }
 
+    /// Credit-card terms: APR, min payment, due dates, statement balance (`/liabilities/get`).
+    /// Requires Liabilities on the Item (Link with `required_if_supported_products: liabilities`).
+    static func liabilitiesGet(accessToken: String) async throws -> [PlaidCreditLiability] {
+        try PlaidCredentialsStore.requireConfigured()
+
+        struct Body: Encodable {
+            let client_id: String
+            let secret: String
+            let access_token: String
+        }
+
+        struct Response: Decodable {
+            let liabilities: Liabilities?
+
+            struct Liabilities: Decodable {
+                let credit: [PlaidCreditLiability]?
+            }
+        }
+
+        let response: Response = try await post(
+            path: "/liabilities/get",
+            body: Body(
+                client_id: PlaidCredentialsStore.clientID,
+                secret: PlaidCredentialsStore.secret,
+                access_token: accessToken
+            )
+        )
+        return response.liabilities?.credit ?? []
+    }
+
     /// Optional: remove Item on Plaid side (invalidates access token).
     static func removeItem(accessToken: String) async throws {
         try PlaidCredentialsStore.requireConfigured()
@@ -564,6 +599,26 @@ struct PlaidBalances: Decodable {
     let current: Double?
     let limit: Double?
     let iso_currency_code: String?
+}
+
+/// One credit-card liability from `/liabilities/get`.
+struct PlaidCreditLiability: Decodable, Sendable {
+    let account_id: String?
+    let aprs: [PlaidAPR]?
+    let is_overdue: Bool?
+    let last_payment_amount: Double?
+    let last_payment_date: String?
+    let last_statement_issue_date: String?
+    let last_statement_balance: Double?
+    let minimum_payment_amount: Double?
+    let next_payment_due_date: String?
+}
+
+struct PlaidAPR: Decodable, Sendable {
+    let apr_percentage: Double?
+    let apr_type: String?
+    let balance_subject_to_apr: Double?
+    let interest_charge_amount: Double?
 }
 
 struct PlaidTransaction: Decodable {

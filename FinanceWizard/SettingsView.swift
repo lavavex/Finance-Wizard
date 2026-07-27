@@ -84,17 +84,25 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(linkedItems) { item in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.institutionName)
-                                    .font(.body.weight(.semibold))
-                                if !item.accountNames.isEmpty {
-                                    Text(item.accountNames.joined(separator: ", "))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                            HStack(spacing: 12) {
+                                BankIconView(
+                                    paymentMethod: item.institutionName,
+                                    size: 36,
+                                    displayName: item.institutionName,
+                                    institutionName: item.institutionName
+                                )
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.institutionName)
+                                        .font(.body.weight(.semibold))
+                                    if !item.accountNames.isEmpty {
+                                        Text(item.accountNames.joined(separator: ", "))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text("Linked \(item.linkedAt.formatted(date: .abbreviated, time: .omitted))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
                                 }
-                                Text("Linked \(item.linkedAt.formatted(date: .abbreviated, time: .omitted))")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
@@ -115,7 +123,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Linked banks")
                 } footer: {
-                    Text("Link uses Plaid Link with your own API keys. After linking, tap Sync on Transactions to pull transactions.")
+                    Text("Link uses Plaid Hosted Link with your own API keys (transactions + credit details when supported). After linking, Sync on Transactions. Re-link older banks once if credit APR/due dates are missing.")
                 }
 
                 // MARK: Sync info

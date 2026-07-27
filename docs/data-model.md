@@ -87,6 +87,9 @@ Plaid account snapshot (`Shared/BankAccount.swift`). Used for credit utilization
 | Property | Notes |
 |----------|--------|
 | `accountId` | Unique Plaid account id |
+| `creditLimit` / balances | From `/accounts/get` |
+| Liabilities fields | Min payment, due date, last payment/statement, APRs, overdue (`/liabilities/get`) |
+| `institutionId` | For Plaid logo cache |
 | `type` | `credit`, `depository`, … |
 | `currentBalance` | Owed amount for credit |
 | `creditLimit` | Limit when reported |

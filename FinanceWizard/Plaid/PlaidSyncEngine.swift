@@ -19,6 +19,7 @@ struct PlaidSyncReport: Sendable {
     var skippedTransfers: Int = 0
     var cleanedLegacy: Int = 0
     var accountsUpdated: Int = 0
+    var liabilitiesUpdated: Int = 0
     var warnings: [String] = []
 
     var summary: String {
@@ -30,6 +31,7 @@ struct PlaidSyncReport: Sendable {
         if skippedTransfers > 0 { lines.append("Skipped transfers: \(skippedTransfers)") }
         if cleanedLegacy > 0 { lines.append("Removed mis-filed transfers: \(cleanedLegacy)") }
         if accountsUpdated > 0 { lines.append("Accounts refreshed: \(accountsUpdated)") }
+        if liabilitiesUpdated > 0 { lines.append("Credit details refreshed: \(liabilitiesUpdated)") }
         if removed > 0 { lines.append("Removed by bank: \(removed)") }
         if !warnings.isEmpty {
             lines.append("Warnings:")
@@ -92,6 +94,7 @@ enum PlaidSyncEngine {
                 report.removed += itemReport.removed
                 report.skippedTransfers += itemReport.skippedTransfers
                 report.accountsUpdated += itemReport.accountsUpdated
+                report.liabilitiesUpdated += itemReport.liabilitiesUpdated
                 report.itemLines.append(
                     "\(item.institutionName): +\(itemReport.expensesUpserted) exp / +\(itemReport.incomeUpserted) inc / \(itemReport.creditPaymentsUpserted) card pmts"
                 )
@@ -213,6 +216,49 @@ enum PlaidSyncEngine {
             )
         } catch {
             report.warnings.append("\(item.institutionName) balances: \(error.localizedDescription)")
+        }
+
+        // Credit APR / due dates / min payment (Liabilities product)
+        progress?("\(item.institutionName): credit details…")
+        do {
+            let creditLiabilities = try await PlaidAPIClient.liabilitiesGet(accessToken: item.accessToken)
+            report.liabilitiesUpdated = applyCreditLiabilities(
+                creditLiabilities,
+                modelContext: modelContext
+            )
+        } catch {
+            if case PlaidAPIError.http(_, let code, let message) = error {
+                // Expected when Item was linked before Liabilities, product still warming up, or unsupported.
+                let softCodes: Set<String> = [
+                    "PRODUCTS_NOT_SUPPORTED",
+                    "PRODUCT_NOT_READY",
+                    "PRODUCT_NOT_ENABLED",
+                    "INVALID_PRODUCT",
+                    "ADDITIONAL_CONSENT_REQUIRED",
+                    "NO_LIABILITY_ACCOUNTS"
+                ]
+                if let code, softCodes.contains(code) {
+                    if code == "PRODUCT_NOT_READY" {
+                        report.warnings.append(
+                            "\(item.institutionName): credit details still preparing — Sync again in a few minutes."
+                        )
+                    } else if code == "PRODUCTS_NOT_SUPPORTED" || code == "NO_LIABILITY_ACCOUNTS" {
+                        // Institution has no credit liabilities data — silent for depository-only Items.
+                    } else if code == "PRODUCT_NOT_ENABLED"
+                                || code == "INVALID_PRODUCT"
+                                || code == "ADDITIONAL_CONSENT_REQUIRED" {
+                        report.warnings.append(
+                            "\(item.institutionName): re-link bank to enable credit details (APR, due date)."
+                        )
+                    } else {
+                        report.warnings.append("\(item.institutionName) liabilities: \(message)")
+                    }
+                } else {
+                    report.warnings.append("\(item.institutionName) liabilities: \(error.localizedDescription)")
+                }
+            } else {
+                report.warnings.append("\(item.institutionName) liabilities: \(error.localizedDescription)")
+            }
         }
 
         return report
@@ -535,6 +581,59 @@ enum PlaidSyncEngine {
                         lastSyncedAt: Date()
                     )
                 )
+            }
+            count += 1
+        }
+        return count
+    }
+
+    /// Merge `/liabilities/get` credit rows onto existing `BankAccount`s by account_id.
+    @MainActor
+    private static func applyCreditLiabilities(
+        _ liabilities: [PlaidCreditLiability],
+        modelContext: ModelContext
+    ) -> Int {
+        var count = 0
+        let now = Date()
+        for liability in liabilities {
+            guard let accountId = liability.account_id, !accountId.isEmpty else { continue }
+
+            var descriptor = FetchDescriptor<BankAccount>(
+                predicate: #Predicate<BankAccount> { account in
+                    account.accountId == accountId
+                }
+            )
+            descriptor.fetchLimit = 1
+            guard let account = try? modelContext.fetch(descriptor).first else { continue }
+
+            account.isOverdue = liability.is_overdue
+            account.lastPaymentAmount = liability.last_payment_amount
+            account.lastPaymentDate = liability.last_payment_date.flatMap(parseDate)
+            account.lastStatementIssueDate = liability.last_statement_issue_date.flatMap(parseDate)
+            account.lastStatementBalance = liability.last_statement_balance
+            account.minimumPaymentAmount = liability.minimum_payment_amount
+            account.nextPaymentDueDate = liability.next_payment_due_date.flatMap(parseDate)
+            account.liabilitiesSyncedAt = now
+
+            // Reset APR slots then fill from payload
+            account.purchaseApr = nil
+            account.cashApr = nil
+            account.balanceTransferApr = nil
+            account.specialApr = nil
+            for apr in liability.aprs ?? [] {
+                guard let pct = apr.apr_percentage else { continue }
+                switch (apr.apr_type ?? "").lowercased() {
+                case "purchase_apr":
+                    account.purchaseApr = pct
+                case "cash_apr":
+                    account.cashApr = pct
+                case "balance_transfer_apr":
+                    account.balanceTransferApr = pct
+                case "special":
+                    account.specialApr = pct
+                default:
+                    break
+                }
             }
             count += 1
         }

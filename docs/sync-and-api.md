@@ -58,9 +58,12 @@ No Dashboard allowlist is required for `completion_redirect_uri` (custom scheme)
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /link/token/create` | Start Link session (`products: ["transactions"]`, up to 730 days) |
+| `POST /link/token/create` | Link session: `transactions` + `liabilities` when supported (up to 730 days) |
 | `POST /item/public_token/exchange` | public_token → access_token + item_id |
 | `POST /transactions/sync` | Incremental transaction updates (cursor-based) |
+| `POST /accounts/get` | Balances and credit limits |
+| `POST /item/get` + `/institutions/get_by_id` | Institution id, logo, primary color |
+| `POST /liabilities/get` | Credit APR, min payment, due dates, statement balance |
 | `POST /item/remove` | Optional unlink on Plaid side |
 
 Host depends on Settings environment:
@@ -85,9 +88,11 @@ Plaid amount convention:
 - **Transfers** (savings ↔ checking, internal moves) are **skipped** — never enter spend or income.  
 - **Credit card bill payments** are stored as `CreditCardPayment` for the Credit tab (payoff tracking), not as spend/income.  
 - **Credit balances / limits** come from `POST /accounts/get` on each Sync.  
+- **Credit terms** (min payment, due date, last payment/statement, APRs, overdue) from `POST /liabilities/get` when the Item has Liabilities.  
 - **Bank logo / brand color** from `POST /item/get` → `POST /institutions/get_by_id` (`include_optional_metadata`).  
 - Pending rows are skipped by default.  
-- Each Sync also cleans older expense/income rows whose titles look like transfers or card payments.
+- Each Sync also cleans older expense/income rows whose titles look like transfers or card payments.  
+- Banks linked **before** Liabilities was added may need a **re-link** so credit details can load.
 
 ### Local locks & learn rules
 
