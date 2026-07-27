@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Optional: install with `git config core.hooksPath .githooks`
+# Prevents committing a future Xcode project format that breaks Xcode Cloud.
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+"$ROOT/scripts/lock-xcode-project-format.sh"
+# Re-stage pbxproj if the hook rewrote it
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  git add -u -- "$ROOT/FinanceWizard.xcodeproj/project.pbxproj" 2>/dev/null || true
+fi

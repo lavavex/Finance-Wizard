@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @State private var clientID: String = ""
@@ -149,6 +150,23 @@ struct SettingsView: View {
                             .foregroundStyle(statusIsError ? .red : .secondary)
                     }
                 }
+
+                // MARK: About
+                Section {
+                    NavigationLink {
+                        AboutBuildView()
+                    } label: {
+                        HStack {
+                            Text("About")
+                            Spacer()
+                            Text(AppBuildInfo.versionBuildLabel)
+                                .font(.subheadline.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } footer: {
+                    Text("Version and build match MARKETING_VERSION / CURRENT_PROJECT_VERSION from the Xcode project (same values Xcode Cloud embeds in the archive).")
+                }
             }
             .navigationTitle("Settings")
             .onAppear(perform: reload)
@@ -221,6 +239,97 @@ struct SettingsView: View {
                 statusMessage = "Unlinked \(item.institutionName)."
             }
         }
+    }
+}
+
+// MARK: - Build info (from Info.plist / Xcode versions)
+
+enum AppBuildInfo {
+    /// CFBundleShortVersionString ← MARKETING_VERSION (e.g. 0.1)
+    static var marketingVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    /// CFBundleVersion ← CURRENT_PROJECT_VERSION (e.g. 5)
+    static var buildNumber: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+    }
+
+    static var versionBuildLabel: String {
+        "\(marketingVersion) (\(buildNumber))"
+    }
+
+    static var displayName: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? "Finance Wizard"
+    }
+
+    static var bundleIdentifier: String {
+        Bundle.main.bundleIdentifier ?? "—"
+    }
+
+    static var minimumOS: String {
+        Bundle.main.object(forInfoDictionaryKey: "MinimumOSVersion") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "LSMinimumSystemVersion") as? String
+            ?? "—"
+    }
+}
+
+struct AboutBuildView: View {
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("App") {
+                    Text(AppBuildInfo.displayName)
+                }
+                LabeledContent("Version") {
+                    Text(AppBuildInfo.marketingVersion)
+                        .font(.body.monospaced())
+                        .textSelection(.enabled)
+                }
+                LabeledContent("Build") {
+                    Text(AppBuildInfo.buildNumber)
+                        .font(.body.monospaced())
+                        .textSelection(.enabled)
+                }
+                LabeledContent("Version (build)") {
+                    Text(AppBuildInfo.versionBuildLabel)
+                        .font(.body.monospaced())
+                        .textSelection(.enabled)
+                }
+            } header: {
+                Text("Release")
+            } footer: {
+                Text("These come from the installed app’s Info.plist. Xcode Cloud sets them from the target’s Version (MARKETING_VERSION) and Build (CURRENT_PROJECT_VERSION) when it archives.")
+            }
+
+            Section("Identifiers") {
+                LabeledContent("Bundle ID") {
+                    Text(AppBuildInfo.bundleIdentifier)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Minimum iOS") {
+                    Text(AppBuildInfo.minimumOS)
+                        .font(.body.monospaced())
+                }
+            }
+
+            Section("Runtime") {
+                LabeledContent("iOS") {
+                    Text(UIDevice.current.systemVersion)
+                        .font(.body.monospaced())
+                }
+                LabeledContent("Device") {
+                    Text(UIDevice.current.model)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("About")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

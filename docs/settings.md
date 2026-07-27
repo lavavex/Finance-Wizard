@@ -33,6 +33,19 @@ Link completion uses the custom scheme `financewizard://hosted-link-complete` (H
 | Linked items | Count of stored Items |
 | API host | Hostname for the selected environment |
 
+## About / build info
+
+**Settings → About** shows values from the installed binary’s Info.plist:
+
+| Field | Source |
+|-------|--------|
+| **Version** | `CFBundleShortVersionString` ← Xcode **MARKETING_VERSION** |
+| **Build** | `CFBundleVersion` ← Xcode **CURRENT_PROJECT_VERSION** |
+| Bundle ID | `Bundle.main.bundleIdentifier` |
+| Minimum iOS | Info.plist minimum OS |
+
+These match what Xcode Cloud embeds when it archives (same target version/build numbers).
+
 ## Implementation
 
 | Piece | Location |
@@ -40,6 +53,6 @@ Link completion uses the custom scheme `financewizard://hosted-link-complete` (H
 | Credentials | `FinanceWizard/Plaid/PlaidCredentialsStore.swift` |
 | Items / cursors | `FinanceWizard/Plaid/PlaidItemStore.swift` |
 | Keychain | `FinanceWizard/Plaid/PlaidKeychain.swift` |
-| UI | `FinanceWizard/SettingsView.swift` |
+| UI | `FinanceWizard/SettingsView.swift` (`AboutBuildView`, `AppBuildInfo`) |
 
 Credentials are **device-local** (not in the App Group).
