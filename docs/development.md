@@ -21,6 +21,38 @@ open FinanceWizard.xcodeproj
 
 In Xcode: scheme **FinanceWizard** (Finance Wizard app) → Run (⌘R).
 
+## Xcode project format (Xcode Cloud)
+
+Newer local Xcodes (26/27) may rewrite `project.pbxproj` to **objectVersion 110+**. Older Xcode Cloud images then fail with:
+
+> cannot be opened because it is in a future Xcode project file format (110)
+
+There is **no permanent lock inside the `.xcodeproj`** that stops Xcode from rewriting the file when you save. Use one (or both) of these:
+
+### A. Auto-downgrade on Xcode Cloud (in this repo)
+
+| Script | When |
+|--------|------|
+| `ci_scripts/ci_post_clone.sh` | After clone |
+| `ci_scripts/ci_pre_xcodebuild.sh` | Before `xcodebuild` |
+| `scripts/lock-xcode-project-format.sh` | Forces `objectVersion = 77` |
+
+Cloud runs the `ci_scripts/*` hooks automatically when present.
+
+### B. Optional local pre-commit hook
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Commits then re-lock the project format before they land.
+
+### C. Or upgrade Xcode Cloud to match your Mac
+
+App Store Connect → your app → **Xcode Cloud** → workflow → **Environment** → pick an Xcode version that understands format 110 (same generation as your local Xcode 27). Then you can leave format 110 as-is.
+
+**Also check the workflow project name:** it must open **`FinanceWizard.xcodeproj`** (not the old `FinanceWidget.xcodeproj`).
+
 ## Where to put code
 
 | Change | Put it in |
