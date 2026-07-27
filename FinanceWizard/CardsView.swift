@@ -63,6 +63,18 @@ struct CardsView: View {
         CreditAnalytics.totalPaid(in: periodPayments)
     }
 
+    private var totalMinimumDue: Double {
+        creditAccounts.compactMap(\.minimumPaymentAmount).reduce(0, +)
+    }
+
+    private var soonestDueDate: Date? {
+        creditAccounts.compactMap(\.nextPaymentDueDate).min()
+    }
+
+    private var anyOverdue: Bool {
+        creditAccounts.contains { $0.isOverdue == true }
+    }
+
     /// One row per credit account (unique account_id), plus orphan spend methods.
     private var unifiedCardRows: [UnifiedCardRow] {
         _ = nicknameEpoch
@@ -189,6 +201,39 @@ struct CardsView: View {
                                 UtilizationBar(value: util, label: "Overall utilization")
                             }
 
+                            if totalMinimumDue > 0 || soonestDueDate != nil {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Min payments")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if totalMinimumDue > 0 {
+                                            Text(totalMinimumDue, format: .currency(code: "USD"))
+                                                .font(.subheadline.weight(.semibold))
+                                        } else {
+                                            Text("—")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text(anyOverdue ? "Overdue" : "Next due")
+                                            .font(.caption)
+                                            .foregroundStyle(anyOverdue ? .red : .secondary)
+                                        if let due = soonestDueDate {
+                                            Text(due, style: .date)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(anyOverdue ? .red : .primary)
+                                        } else {
+                                            Text("—")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                }
+                            }
+
                             HStack {
                                 Text("Paid in \(periodLabel.lowercased())")
                                     .font(.caption)
@@ -204,7 +249,7 @@ struct CardsView: View {
                 } header: {
                     Text("Overview")
                 } footer: {
-                    Text("Each linked account is listed separately (by card number). Open a card to rename it. Logos come from Plaid.")
+                    Text("Each linked account is listed separately (by card number). Open a card to rename it. Logos and credit details come from Plaid.")
                 }
 
                 Section {
@@ -244,7 +289,10 @@ struct CardsView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(periodPayments, id: \.transactionId) { payment in
-                            CreditPaymentRow(payment: payment)
+                            CreditPaymentRow(
+                                payment: payment,
+                                institutionId: institutionId(for: payment)
+                            )
                         }
                     }
                 } header: {
@@ -338,6 +386,20 @@ struct CardsView: View {
         a.trimmingCharacters(in: .whitespacesAndNewlines)
             .caseInsensitiveCompare(b.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
     }
+
+    private func institutionId(for payment: CreditCardPayment) -> String? {
+        if let id = payment.creditAccountId,
+           let account = accounts.first(where: { $0.accountId == id }) {
+            return account.institutionId
+        }
+        if let maskMatch = creditAccounts.first(where: { account in
+            guard let mask = account.mask, !mask.isEmpty else { return false }
+            return payment.cardName.contains(mask)
+        }) {
+            return maskMatch.institutionId
+        }
+        return accounts.first { $0.institutionName == payment.institutionName }?.institutionId
+    }
 }
 
 // MARK: - Row model
@@ -424,6 +486,35 @@ private struct UnifiedCardLabel: View {
 
             if let util = row.creditAccount?.utilization {
                 UtilizationBar(value: util, label: nil)
+            }
+
+            if let credit = row.creditAccount, credit.hasLiabilitiesDetails {
+                HStack(spacing: 8) {
+                    if let minPay = credit.minimumPaymentAmount {
+                        Text("Min \(minPay.formatted(.currency(code: "USD")))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let due = credit.nextPaymentDueDate {
+                        Text("·")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        if credit.isOverdue == true {
+                            Text("Overdue")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.red)
+                        } else {
+                            Text("Due \(due.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if credit.isOverdue == true {
+                        Text("Overdue")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                    }
+                    Spacer(minLength: 0)
+                }
             }
 
             HStack {
@@ -556,6 +647,14 @@ struct CardDetailView: View {
                         Text(max(0, credit.currentBalance), format: .currency(code: "USD"))
                             .font(.title3.weight(.semibold))
                     }
+                    if let available = credit.availableBalance {
+                        HStack {
+                            Text("Available credit")
+                            Spacer()
+                            Text(available, format: .currency(code: "USD"))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     if let limit = credit.creditLimit, limit > 0 {
                         HStack {
                             Text("Limit")
@@ -591,10 +690,92 @@ struct CardDetailView: View {
                 Text("Summary")
             }
 
+            if let credit = creditAccount, credit.hasLiabilitiesDetails {
+                Section {
+                    if credit.isOverdue == true {
+                        Label("Payment overdue", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    if let minPay = credit.minimumPaymentAmount {
+                        LabeledContent("Minimum payment") {
+                            Text(minPay, format: .currency(code: "USD"))
+                        }
+                    }
+                    if let due = credit.nextPaymentDueDate {
+                        LabeledContent("Payment due") {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(due, style: .date)
+                                if let days = credit.daysUntilDue {
+                                    Text(dueSubtitle(days: days, overdue: credit.isOverdue == true))
+                                        .font(.caption)
+                                        .foregroundStyle(days < 0 || credit.isOverdue == true ? .red : .secondary)
+                                }
+                            }
+                        }
+                    }
+                    if let lastAmt = credit.lastPaymentAmount {
+                        LabeledContent("Last payment") {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(lastAmt, format: .currency(code: "USD"))
+                                if let d = credit.lastPaymentDate {
+                                    Text(d, style: .date)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    if let stmt = credit.lastStatementBalance {
+                        LabeledContent("Last statement") {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(stmt, format: .currency(code: "USD"))
+                                if let d = credit.lastStatementIssueDate {
+                                    Text(d, style: .date)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    if let apr = credit.purchaseApr {
+                        LabeledContent("Purchase APR") {
+                            Text(formatAPR(apr))
+                        }
+                    }
+                    if let apr = credit.cashApr {
+                        LabeledContent("Cash APR") {
+                            Text(formatAPR(apr))
+                        }
+                    }
+                    if let apr = credit.balanceTransferApr {
+                        LabeledContent("Balance transfer APR") {
+                            Text(formatAPR(apr))
+                        }
+                    }
+                    if let apr = credit.specialApr {
+                        LabeledContent("Special APR") {
+                            Text(formatAPR(apr))
+                        }
+                    }
+                } header: {
+                    Text("Credit details")
+                } footer: {
+                    if credit.liabilitiesSyncedAt != nil {
+                        Text("From Plaid Liabilities. Coverage varies by bank.")
+                    } else {
+                        Text("Sync after linking to load APR and due dates when the bank supports them.")
+                    }
+                }
+            }
+
             if !periodPayments.isEmpty {
                 Section("Payments · \(periodLabel)") {
                     ForEach(periodPayments, id: \.transactionId) { payment in
-                        CreditPaymentRow(payment: payment)
+                        CreditPaymentRow(
+                            payment: payment,
+                            institutionId: account?.institutionId
+                        )
                     }
                 }
             }
@@ -608,7 +789,11 @@ struct CardDetailView: View {
                         NavigationLink {
                             TransactionDetailView(transaction: transaction)
                         } label: {
-                            TransactionRowView(transaction: transaction)
+                            TransactionRowView(
+                                transaction: transaction,
+                                institutionId: account?.institutionId,
+                                institutionName: account?.institutionName
+                            )
                         }
                     }
                 }
@@ -642,20 +827,51 @@ struct CardDetailView: View {
             didSaveNickname = false
         }
     }
+
+    private func formatAPR(_ value: Double) -> String {
+        "\(value.formatted(.number.precision(.fractionLength(0...2))))%"
+    }
+
+    private func dueSubtitle(days: Int, overdue: Bool) -> String {
+        if overdue || days < 0 {
+            let past = abs(min(days, 0))
+            if past == 0 { return "Due today" }
+            return past == 1 ? "1 day past due" : "\(past) days past due"
+        }
+        if days == 0 { return "Due today" }
+        if days == 1 { return "Due tomorrow" }
+        return "In \(days) days"
+    }
 }
 
 // MARK: - Shared rows
 
 struct TransactionRowView: View {
     let transaction: Transaction
+    var institutionId: String? = nil
+    var institutionName: String? = nil
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: CategoryStyle.symbolName(for: transaction.category))
-                .font(.title3)
-                .foregroundStyle(CategoryStyle.color(for: transaction.category))
-                .frame(width: 28, alignment: .center)
-                .accessibilityLabel(transaction.category)
+            // Category for the spend type; institution mark when we know the card's bank
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: CategoryStyle.symbolName(for: transaction.category))
+                    .font(.title3)
+                    .foregroundStyle(CategoryStyle.color(for: transaction.category))
+                    .frame(width: 28, alignment: .center)
+                    .accessibilityLabel(transaction.category)
+
+                if institutionId != nil || institutionName != nil {
+                    BankIconView(
+                        paymentMethod: transaction.paymentMethod,
+                        size: 14,
+                        displayName: displayPaymentMethod,
+                        institutionId: institutionId,
+                        institutionName: institutionName
+                    )
+                    .offset(x: 4, y: 4)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.title)
@@ -685,6 +901,7 @@ struct TransactionRowView: View {
 
 struct CreditPaymentRow: View {
     let payment: CreditCardPayment
+    var institutionId: String? = nil
 
     private var cardLabel: String {
         if let id = payment.creditAccountId {
@@ -695,9 +912,20 @@ struct CreditPaymentRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "arrow.down.circle.fill")
-                .foregroundStyle(.green)
-                .font(.title3)
+            ZStack(alignment: .bottomTrailing) {
+                BankIconView(
+                    paymentMethod: payment.cardName,
+                    size: 36,
+                    displayName: cardLabel,
+                    institutionId: institutionId,
+                    institutionName: payment.institutionName
+                )
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.green)
+                    .background(Circle().fill(Color(.systemBackground)).padding(-1))
+                    .offset(x: 4, y: 4)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(cardLabel)
                     .font(.body.weight(.medium))

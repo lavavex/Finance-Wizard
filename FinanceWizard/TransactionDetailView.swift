@@ -51,9 +51,14 @@ struct TransactionDetailView: View {
     @State private var saveStatusMessage: String?
 
     @Query private var allTransactions: [Transaction]
+    @Query private var bankAccounts: [BankAccount]
 
     private var selectedPreset: String? {
         categoryOptions.first { $0 == categoryText }
+    }
+
+    private var linkedAccount: BankAccount? {
+        BankAccount.matching(paymentMethod: transaction.paymentMethod, in: bankAccounts)
     }
 
     var body: some View {
@@ -82,9 +87,26 @@ struct TransactionDetailView: View {
                 }
                 LabeledContent("Card") {
                     HStack(spacing: 8) {
-                        BankIconView(paymentMethod: transaction.paymentMethod, size: 24)
-                        Text(transaction.paymentMethod)
-                            .multilineTextAlignment(.trailing)
+                        BankIconView(
+                            paymentMethod: transaction.paymentMethod,
+                            size: 24,
+                            accountId: linkedAccount?.accountId,
+                            displayName: CardLabelStore.label(
+                                paymentMethod: transaction.paymentMethod,
+                                accountId: linkedAccount?.accountId,
+                                fallback: transaction.paymentMethod
+                            ),
+                            institutionId: linkedAccount?.institutionId,
+                            institutionName: linkedAccount?.institutionName
+                        )
+                        Text(
+                            CardLabelStore.label(
+                                paymentMethod: transaction.paymentMethod,
+                                accountId: linkedAccount?.accountId,
+                                fallback: transaction.paymentMethod
+                            )
+                        )
+                        .multilineTextAlignment(.trailing)
                     }
                 }
                 LabeledContent("ID") {

@@ -91,6 +91,7 @@ struct ContentView: View {
 struct AllTransactionsView: View {
     @Query private var transactions: [Transaction]
     @Query private var incomeRows: [Income]
+    @Query private var bankAccounts: [BankAccount]
     @Environment(\.modelContext) private var modelContext
 
     @State private var isImporting = false
@@ -261,9 +262,22 @@ struct AllTransactionsView: View {
                     } else {
                         ForEach(visibleIncome) { row in
                             NavigationLink {
-                                IncomeDetailView(income: row)
+                                IncomeDetailView(income: row, bankAccounts: bankAccounts)
                             } label: {
-                                IncomeRowView(income: row)
+                                let matched = bankAccounts.first { account in
+                                    if let mask = row.accountMask, let am = account.mask, mask == am {
+                                        return true
+                                    }
+                                    if let name = row.accountName, account.matchesPaymentMethod(name) {
+                                        return true
+                                    }
+                                    return false
+                                }
+                                IncomeRowView(
+                                    income: row,
+                                    institutionId: matched?.institutionId,
+                                    institutionName: matched?.institutionName ?? row.sourceInstitution
+                                )
                             }
                         }
                     }
@@ -279,7 +293,15 @@ struct AllTransactionsView: View {
                             NavigationLink {
                                 TransactionDetailView(transaction: transaction)
                             } label: {
-                                TransactionRowView(transaction: transaction)
+                                let matched = BankAccount.matching(
+                                    paymentMethod: transaction.paymentMethod,
+                                    in: bankAccounts
+                                )
+                                TransactionRowView(
+                                    transaction: transaction,
+                                    institutionId: matched?.institutionId,
+                                    institutionName: matched?.institutionName
+                                )
                             }
                         }
                     }
@@ -664,14 +686,27 @@ struct AllTransactionsView: View {
 
 struct IncomeRowView: View {
     let income: Income
+    var institutionId: String? = nil
+    var institutionName: String? = nil
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: CategoryStyle.symbolName(for: income.category))
-                .font(.title3)
-                .foregroundStyle(.green)
-                .frame(width: 28, alignment: .center)
-                .accessibilityLabel(income.category)
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: CategoryStyle.symbolName(for: income.category))
+                    .font(.title3)
+                    .foregroundStyle(.green)
+                    .frame(width: 28, alignment: .center)
+                    .accessibilityLabel(income.category)
+                if institutionId != nil || institutionName != nil || !income.iconKey.isEmpty {
+                    BankIconView(
+                        paymentMethod: income.iconKey,
+                        size: 14,
+                        institutionId: institutionId,
+                        institutionName: institutionName ?? income.sourceInstitution
+                    )
+                    .offset(x: 4, y: 4)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 // Display: source (employer / payer)
@@ -700,6 +735,15 @@ struct IncomeRowView: View {
 
 struct IncomeDetailView: View {
     let income: Income
+    var bankAccounts: [BankAccount] = []
+
+    private var linkedAccount: BankAccount? {
+        bankAccounts.first { account in
+            if let mask = income.accountMask, let am = account.mask, mask == am { return true }
+            if let name = income.accountName, account.matchesPaymentMethod(name) { return true }
+            return false
+        }
+    }
 
     var body: some View {
         Form {
@@ -731,7 +775,12 @@ struct IncomeDetailView: View {
                 if let accountName = income.accountName, !accountName.isEmpty {
                     LabeledContent("Account") {
                         HStack(spacing: 8) {
-                            BankIconView(paymentMethod: income.iconKey, size: 24)
+                            BankIconView(
+                                paymentMethod: income.iconKey,
+                                size: 24,
+                                institutionId: linkedAccount?.institutionId,
+                                institutionName: linkedAccount?.institutionName ?? income.sourceInstitution
+                            )
                             VStack(alignment: .trailing, spacing: 2) {
                                 Text(accountName)
                                 if let mask = income.accountMask, !mask.isEmpty {
@@ -746,7 +795,12 @@ struct IncomeDetailView: View {
                 } else if let institution = income.sourceInstitution, !institution.isEmpty {
                     LabeledContent("Institution") {
                         HStack(spacing: 8) {
-                            BankIconView(paymentMethod: institution, size: 24)
+                            BankIconView(
+                                paymentMethod: institution,
+                                size: 24,
+                                institutionId: linkedAccount?.institutionId,
+                                institutionName: linkedAccount?.institutionName ?? institution
+                            )
                             Text(institution)
                         }
                     }

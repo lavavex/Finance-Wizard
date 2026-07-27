@@ -63,10 +63,11 @@ Single hub for payment methods and credit tracking:
 |---------|---------|
 | **Total Spend** | Purchases in the selected period (tap → category chart) |
 | **Credit balance / limit / utilization** | From Plaid balances on Sync |
+| **Min payments / next due** | From Plaid Liabilities on Sync (when the bank supports it) |
 | **Paid this period** | Card bill payments (excluded from Total Spend) |
-| **Cards list** | Primary: balance + limit; secondary: spend + paid; utilization bar |
-| **Payments list** | Bill payments for the period |
-| **Card detail** | Rename card, balance/limit, payments, purchases |
+| **Cards list** | Balance + limit; min/due; spend + paid; utilization; Plaid institution logo |
+| **Payments list** | Bill payments for the period (institution logos) |
+| **Card detail** | Rename; balance/limit/available; APR, due date, min payment, statement; payments; purchases |
 
 Open a card → **Card name** to nickname it (per account / last four). Save the bank label again to restore the default.
 
