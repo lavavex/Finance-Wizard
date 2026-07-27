@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 110;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -189,10 +189,10 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					2067E8173016766000D9E2D2 = {
-						CreatedOnToolsVersion = 26.0;
+						CreatedOnToolsVersion = 16.0;
 					};
 					20DF1AD430165D170007AB19 = {
-						CreatedOnToolsVersion = 26.0;
+						CreatedOnToolsVersion = 16.0;
 					};
 				};
 			};
@@ -570,5 +570,4 @@
 /* End XCConfigurationList section */
 	};
 	rootObject = 20DF1ACD30165D170007AB19 /* Project object */;
-	validationLevel = 1;
 }
