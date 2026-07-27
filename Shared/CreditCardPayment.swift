@@ -55,21 +55,76 @@ enum CreditAnalytics {
             for: period,
             referenceDate: referenceDate
         ) else {
-            return rows
+            return deduplicated(rows)
         }
-        return rows.filter { $0.date >= interval.start && $0.date < interval.end }
+        let filtered = rows.filter { $0.date >= interval.start && $0.date < interval.end }
+        return deduplicated(filtered)
     }
 
+    /// Sum after collapsing checking-side + credit-side duplicates of the same bill pay.
     static func totalPaid(in rows: [CreditCardPayment]) -> Double {
-        rows.reduce(0) { $0 + max(0, $1.amount) }
+        deduplicated(rows).reduce(0) { $0 + max(0, $1.amount) }
     }
 
     static func paidByCard(in rows: [CreditCardPayment]) -> [String: Double] {
         var map: [String: Double] = [:]
-        for row in rows {
+        for row in deduplicated(rows) {
             let key = row.cardName.isEmpty ? "Unknown card" : row.cardName
             map[key, default: 0] += max(0, row.amount)
         }
         return map
+    }
+
+    /// Banks post the same payment twice (ACH out of checking + “Payment Thank You” on the card).
+    /// Keep one row per day/amount/mask, preferring the side with `creditAccountId`.
+    static func deduplicated(_ rows: [CreditCardPayment]) -> [CreditCardPayment] {
+        let cal = Calendar.current
+        var best: [String: CreditCardPayment] = [:]
+
+        for row in rows {
+            let day = cal.startOfDay(for: row.date)
+            let dayKey = ISO8601DateFormatter().string(from: day)
+            let amountKey = String(format: "%.2f", max(0, row.amount))
+            let mask = extractMask(from: row.cardName)
+                ?? extractMask(from: row.title)
+                ?? extractMask(from: row.sourceAccount ?? "")
+                ?? "nomask"
+            let key = "\(dayKey)|\(amountKey)|\(mask.lowercased())"
+
+            if let existing = best[key] {
+                // Prefer linked credit account id; then more specific card name
+                let preferNew: Bool = {
+                    if existing.creditAccountId == nil, row.creditAccountId != nil { return true }
+                    if existing.creditAccountId != nil, row.creditAccountId == nil { return false }
+                    if existing.cardName.count < row.cardName.count { return true }
+                    return false
+                }()
+                if preferNew { best[key] = row }
+            } else {
+                best[key] = row
+            }
+        }
+
+        return best.values.sorted { $0.date > $1.date }
+    }
+
+    /// Last 4 digits from “···0820”, “ending in 0820”, etc.
+    static func extractMask(from text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        // ···1234 or ...1234
+        if let r = text.range(of: #"[\·\.]{2,4}(\d{4})"#, options: .regularExpression) {
+            let s = String(text[r])
+            return String(s.suffix(4))
+        }
+        if let r = text.range(of: #"ending in\s*(\d{4})"#, options: [.regularExpression, .caseInsensitive]) {
+            let s = String(text[r])
+            return String(s.suffix(4))
+        }
+        if let r = text.range(of: #"\b(\d{4})\b"#, options: .regularExpression) {
+            // only if string is short / card-like
+            let digits = String(text[r])
+            if text.count <= 40 { return digits }
+        }
+        return nil
     }
 }

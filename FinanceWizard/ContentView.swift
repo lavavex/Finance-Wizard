@@ -95,7 +95,10 @@ struct AllTransactionsView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var isImporting = false
+    @State private var importContentTypes: [UTType] = [.json]
+    @State private var importMode: ImportMode = .json
     @State private var importError: String?
+    @State private var importStatusMessage: String?
     @State private var isSyncing = false
 
     // Live + final Sync Status panel
@@ -172,6 +175,14 @@ struct AllTransactionsView: View {
         NavigationStack {
             List {
                 // Live / last Sync Status (Plaid + downloads)
+                if let importStatusMessage {
+                    Section("Import") {
+                        Text(importStatusMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 if showSyncStatus || isSyncing {
                     Section("Sync Status") {
                         HStack(alignment: .top, spacing: 12) {
@@ -385,14 +396,29 @@ struct AllTransactionsView: View {
                         Image(systemName: "eye.slash")
                     }
 
-                    Button("Import") {
-                        isImporting = true
+                    Menu {
+                        Button {
+                            importMode = .json
+                            importContentTypes = [.json]
+                            isImporting = true
+                        } label: {
+                            Label("JSON export…", systemImage: "doc.text")
+                        }
+                        Button {
+                            importMode = .appleCardCSV
+                            importContentTypes = [.commaSeparatedText, .plainText, UTType(filenameExtension: "csv")].compactMap { $0 }
+                            isImporting = true
+                        } label: {
+                            Label("Apple Card CSV…", systemImage: "apple.logo")
+                        }
+                    } label: {
+                        Text("Import")
                     }
                 }
             }
             .fileImporter(
                 isPresented: $isImporting,
-                allowedContentTypes: [.json],
+                allowedContentTypes: importContentTypes,
                 allowsMultipleSelection: false
             ) { result in
                 handleImport(result)
@@ -445,6 +471,11 @@ struct AllTransactionsView: View {
 
     // MARK: - Import / sync
 
+    private enum ImportMode {
+        case json
+        case appleCardCSV
+    }
+
     private func handleImport(_ result: Result<[URL], Error>) {
         switch result {
         case .failure(let error):
@@ -457,7 +488,22 @@ struct AllTransactionsView: View {
             }
             do {
                 let data = try Data(contentsOf: url)
-                try upsertTransactions(from: data)
+                let name = url.lastPathComponent.lowercased()
+                let mode = importMode
+                // Auto-detect by extension when the picker is ambiguous
+                if mode == .appleCardCSV || name.hasSuffix(".csv") {
+                    let report = try AppleCardCSVImporter.importCSV(
+                        data: data,
+                        modelContext: modelContext
+                    )
+                    WidgetCenter.shared.reloadAllTimelines()
+                    importStatusMessage = report.summary
+                    importError = nil
+                } else {
+                    let count = try upsertTransactions(from: data)
+                    importStatusMessage = "Imported \(count) transaction(s) from JSON."
+                    importError = nil
+                }
             } catch {
                 importError = error.localizedDescription
             }

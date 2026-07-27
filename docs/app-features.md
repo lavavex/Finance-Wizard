@@ -31,7 +31,7 @@ Main list of expenses with filters shared conceptually with the widget.
 | Calendar | Period: This week / This month / All time |
 | Sort | Date, amount, name |
 | Eye slash | Hide cards from the **list only** |
-| **Import** | Pick optional JSON export from Files |
+| **Import** | Menu: legacy JSON export, or **Apple Card CSV** from Wallet / card.apple.com |
 
 ### Rows
 
@@ -107,7 +107,7 @@ Maps **category** → SF Symbol in `Shared/CategorySymbol.swift`.
 
 ## What the app does *not* do (yet)
 
-- Apple Card direct API / CSV import  
+- Apple Card live API (CSV import is supported)  
 - Budget limits / overspend alerts  
 - Multi-device cloud sync (data is local + re-Sync from Plaid)  
 - Hosted backend for Plaid secrets (BYO keys on device)  

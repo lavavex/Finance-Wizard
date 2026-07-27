@@ -113,6 +113,7 @@ enum DebugDataExporter {
         var linkedItems: [LinkedItemDTO]
         var cardLabels: [String: String]
         var vendorRules: [VendorRule]
+        var logoCache: [String: Bool]
         var notes: [String]
     }
 
@@ -260,6 +261,18 @@ enum DebugDataExporter {
         if !unlockedRails.isEmpty {
             notes.append("\(unlockedRails.count) transaction(s) have no stored paymentRail (will use inference).")
         }
+        let noLiabilities = accounts.filter(\.isCredit).filter { $0.liabilitiesSyncedAt == nil }
+        if !noLiabilities.isEmpty {
+            notes.append("\(noLiabilities.count) credit account(s) have no Liabilities fields (APR/due date). Re-link or enable Liabilities.")
+        }
+        let missingInstId = accounts.filter { ($0.institutionId ?? "").isEmpty }
+        if !missingInstId.isEmpty {
+            notes.append("\(missingInstId.count) account(s) missing institutionId (logos won’t resolve by id).")
+        }
+        let logoStatus = InstitutionLogoCache.debugLogoStatus()
+        if logoStatus.isEmpty {
+            notes.append("No institution logos cached on disk — Sync to refresh branding.")
+        }
 
         let accountDTOs = accounts
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -390,6 +403,7 @@ enum DebugDataExporter {
             linkedItems: linkedDTOs,
             cardLabels: labels,
             vendorRules: rules,
+            logoCache: InstitutionLogoCache.debugLogoStatus(),
             notes: notes
         )
     }

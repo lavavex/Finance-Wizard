@@ -58,12 +58,27 @@ enum VendorRulesStore {
     /// Prefer card-scoped rule, then any-card rule.
     static func match(vendor: String, paymentMethod: String) -> VendorRule? {
         let vKey = normalize(vendor)
+        // Never apply learn-rules to ACH bill-pay codes (e.g. EPAY → Chase card)
+        if isBillPayVendorKey(vKey) { return nil }
         let pKey = normalize(paymentMethod)
         let rules = load()
         if let exact = rules.first(where: { $0.vendorKey == vKey && $0.paymentMethodKey == pKey }) {
             return exact
         }
         return rules.first(where: { $0.vendorKey == vKey && $0.paymentMethodKey.isEmpty })
+    }
+
+    /// Drop learn rules that reclassified bill pays as spend (e.g. epay → Shopping).
+    static func removeBillPayMisrules() {
+        let cleaned = load().filter { !isBillPayVendorKey($0.vendorKey) }
+        save(cleaned)
+    }
+
+    private static func isBillPayVendorKey(_ key: String) -> Bool {
+        let k = key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return k == "epay" || k == "e-pay" || k == "epmt"
+            || k.hasPrefix("payment thank you")
+            || k.hasPrefix("mobile payment")
     }
 
     private static func normalize(_ s: String) -> String {

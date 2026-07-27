@@ -101,9 +101,26 @@ Editing a transaction **Save**s on device only:
 - Sets `categoryLocked` / `multiplierLocked` so later syncs do not overwrite.  
 - Optional **learn** stores a vendor rule (`VendorRulesStore`) applied on future Plaid upserts.
 
-## JSON file import
+## File import
 
-Toolbar **Import** still accepts a legacy export with a `transactions` array (finance-sync-shaped JSON) for offline backfill.
+Toolbar **Import** menu:
+
+| Option | Format |
+|--------|--------|
+| **JSON export** | Legacy finance-sync shape (`transactions[]`) |
+| **Apple Card CSV** | Wallet / [card.apple.com](https://card.apple.com) CSV export |
+
+### Apple Card CSV
+
+Expected columns (header names are flexible): **Transaction Date**, **Description** / **Merchant**, **Amount (USD)**, optional **Category**, **Type** (`Purchase` / `Payment` / `Credit`).
+
+| Type | Result |
+|------|--------|
+| Purchase | Expense on payment method **Apple Card** |
+| Payment | **Credit Card Payment** (list + Total paid; not spend) |
+| Credit / refund | **Income** category Refund |
+
+Re-import updates the same rows via stable `applecard:…` ids.
 
 ## Security notes
 
