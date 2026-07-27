@@ -2,27 +2,32 @@
 //  PlaidLinkView.swift
 //  Finance Wizard
 //
-//  Official Plaid Link *webview* flow (isWebview=true + plaidlink:// redirects).
-//  Supports OAuth “Continue to Login” by keeping bank auth in-app and re-initializing
-//  Link after the redirect_uri returns.
+//  Plaid Hosted Link in ASWebAuthenticationSession (webview Link is deprecated).
+//  See https://plaid.com/docs/link/hosted-link/
 //
 
 import SwiftUI
-import WebKit
+import AuthenticationServices
 
-/// Full-screen sheet: create link_token → open Link → exchange → save Item.
+/// Custom URL scheme for Hosted Link completion (not a Universal Link; not in Plaid Dashboard).
+enum PlaidHostedLink {
+    static let callbackScheme = "financewizard"
+    static let completionRedirectURI = "financewizard://hosted-link-complete"
+}
+
+/// Sheet: create Hosted Link token → open secure browser session → poll for public_token → save Item.
 struct PlaidLinkSheet: View {
     var onFinished: (Result<PlaidLinkedItem, Error>) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var phase: Phase = .loading
-    @State private var linkToken: String?
+    @State private var phase: Phase = .starting
     @State private var errorMessage: String?
+    @State private var sessionController: HostedLinkSessionController?
 
     private enum Phase {
-        case loading
-        case ready
-        case exchanging
+        case starting
+        case waitingForUser
+        case finishing
         case failed
     }
 
@@ -30,27 +35,22 @@ struct PlaidLinkSheet: View {
         NavigationStack {
             Group {
                 switch phase {
-                case .loading:
+                case .starting:
                     ProgressView("Preparing Plaid Link…")
-                case .ready:
-                    if let linkToken {
-                        PlaidLinkWebView(
-                            linkToken: linkToken,
-                            redirectURI: PlaidCredentialsStore.redirectURI,
-                            onSuccess: { publicToken, metadata in
-                                Task { await handleSuccess(publicToken: publicToken, metadata: metadata) }
-                            },
-                            onExit: { message in
-                                if let message, !message.isEmpty {
-                                    errorMessage = message
-                                    phase = .failed
-                                } else {
-                                    dismiss()
-                                }
-                            }
-                        )
+                case .waitingForUser:
+                    VStack(spacing: 16) {
+                        ProgressView()
+                        Text("Complete bank login in the browser window.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Text("If nothing appeared, check that pop-ups aren’t blocked, then try again.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
                     }
-                case .exchanging:
+                    .padding()
+                case .finishing:
                     ProgressView("Saving linked bank…")
                 case .failed:
                     ContentUnavailableView(
@@ -60,54 +60,67 @@ struct PlaidLinkSheet: View {
                     )
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle("Link bank")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button("Close") {
+                        sessionController?.cancel()
+                        dismiss()
+                    }
                 }
             }
             .task {
-                await prepareLink()
+                await startHostedLink()
             }
         }
     }
 
-    private func prepareLink() async {
-        phase = .loading
+    private func startHostedLink() async {
+        phase = .starting
         do {
-            let token = try await PlaidAPIClient.createLinkToken()
-            linkToken = token
-            phase = .ready
+            let session = try await PlaidAPIClient.createHostedLinkSession()
+            phase = .waitingForUser
+
+            let controller = HostedLinkSessionController()
+            sessionController = controller
+
+            let callbackURL = try await controller.start(
+                url: session.hostedLinkURL,
+                callbackScheme: PlaidHostedLink.callbackScheme
+            )
+
+            // User cancelled the system browser sheet
+            if callbackURL == nil {
+                dismiss()
+                return
+            }
+
+            phase = .finishing
+            let success = try await PlaidAPIClient.waitForLinkSuccess(linkToken: session.linkToken)
+            await completeWithSuccess(success)
         } catch {
+            // ASWebAuthenticationSession cancel is reported as error
+            if let authError = error as? ASWebAuthenticationSessionError,
+               authError.code == .canceledLogin {
+                dismiss()
+                return
+            }
             errorMessage = error.localizedDescription
             phase = .failed
+            onFinished(.failure(error))
         }
     }
 
-    private func handleSuccess(publicToken: String, metadata: [String: Any]) async {
-        phase = .exchanging
+    private func completeWithSuccess(_ success: PlaidAPIClient.LinkSuccessPayload) async {
         do {
-            let exchanged = try await PlaidAPIClient.exchangePublicToken(publicToken)
-            let institution = (metadata["institution_name"] as? String)
-                ?? (metadata["institution"] as? [String: Any])?["name"] as? String
-                ?? "Linked bank"
-
-            // Webview “connected” may pass accounts as a JSON string
-            var accountNames: [String] = []
-            if let accounts = metadata["accounts"] as? [[String: Any]] {
-                accountNames = accounts.compactMap { Self.accountLabel(from: $0) }
-            } else if let accountsJSON = metadata["accounts"] as? String,
-                      let data = accountsJSON.data(using: .utf8),
-                      let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                accountNames = parsed.compactMap { Self.accountLabel(from: $0) }
-            }
-
+            let exchanged = try await PlaidAPIClient.exchangePublicToken(success.publicToken)
             let item = PlaidLinkedItem(
                 id: exchanged.itemID,
                 accessToken: exchanged.accessToken,
-                institutionName: institution,
-                accountNames: accountNames,
+                institutionName: success.institutionName ?? "Linked bank",
+                accountNames: success.accountNames,
                 transactionsCursor: "",
                 linkedAt: Date()
             )
@@ -120,224 +133,76 @@ struct PlaidLinkSheet: View {
             onFinished(.failure(error))
         }
     }
-
-    private static func accountLabel(from acc: [String: Any]) -> String? {
-        // Webview schema: meta.name / meta.number  OR name / mask
-        let name = (acc["meta"] as? [String: Any])?["name"] as? String
-            ?? acc["name"] as? String
-        let mask = (acc["meta"] as? [String: Any])?["number"] as? String
-            ?? acc["mask"] as? String
-        if let name, let mask, !mask.isEmpty {
-            return "\(name) ···\(mask)"
-        }
-        return name
-    }
 }
 
-// MARK: - Official Link webview
+// MARK: - ASWebAuthenticationSession bridge
 
-/// Loads `cdn.plaid.com/link/v2/stable/link.html?isWebview=true&token=…`
-/// and intercepts `plaidlink://` + OAuth redirect_uri navigations.
-private struct PlaidLinkWebView: UIViewRepresentable {
-    let linkToken: String
-    let redirectURI: String
-    var onSuccess: (_ publicToken: String, _ metadata: [String: Any]) -> Void
-    var onExit: (_ message: String?) -> Void
+@MainActor
+final class HostedLinkSessionController: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private var session: ASWebAuthenticationSession?
+    private var continuation: CheckedContinuation<URL?, Error>?
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(
-            linkToken: linkToken,
-            redirectURI: redirectURI,
-            onSuccess: onSuccess,
-            onExit: onExit
-        )
-    }
+    /// Starts Hosted Link. Returns the callback URL, or `nil` if the user cancelled without error.
+    func start(url: URL, callbackScheme: String) async throws -> URL? {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URL?, Error>) in
+            self.continuation = cont
 
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        // Share cookies / session across OAuth hops in the same process
-        config.websiteDataStore = .default()
+            let session = ASWebAuthenticationSession(
+                url: url,
+                callbackURLScheme: callbackScheme
+            ) { [weak self] callbackURL, error in
+                guard let self else { return }
+                let cont = self.continuation
+                self.continuation = nil
+                self.session = nil
 
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = false
-        webView.scrollView.bounces = false
-        // Safari-like UA avoids some banks rejecting embedded “unsupported browser”
-        webView.customUserAgent = Self.mobileSafariUserAgent
-
-        context.coordinator.webView = webView
-        webView.load(URLRequest(url: context.coordinator.initializationURL()))
-        return webView
-    }
-
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
-
-    private static var mobileSafariUserAgent: String {
-        // Realistic iOS Safari UA; empty/custom UAs cause OAuth “unsupported browser” on some banks
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
-    }
-
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        let linkToken: String
-        let redirectURI: String
-        var onSuccess: (String, [String: Any]) -> Void
-        var onExit: (String?) -> Void
-        weak var webView: WKWebView?
-        private var didFinish = false
-
-        init(
-            linkToken: String,
-            redirectURI: String,
-            onSuccess: @escaping (String, [String: Any]) -> Void,
-            onExit: @escaping (String?) -> Void
-        ) {
-            self.linkToken = linkToken
-            self.redirectURI = redirectURI
-            self.onSuccess = onSuccess
-            self.onExit = onExit
-        }
-
-        func initializationURL(receivedRedirectURI: String? = nil) -> URL {
-            var components = URLComponents()
-            components.scheme = "https"
-            components.host = "cdn.plaid.com"
-            components.path = "/link/v2/stable/link.html"
-            var items: [URLQueryItem] = [
-                URLQueryItem(name: "isWebview", value: "true"),
-                URLQueryItem(name: "isMobile", value: "true"),
-                URLQueryItem(name: "token", value: linkToken)
-            ]
-            if let receivedRedirectURI {
-                // Must be the full URL including oauth_state_id (Plaid docs)
-                items.append(URLQueryItem(name: "receivedRedirectUri", value: receivedRedirectURI))
-            }
-            components.queryItems = items
-            return components.url!
-        }
-
-        // MARK: WKUIDelegate — bank OAuth often uses window.open / target=_blank
-
-        func webView(
-            _ webView: WKWebView,
-            createWebViewWith configuration: WKWebViewConfiguration,
-            for navigationAction: WKNavigationAction,
-            windowFeatures: WKWindowFeatures
-        ) -> WKWebView? {
-            // Keep OAuth inside this webview so “Continue to Login” actually navigates
-            // (returning nil without loading drops the click entirely).
-            if let url = navigationAction.request.url {
-                webView.load(URLRequest(url: url))
-            }
-            return nil
-        }
-
-        // MARK: WKNavigationDelegate
-
-        func webView(
-            _ webView: WKWebView,
-            decidePolicyFor navigationAction: WKNavigationAction,
-            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
-        ) {
-            guard let url = navigationAction.request.url else {
-                decisionHandler(.allow)
-                return
-            }
-
-            // 1) Link → app callbacks (plaidlink://connected|exit|event)
-            if url.scheme?.lowercased() == "plaidlink" {
-                handlePlaidLinkURL(url)
-                decisionHandler(.cancel)
-                return
-            }
-
-            // 2) OAuth return to our redirect_uri → re-init Link with receivedRedirectUri
-            if matchesRedirectURI(url) {
-                let reinit = initializationURL(receivedRedirectURI: url.absoluteString)
-                webView.load(URLRequest(url: reinit))
-                decisionHandler(.cancel)
-                return
-            }
-
-            // 3) Explicit link taps for http(s) that leave the bank flow (e.g. “forgot password”)
-            //    keep in-webview; only open Safari for non-http schemes we don't handle
-            let scheme = url.scheme?.lowercased() ?? ""
-            if scheme == "http" || scheme == "https" {
-                decisionHandler(.allow)
-                return
-            }
-
-            // Bank app deep links / tel / mailto — hand to the system
-            if UIApplication.shared.canOpenURL(url) {
-                UIApplication.shared.open(url)
-                decisionHandler(.cancel)
-                return
-            }
-
-            decisionHandler(.allow)
-        }
-
-        private func matchesRedirectURI(_ url: URL) -> Bool {
-            guard let redirect = URL(string: redirectURI) else { return false }
-            // Compare scheme + host + path (ignore query — oauth_state_id is appended)
-            let urlPath = url.path.hasSuffix("/") ? String(url.path.dropLast()) : url.path
-            let redirectPath = redirect.path.hasSuffix("/") ? String(redirect.path.dropLast()) : redirect.path
-            let pathMatches = (urlPath == redirectPath)
-                || (urlPath.isEmpty && redirectPath.isEmpty)
-                || (urlPath == "/" && redirectPath.isEmpty)
-                || (urlPath.isEmpty && redirectPath == "/")
-            return url.scheme?.lowercased() == redirect.scheme?.lowercased()
-                && url.host?.lowercased() == redirect.host?.lowercased()
-                && pathMatches
-        }
-
-        private func handlePlaidLinkURL(_ url: URL) {
-            if didFinish { return }
-            let action = (url.host ?? "").lowercased()
-            let params = queryParams(url)
-
-            switch action {
-            case "connected":
-                didFinish = true
-                guard let publicToken = params["public_token"], !publicToken.isEmpty else {
-                    onExit("Link succeeded but no public_token was returned.")
+                if let error {
+                    // Map cancel to nil URL for cleaner UI
+                    if let auth = error as? ASWebAuthenticationSessionError,
+                       auth.code == .canceledLogin {
+                        cont?.resume(returning: nil)
+                    } else {
+                        cont?.resume(throwing: error)
+                    }
                     return
                 }
-                // Flatten query params as metadata (institution_name, accounts, …)
-                var metadata: [String: Any] = params
-                onSuccess(publicToken, metadata)
+                cont?.resume(returning: callbackURL)
+            }
 
-            case "exit":
-                didFinish = true
-                let message = params["error_display_message"]
-                    ?? params["error_message"]
-                    ?? params["display_message"]
-                // User cancelled without an error → silent dismiss
-                if message == nil || message?.isEmpty == true {
-                    onExit(nil)
-                } else {
-                    onExit(message)
-                }
+            session.presentationContextProvider = self
+            session.prefersEphemeralWebBrowserSession = false
+            self.session = session
 
-            case "event":
-                // Optional: could surface OPEN_OAUTH etc. for debugging
-                break
-
-            default:
-                break
+            if !session.start() {
+                self.continuation = nil
+                cont.resume(
+                    throwing: PlaidAPIError.http(
+                        status: 0,
+                        code: nil,
+                        message: "Could not start the secure browser session for Plaid Link."
+                    )
+                )
             }
         }
+    }
 
-        private func queryParams(_ url: URL) -> [String: String] {
-            guard let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else {
-                return [:]
-            }
-            var dict: [String: String] = [:]
-            for item in items {
-                dict[item.name] = item.value ?? ""
-            }
-            return dict
+    func cancel() {
+        session?.cancel()
+        if let cont = continuation {
+            continuation = nil
+            cont.resume(returning: nil)
         }
+    }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        // Prefer the key window of the active scene
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        if let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) {
+            return window
+        }
+        if let window = scenes.flatMap(\.windows).first {
+            return window
+        }
+        return ASPresentationAnchor()
     }
 }

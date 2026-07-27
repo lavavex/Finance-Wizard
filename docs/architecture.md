@@ -38,7 +38,8 @@ SwiftData `@Model` types and `ModelConfiguration(groupContainer:)` must match **
 User saves Plaid client_id + secret (Keychain)
     │
     ▼
-Link bank → /link/token/create → Plaid Link → /item/public_token/exchange
+Link bank → /link/token/create (hosted_link) → ASWebAuthenticationSession
+    → /link/token/get → /item/public_token/exchange
     │
     ▼
 access_token stored on device (per Item)

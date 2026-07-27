@@ -36,20 +36,23 @@ Reload widget timelines
 
 Same as above, but **clears cursors** first so Plaid re-sends the full transaction stream for each Item (use after schema resets or missing history).
 
-### Link bank account
+### Link bank account (Hosted Link)
+
+In-app WKWebView Link is **deprecated**. Finance Wizard uses [Hosted Link](https://plaid.com/docs/link/hosted-link/) in an `ASWebAuthenticationSession`:
 
 ```text
-1. POST /link/token/create   (client_id + secret + redirect_uri)
-2. Load official webview URL:
-     https://cdn.plaid.com/link/v2/stable/link.html?isWebview=true&token=…
-3. OAuth “Continue to Login” navigates in-webview; bank returns to redirect_uri
-   → re-open Link with receivedRedirectUri
-4. Intercept plaidlink://connected → public_token
-5. POST /item/public_token/exchange
-6. Store access_token (Keychain) + item metadata (UserDefaults)
+1. POST /link/token/create with hosted_link:
+     is_mobile_app: true
+     completion_redirect_uri: financewizard://hosted-link-complete
+2. Open response.hosted_link_url in ASWebAuthenticationSession
+3. User completes Link (including bank OAuth) in the secure browser
+4. Browser redirects to financewizard://hosted-link-complete → session closes
+5. POST /link/token/get  → public_token
+6. POST /item/public_token/exchange
+7. Store access_token (Keychain) + item metadata
 ```
 
-**Redirect URI:** default `http://localhost/plaid-oauth` (Sandbox). Must be listed under Dashboard → Developers → API → Allowed redirect URIs.
+No Dashboard allowlist is required for `completion_redirect_uri` (custom scheme). Optional `redirect_uri` (https Universal Link) is only for Production app-to-app OAuth.
 
 ## Plaid endpoints used
 

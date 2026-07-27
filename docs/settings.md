@@ -12,8 +12,10 @@ title: Settings
 | **client_id** | From [Plaid Dashboard → Keys](https://dashboard.plaid.com/developers/keys) |
 | **secret** | Environment-specific secret (stored in **Keychain**) |
 | **Environment** | Sandbox / Development / Production |
-| **OAuth redirect URI** | Must match an allowlisted URI (default Sandbox: `http://localhost/plaid-oauth`) |
+| **Optional OAuth redirect** | https Universal Link for Production app-to-app (optional; leave blank in Sandbox) |
 | **Save credentials** | Writes client_id + env + redirect to `UserDefaults`, secret to Keychain |
+
+Link completion uses the custom scheme `financewizard://hosted-link-complete` (Hosted Link). That URI is **not** registered in the Plaid Dashboard.
 
 ## Linked banks
 

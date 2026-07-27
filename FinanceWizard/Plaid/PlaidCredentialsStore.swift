@@ -14,9 +14,9 @@ enum PlaidCredentialsStore {
     private static let redirectURIKey = "plaid.redirectURI"
     private static let secretAccount = "plaid.secret"
 
-    /// Default OAuth return URL. Sandbox allows `http://localhost…`.
-    /// Add the same URI under Plaid Dashboard → Developers → API → Allowed redirect URIs.
-    static let defaultRedirectURI = "http://localhost/plaid-oauth"
+    /// Optional Universal Link / https OAuth redirect for app-to-app bank auth.
+    /// Leave empty for Sandbox Hosted Link; set an allowlisted https URI in Production if needed.
+    static let defaultRedirectURI = ""
 
     static var clientID: String {
         get {

@@ -38,11 +38,17 @@ enum PlaidAPIError: LocalizedError {
 enum PlaidAPIClient {
     // MARK: - Public API
 
-    /// Create a short-lived link_token for Plaid Link (mobile webview + OAuth).
-    static func createLinkToken(
+    /// Hosted Link session for native mobile (`ASWebAuthenticationSession`).
+    struct HostedLinkSession: Sendable {
+        let linkToken: String
+        let hostedLinkURL: URL
+    }
+
+    /// Create link_token + Hosted Link URL (webview Link is deprecated).
+    static func createHostedLinkSession(
         clientName: String = "Finance Wizard",
         userID: String = "finance-wizard-user"
-    ) async throws -> String {
+    ) async throws -> HostedLinkSession {
         try PlaidCredentialsStore.requireConfigured()
 
         struct Body: Encodable {
@@ -53,9 +59,10 @@ enum PlaidAPIClient {
             let country_codes: [String]
             let user: User
             let products: [String]
-            let transactions: TransactionsOpts?
-            /// Required for OAuth banks (“Continue to Login”) in mobile webviews
-            let redirect_uri: String
+            let transactions: TransactionsOpts
+            /// Optional OAuth app-to-app return (https Universal Link preferred in Production).
+            let redirect_uri: String?
+            let hosted_link: HostedLink
 
             struct User: Encodable {
                 let client_user_id: String
@@ -64,7 +71,43 @@ enum PlaidAPIClient {
             struct TransactionsOpts: Encodable {
                 let days_requested: Int
             }
+
+            struct HostedLink: Encodable {
+                let is_mobile_app: Bool
+                let completion_redirect_uri: String
+                let url_lifetime_seconds: Int
+            }
+
+            enum CodingKeys: String, CodingKey {
+                case client_id, secret, client_name, language, country_codes
+                case user, products, transactions, redirect_uri, hosted_link
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(client_id, forKey: .client_id)
+                try c.encode(secret, forKey: .secret)
+                try c.encode(client_name, forKey: .client_name)
+                try c.encode(language, forKey: .language)
+                try c.encode(country_codes, forKey: .country_codes)
+                try c.encode(user, forKey: .user)
+                try c.encode(products, forKey: .products)
+                try c.encode(transactions, forKey: .transactions)
+                try c.encodeIfPresent(redirect_uri, forKey: .redirect_uri)
+                try c.encode(hosted_link, forKey: .hosted_link)
+            }
         }
+
+        // Only send redirect_uri when it is a real http(s) URI allowlisted in the Dashboard.
+        // Custom schemes belong in completion_redirect_uri, not redirect_uri.
+        let redirect = PlaidCredentialsStore.redirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
+        let oauthRedirect: String? = {
+            guard !redirect.isEmpty else { return nil }
+            if redirect.hasPrefix("http://") || redirect.hasPrefix("https://") {
+                return redirect
+            }
+            return nil
+        }()
 
         let body = Body(
             client_id: PlaidCredentialsStore.clientID,
@@ -74,18 +117,160 @@ enum PlaidAPIClient {
             country_codes: ["US"],
             user: .init(client_user_id: userID),
             products: ["transactions"],
-            // Up to ~2 years when product is initialized at Link
             transactions: .init(days_requested: 730),
-            redirect_uri: PlaidCredentialsStore.redirectURI
+            redirect_uri: oauthRedirect,
+            hosted_link: .init(
+                is_mobile_app: true,
+                completion_redirect_uri: PlaidHostedLink.completionRedirectURI,
+                url_lifetime_seconds: 1800
+            )
         )
 
         struct Response: Decodable {
             let link_token: String
+            let hosted_link_url: String?
             let expiration: String?
         }
 
         let response: Response = try await post(path: "/link/token/create", body: body)
-        return response.link_token
+        guard let urlString = response.hosted_link_url,
+              let url = URL(string: urlString) else {
+            throw PlaidAPIError.http(
+                status: 0,
+                code: nil,
+                message: "Plaid did not return a hosted_link_url. Ensure Hosted Link is available for your account."
+            )
+        }
+        return HostedLinkSession(linkToken: response.link_token, hostedLinkURL: url)
+    }
+
+    struct LinkSuccessPayload: Sendable {
+        let publicToken: String
+        let institutionName: String?
+        let accountNames: [String]
+    }
+
+    /// Poll `/link/token/get` until a public_token is available (or timeout).
+    static func waitForLinkSuccess(
+        linkToken: String,
+        maxAttempts: Int = 24,
+        delayNanoseconds: UInt64 = 500_000_000
+    ) async throws -> LinkSuccessPayload {
+        try PlaidCredentialsStore.requireConfigured()
+
+        var lastError: Error?
+        for attempt in 0..<maxAttempts {
+            if attempt > 0 {
+                try await Task.sleep(nanoseconds: delayNanoseconds)
+            }
+            do {
+                if let payload = try await fetchLinkSuccess(linkToken: linkToken) {
+                    return payload
+                }
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+            ?? PlaidAPIError.http(
+                status: 0,
+                code: nil,
+                message: "Link closed without linking a bank (or the session timed out). Try Link again."
+            )
+    }
+
+    /// One shot `/link/token/get` → first successful Item add, if any.
+    static func fetchLinkSuccess(linkToken: String) async throws -> LinkSuccessPayload? {
+        struct Body: Encodable {
+            let client_id: String
+            let secret: String
+            let link_token: String
+        }
+
+        struct Response: Decodable {
+            let link_sessions: [LinkSession]?
+
+            struct LinkSession: Decodable {
+                let results: Results?
+                let on_success: OnSuccess?
+
+                struct Results: Decodable {
+                    let item_add_results: [ItemAdd]?
+                }
+
+                struct ItemAdd: Decodable {
+                    let public_token: String?
+                    let institution: Institution?
+                    let accounts: [Account]?
+                }
+
+                struct OnSuccess: Decodable {
+                    let public_token: String?
+                    let metadata: SuccessMetadata?
+                }
+
+                struct SuccessMetadata: Decodable {
+                    let institution: Institution?
+                    let accounts: [Account]?
+                }
+
+                struct Institution: Decodable {
+                    let name: String?
+                    let institution_id: String?
+                }
+
+                struct Account: Decodable {
+                    let name: String?
+                    let mask: String?
+                    let meta: Meta?
+
+                    struct Meta: Decodable {
+                        let name: String?
+                        let number: String?
+                    }
+                }
+            }
+        }
+
+        let response: Response = try await post(
+            path: "/link/token/get",
+            body: Body(
+                client_id: PlaidCredentialsStore.clientID,
+                secret: PlaidCredentialsStore.secret,
+                link_token: linkToken
+            )
+        )
+
+        func labels(from accounts: [Response.LinkSession.Account]?) -> [String] {
+            guard let accounts else { return [] }
+            return accounts.compactMap { acc in
+                let name = acc.name ?? acc.meta?.name
+                let mask = acc.mask ?? acc.meta?.number
+                guard let name else { return nil }
+                if let mask, !mask.isEmpty { return "\(name) ···\(mask)" }
+                return name
+            }
+        }
+
+        for session in response.link_sessions ?? [] {
+            if let add = session.results?.item_add_results?.first,
+               let token = add.public_token, !token.isEmpty {
+                return LinkSuccessPayload(
+                    publicToken: token,
+                    institutionName: add.institution?.name,
+                    accountNames: labels(from: add.accounts)
+                )
+            }
+            if let success = session.on_success,
+               let token = success.public_token, !token.isEmpty {
+                return LinkSuccessPayload(
+                    publicToken: token,
+                    institutionName: success.metadata?.institution?.name,
+                    accountNames: labels(from: success.metadata?.accounts)
+                )
+            }
+        }
+        return nil
     }
 
     /// Exchange Link’s public_token for a long-lived access_token + item_id.

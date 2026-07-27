@@ -56,7 +56,7 @@ struct SettingsView: View {
                         }
                     }
 
-                    TextField("OAuth redirect URI", text: $redirectURI)
+                    TextField("Optional OAuth redirect (https…)", text: $redirectURI)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
@@ -73,7 +73,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Plaid developer account")
                 } footer: {
-                    Text("Keys: dashboard.plaid.com → Developers → Keys. For OAuth banks (“Continue to Login”), add the same redirect URI under Developers → API → Allowed redirect URIs. Sandbox allows \(PlaidCredentialsStore.defaultRedirectURI). Secrets stay on this device (Keychain).")
+                    Text("Keys: dashboard.plaid.com → Developers → Keys. Link uses Plaid Hosted Link (secure browser). Optional https redirect is only for bank app-to-app OAuth and must be allowlisted in the Dashboard. Completion returns via \(PlaidHostedLink.completionRedirectURI) (no Dashboard entry needed). Secrets stay on this device (Keychain).")
                 }
 
                 // MARK: Linked banks
