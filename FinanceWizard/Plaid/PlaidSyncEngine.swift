@@ -301,11 +301,8 @@ enum PlaidSyncEngine {
             return
 
         case .creditPayment:
-            // Remove from spend/income if previously mis-filed
-            _ = deleteLocalExpenseOrIncomeOnly(
-                transactionID: tx.transaction_id,
-                modelContext: modelContext
-            )
+            // Not income; show as Transaction with special category (excluded from Total Spend)
+            deleteIncomeOnly(transactionID: tx.transaction_id, modelContext: modelContext)
             upsertCreditPayment(
                 tx: tx,
                 title: title,
@@ -315,11 +312,19 @@ enum PlaidSyncEngine {
                 institutionName: item.institutionName,
                 modelContext: modelContext
             )
+            upsertCreditPaymentExpense(
+                tx: tx,
+                title: title,
+                date: date,
+                paymentMethod: paymentMethod,
+                modelContext: modelContext
+            )
             report.creditPaymentsUpserted += 1
 
         case .spending:
-            // Don't keep a parallel income row if type flipped
+            // Don't keep a parallel income / payment row if type flipped
             deleteIncomeOnly(transactionID: tx.transaction_id, modelContext: modelContext)
+            deleteCreditPaymentOnly(transactionID: tx.transaction_id, modelContext: modelContext)
             upsertExpense(
                 tx: tx,
                 title: title,
@@ -332,6 +337,7 @@ enum PlaidSyncEngine {
 
         case .income:
             deleteExpenseOnly(transactionID: tx.transaction_id, modelContext: modelContext)
+            deleteCreditPaymentOnly(transactionID: tx.transaction_id, modelContext: modelContext)
             upsertIncome(
                 tx: tx,
                 title: title,
@@ -538,6 +544,70 @@ enum PlaidSyncEngine {
         }
     }
 
+    /// List-visible row for a bill payment; category is excluded from Total Spend.
+    @MainActor
+    private static func upsertCreditPaymentExpense(
+        tx: PlaidTransaction,
+        title: String,
+        date: Date,
+        paymentMethod: String,
+        modelContext: ModelContext
+    ) {
+        let targetId = tx.transaction_id
+        var descriptor = FetchDescriptor<Transaction>(
+            predicate: #Predicate<Transaction> { row in
+                row.transactionId == targetId
+            }
+        )
+        descriptor.fetchLimit = 1
+
+        let category = TransactionAnalytics.creditCardPaymentCategory
+        let amount = -abs(tx.amount)
+        let channel = tx.payment_channel
+        let rail = PaymentRail.infer(plaidChannel: channel, title: title)
+
+        if let existing = try? modelContext.fetch(descriptor).first {
+            existing.title = title
+            existing.amount = amount
+            existing.date = date
+            existing.paymentMethod = paymentMethod
+            existing.plaidPaymentChannel = channel
+            // Always keep bill payments in this category unless the user locked a different one
+            if !existing.isCategoryLocked
+                || TransactionAnalytics.isExcludedFromSpendCategory(existing.category) {
+                existing.category = category
+                existing.categoryLocked = true
+            }
+            if !existing.isMultiplierLocked {
+                existing.multiplier = 0
+            }
+            if !existing.isPaymentRailLocked {
+                existing.paymentRail = rail.rawValue
+            }
+            if existing.overrideSource == nil {
+                existing.overrideSource = "credit-payment"
+            }
+        } else {
+            modelContext.insert(
+                Transaction(
+                    transactionId: targetId,
+                    title: title,
+                    amount: amount,
+                    date: date,
+                    category: category,
+                    paymentMethod: paymentMethod,
+                    multiplier: 0,
+                    categoryLocked: true,
+                    multiplierLocked: true,
+                    overrideSource: "credit-payment",
+                    plaidPaymentChannel: channel,
+                    paymentRail: rail.rawValue,
+                    paymentRailLocked: false
+                )
+            )
+        }
+    }
+
     /// Best-effort card label from a payment description.
     private static func inferCardName(from title: String) -> String? {
         let lower = title.lowercased()
@@ -676,23 +746,68 @@ enum PlaidSyncEngine {
 
     // MARK: - Cleanup / delete helpers
 
-    /// Remove spend/income rows that look like transfers or card payments (legacy syncs).
+    /// Re-home mis-filed spend/income that look like transfers or card payments.
     @MainActor
     private static func cleanLegacyMisclassifiedRows(modelContext: ModelContext) -> Int {
-        var removed = 0
+        var fixed = 0
         if let expenses = try? modelContext.fetch(FetchDescriptor<Transaction>()) {
-            for row in expenses where PlaidCategoryMapper.looksLikeNonSpendTitle(row.title) {
-                modelContext.delete(row)
-                removed += 1
+            for row in expenses {
+                let lower = row.title.lowercased()
+                if PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower)
+                    || TransactionAnalytics.isExcludedFromSpendCategory(row.category) {
+                    // Promote to proper bill-payment category + CreditCardPayment row
+                    if !TransactionAnalytics.isExcludedFromSpendCategory(row.category) {
+                        row.category = TransactionAnalytics.creditCardPaymentCategory
+                        row.categoryLocked = true
+                        row.multiplier = 0
+                        row.multiplierLocked = true
+                        row.overrideSource = row.overrideSource ?? "legacy-credit-payment"
+                        fixed += 1
+                    }
+                    ensureCreditPaymentFromTransaction(row, modelContext: modelContext)
+                    continue
+                }
+                if PlaidCategoryMapper.looksLikeNonSpendTitle(row.title) {
+                    // Other transfers: drop from expense stream
+                    modelContext.delete(row)
+                    fixed += 1
+                }
             }
         }
         if let income = try? modelContext.fetch(FetchDescriptor<Income>()) {
             for row in income where PlaidCategoryMapper.looksLikeNonSpendTitle(row.source) {
                 modelContext.delete(row)
-                removed += 1
+                fixed += 1
             }
         }
-        return removed
+        return fixed
+    }
+
+    @MainActor
+    private static func ensureCreditPaymentFromTransaction(
+        _ row: Transaction,
+        modelContext: ModelContext
+    ) {
+        let targetId = row.transactionId
+        var descriptor = FetchDescriptor<CreditCardPayment>(
+            predicate: #Predicate<CreditCardPayment> { p in
+                p.transactionId == targetId
+            }
+        )
+        descriptor.fetchLimit = 1
+        if (try? modelContext.fetch(descriptor).first) != nil { return }
+        modelContext.insert(
+            CreditCardPayment(
+                transactionId: row.transactionId,
+                amount: abs(row.amount),
+                date: row.date,
+                cardName: row.paymentMethod,
+                sourceAccount: row.paymentMethod,
+                title: row.title,
+                creditAccountId: nil,
+                institutionName: nil
+            )
+        )
     }
 
     @MainActor

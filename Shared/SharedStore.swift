@@ -187,6 +187,27 @@ struct FinanceSnapshot {
 // MARK: - Pure helpers (work on any array — app @Query or widget fetch)
 
 enum TransactionAnalytics {
+    /// Canonical label for credit-card bill payments (not real spend).
+    static let creditCardPaymentCategory = "Credit Card Payment"
+
+    /// Categories excluded from Total Spend, charts, and card spend rollups.
+    static func isExcludedFromSpend(_ transaction: Transaction) -> Bool {
+        isExcludedFromSpendCategory(transaction.category)
+    }
+
+    static func isExcludedFromSpendCategory(_ category: String) -> Bool {
+        let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return c == creditCardPaymentCategory.lowercased()
+            || c == "credit card payments"
+            || c == "card payment"
+            || c == "card payments"
+    }
+
+    /// Rows that count toward spend / utilization of budget categories.
+    static func spendOnly(_ transactions: [Transaction]) -> [Transaction] {
+        transactions.filter { !isExcludedFromSpend($0) }
+    }
+
     // Normalize empty payment method strings
     static func cardName(for transaction: Transaction) -> String {
         transaction.paymentMethod.isEmpty ? "Unknown" : transaction.paymentMethod
@@ -297,14 +318,14 @@ enum TransactionAnalytics {
         }
     }
 
-    // Positive dollars spent in a set of transactions
+    // Positive dollars spent (excludes credit-card bill payments, etc.)
     static func totalSpend(in transactions: [Transaction]) -> Double {
-        transactions.reduce(0) { $0 + abs($1.amount) }
+        spendOnly(transactions).reduce(0) { $0 + abs($1.amount) }
     }
 
-    // Signed balance (our model: expenses negative)
+    // Signed balance of spend rows only (bill payments excluded)
     static func balance(in transactions: [Transaction]) -> Double {
-        transactions.reduce(0) { $0 + $1.amount }
+        spendOnly(transactions).reduce(0) { $0 + $1.amount }
     }
 
     // Unique card names, sorted A–Z
@@ -326,7 +347,7 @@ enum TransactionAnalytics {
     ) -> [CategorySpendSummary] {
         var spent: [String: Double] = [:]
         var counts: [String: Int] = [:]
-        for transaction in transactions {
+        for transaction in spendOnly(transactions) {
             let cat = categoryName(for: transaction)
             spent[cat, default: 0] += abs(transaction.amount)
             counts[cat, default: 0] += 1
@@ -410,7 +431,8 @@ enum TransactionAnalytics {
         }
 
         let inPeriodRows = inPeriod(allTransactions, period: period, referenceDate: referenceDate)
-        if inPeriodRows.isEmpty {
+        let spendRows = spendOnly(inPeriodRows)
+        if spendRows.isEmpty {
             return CategorySpendSnapshot(
                 categories: [],
                 totalSpend: 0,
@@ -421,14 +443,14 @@ enum TransactionAnalytics {
             )
         }
 
-        let categories = categorySummaries(from: inPeriodRows, categoryLimit: categoryLimit)
+        let categories = categorySummaries(from: spendRows, categoryLimit: categoryLimit)
         // Total = sum of slices (includes Other) so the pie always adds up
         let sliceTotal = categories.reduce(0.0) { $0 + $1.spent }
 
         return CategorySpendSnapshot(
             categories: categories,
             totalSpend: sliceTotal,
-            transactionCount: inPeriodRows.count,
+            transactionCount: spendRows.count,
             period: period,
             isEmptyOrError: false,
             message: nil
@@ -442,8 +464,8 @@ enum TransactionAnalytics {
         excludedCards: Set<String> = [],
         cardLimit: Int? = nil
     ) -> [CardSpendSummary] {
-        // Only rows that should appear in the card breakdown
-        let visible = excludingCards(transactions, excludedCards: excludedCards)
+        // Only real spend rows (not bill payments), then hide-card filter
+        let visible = excludingCards(spendOnly(transactions), excludedCards: excludedCards)
 
         var spent: [String: Double] = [:]
         var counts: [String: Int] = [:]
@@ -491,8 +513,9 @@ enum TransactionAnalytics {
 
         // Period only — used for the big total (ignores hide-card)
         let inPeriodRows = inPeriod(allTransactions, period: period)
+        let spendRows = spendOnly(inPeriodRows)
 
-        if inPeriodRows.isEmpty {
+        if spendRows.isEmpty {
             return FinanceSnapshot(
                 cards: [],
                 totalSpend: 0,
@@ -505,17 +528,17 @@ enum TransactionAnalytics {
         }
 
         let cards = cardSummaries(
-            from: inPeriodRows,
+            from: spendRows,
             excludedCards: excludedCards,
             cardLimit: cardLimit
         )
 
         return FinanceSnapshot(
             cards: cards,
-            // Full period total — hide-card does not change this
-            totalSpend: totalSpend(in: inPeriodRows),
-            balance: balance(in: inPeriodRows),
-            transactionCount: inPeriodRows.count,
+            // Full period total — hide-card does not change this; bill payments excluded
+            totalSpend: totalSpend(in: spendRows),
+            balance: balance(in: spendRows),
+            transactionCount: spendRows.count,
             period: period,
             isEmptyOrError: false,
             message: nil

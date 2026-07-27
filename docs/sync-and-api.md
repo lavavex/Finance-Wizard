@@ -86,7 +86,7 @@ Plaid amount convention:
 - **Category** from `personal_finance_category` (mapped to Dining, Gas, …) unless a local learn rule or lock applies.  
 - **Payment method** from account name + mask (e.g. `Checking ···0000`) or institution name.  
 - **Transfers** (savings ↔ checking, internal moves) are **skipped** — never enter spend or income.  
-- **Credit card bill payments** are stored as `CreditCardPayment` for the Credit tab (payoff tracking), not as spend/income.  
+- **Credit card bill payments** → `CreditCardPayment` (Accounts → Total paid) **and** a `Transaction` with category **Credit Card Payment** (list-visible, excluded from Total Spend).  
 - **Credit balances / limits** come from `POST /accounts/get` on each Sync.  
 - **Credit terms** (min payment, due date, last payment/statement, APRs, overdue) from `POST /liabilities/get` when the Item has Liabilities.  
 - **Bank logo / brand color** from `POST /item/get` → `POST /institutions/get_by_id` (`include_optional_metadata`).  

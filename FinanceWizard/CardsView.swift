@@ -1065,10 +1065,20 @@ struct TransactionRowView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
                 Text(transaction.amount, format: .currency(code: "USD"))
-                    .foregroundStyle(transaction.amount >= 0 ? .green : .primary)
-                Text("\(transaction.multiplier.formatted())x")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(
+                        TransactionAnalytics.isExcludedFromSpend(transaction)
+                            ? Color.secondary
+                            : (transaction.amount >= 0 ? .green : .primary)
+                    )
+                if TransactionAnalytics.isExcludedFromSpend(transaction) {
+                    Text("Bill pay")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(CategoryStyle.creditPayment)
+                } else {
+                    Text("\(transaction.multiplier.formatted())x")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

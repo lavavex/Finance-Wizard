@@ -6,9 +6,12 @@
 //
 
 import SwiftUI
+import SwiftData
 import UIKit
 
 struct SettingsView: View {
+    @Environment(\.modelContext) private var modelContext
+
     @State private var clientID: String = ""
     @State private var secret: String = ""
     @State private var environment: PlaidEnvironment = .sandbox
@@ -20,6 +23,11 @@ struct SettingsView: View {
     @State private var statusMessage: String?
     @State private var statusIsError = false
     @State private var itemPendingDelete: PlaidLinkedItem?
+
+    @State private var isExportingDebug = false
+    @State private var debugExportURL: URL?
+    @State private var showDebugShare = false
+    @State private var showDebugExportConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -159,6 +167,27 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: Debug export
+                Section {
+                    Button {
+                        showDebugExportConfirm = true
+                    } label: {
+                        if isExportingDebug {
+                            HStack {
+                                ProgressView()
+                                Text("Preparing export…")
+                            }
+                        } else {
+                            Label("Export data for debug", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(isExportingDebug)
+                } header: {
+                    Text("Debug")
+                } footer: {
+                    Text("Builds a zip with a full JSON snapshot of local transactions, accounts, income, payments, nicknames, and vendor rules, plus the raw SwiftData store files when present. Plaid secrets and access tokens are never included. Contains real merchant names and balances — only share with someone you trust.")
+                }
+
                 // MARK: About
                 Section {
                     NavigationLink {
@@ -211,6 +240,44 @@ struct SettingsView: View {
             } message: {
                 Text("Removes the access token from this device. Optionally also remove the Item from Plaid.")
             }
+            .confirmationDialog(
+                "Export debug data?",
+                isPresented: $showDebugExportConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Export & Share") {
+                    Task { await runDebugExport() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Includes transaction titles, amounts, and account masks. Excludes Plaid secrets and access tokens.")
+            }
+            .sheet(isPresented: $showDebugShare, onDismiss: {
+                debugExportURL = nil
+            }) {
+                if let debugExportURL {
+                    ShareSheet(items: [debugExportURL]) {
+                        showDebugShare = false
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func runDebugExport() async {
+        isExportingDebug = true
+        statusMessage = nil
+        defer { isExportingDebug = false }
+        do {
+            let url = try DebugDataExporter.exportPackage(modelContext: modelContext)
+            debugExportURL = url
+            showDebugShare = true
+            statusIsError = false
+            statusMessage = "Debug export ready: \(url.lastPathComponent)"
+        } catch {
+            statusIsError = true
+            statusMessage = error.localizedDescription
         }
     }
 

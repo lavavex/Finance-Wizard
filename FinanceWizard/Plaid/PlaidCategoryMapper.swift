@@ -89,6 +89,11 @@ enum PlaidCategoryMapper {
         return false
     }
 
+    /// Public wrapper for legacy cleanup / UI.
+    static func looksLikeCardPaymentTitlePublic(_ lower: String) -> Bool {
+        looksLikeCardPaymentTitle(lower)
+    }
+
     private static func looksLikeCardPaymentTitle(_ lower: String) -> Bool {
         // Explicit bank strings
         if lower.contains("payment thank you") { return true }
@@ -204,6 +209,11 @@ enum PlaidCategoryMapper {
             return "Personal Care"
         case "RENT_AND_UTILITIES":
             return "Home Internet"
+        case "LOAN_PAYMENTS":
+            if detailed.contains("CREDIT_CARD") {
+                return TransactionAnalytics.creditCardPaymentCategory
+            }
+            return "Miscellaneous"
         case "BANK_FEES":
             return "Miscellaneous"
         default:
