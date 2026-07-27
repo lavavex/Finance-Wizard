@@ -26,13 +26,37 @@ final class BankAccount {
     var availableBalance: Double?
     /// Credit limit when type == credit (nil for checking/savings)
     var creditLimit: Double?
+    /// Plaid institution_id when known (for logo lookup)
+    var institutionId: String?
     var lastSyncedAt: Date
 
-    var displayName: String {
+    /// Plaid-derived label (e.g. "Credit Card ···0820") before user nickname.
+    var plaidDisplayName: String {
         if let mask, !mask.isEmpty {
             return "\(name) ···\(mask)"
         }
         return name
+    }
+
+    /// User nickname when set, otherwise Plaid label.
+    var displayName: String {
+        CardLabelStore.label(accountId: accountId, fallback: plaidDisplayName)
+    }
+
+    /// Subtitle under the nickname (mask / original Plaid name).
+    var subtitleDetail: String {
+        var parts: [String] = []
+        if !institutionName.isEmpty {
+            parts.append(institutionName)
+        }
+        if let mask, !mask.isEmpty {
+            parts.append("···\(mask)")
+        }
+        // If user renamed, also show original account name
+        if CardLabelStore.label(accountId: accountId, fallback: plaidDisplayName) != plaidDisplayName {
+            parts.insert(plaidDisplayName, at: 0)
+        }
+        return parts.joined(separator: " · ")
     }
 
     var isCredit: Bool {
@@ -57,6 +81,7 @@ final class BankAccount {
         currentBalance: Double,
         availableBalance: Double? = nil,
         creditLimit: Double? = nil,
+        institutionId: String? = nil,
         lastSyncedAt: Date = Date()
     ) {
         self.accountId = accountId
@@ -70,6 +95,7 @@ final class BankAccount {
         self.currentBalance = currentBalance
         self.availableBalance = availableBalance
         self.creditLimit = creditLimit
+        self.institutionId = institutionId
         self.lastSyncedAt = lastSyncedAt
     }
 }
