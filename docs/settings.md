@@ -12,7 +12,8 @@ title: Settings
 | **client_id** | From [Plaid Dashboard → Keys](https://dashboard.plaid.com/developers/keys) |
 | **secret** | Environment-specific secret (stored in **Keychain**) |
 | **Environment** | Sandbox / Development / Production |
-| **Save credentials** | Writes client_id + env to `UserDefaults`, secret to Keychain |
+| **OAuth redirect URI** | Must match an allowlisted URI (default Sandbox: `http://localhost/plaid-oauth`) |
+| **Save credentials** | Writes client_id + env + redirect to `UserDefaults`, secret to Keychain |
 
 ## Linked banks
 

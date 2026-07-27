@@ -38,7 +38,7 @@ enum PlaidAPIError: LocalizedError {
 enum PlaidAPIClient {
     // MARK: - Public API
 
-    /// Create a short-lived link_token for Plaid Link (iOS).
+    /// Create a short-lived link_token for Plaid Link (mobile webview + OAuth).
     static func createLinkToken(
         clientName: String = "Finance Wizard",
         userID: String = "finance-wizard-user"
@@ -54,6 +54,8 @@ enum PlaidAPIClient {
             let user: User
             let products: [String]
             let transactions: TransactionsOpts?
+            /// Required for OAuth banks (“Continue to Login”) in mobile webviews
+            let redirect_uri: String
 
             struct User: Encodable {
                 let client_user_id: String
@@ -73,7 +75,8 @@ enum PlaidAPIClient {
             user: .init(client_user_id: userID),
             products: ["transactions"],
             // Up to ~2 years when product is initialized at Link
-            transactions: .init(days_requested: 730)
+            transactions: .init(days_requested: 730),
+            redirect_uri: PlaidCredentialsStore.redirectURI
         )
 
         struct Response: Decodable {
