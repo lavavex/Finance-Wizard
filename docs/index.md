@@ -3,9 +3,9 @@ layout: default
 title: Home
 ---
 
-# FinanceWidget documentation
+# Finance Wizard documentation
 
-**FinanceWidget** is a personal iOS app for tracking expenses: sync from a home **finance-sync** server (Plaid → SQLite → JSON API), store data in **SwiftData** (App Group), browse by card, and show **Total Spend** on a Home Screen widget.
+**Finance Wizard** is a personal iOS app for tracking expenses: sync from a home **finance-sync** server (Plaid → SQLite → JSON API), store data in **SwiftData** (App Group), browse by card, and show **Total Spend** on a Home Screen widget.
 
 This site is the project wiki: everything needed to build, run, configure, and extend the app.
 
@@ -28,7 +28,7 @@ This site is the project wiki: everything needed to build, run, configure, and e
 
 ```text
 ┌─────────────────┐     POST /api/plaid/sync      ┌──────────────────┐
-│  FinanceWidget  │ ────────────────────────────► │  finance-sync    │
+│  Finance Wizard │ ────────────────────────────► │  finance-sync    │
 │  iOS app        │ ◄── GET /api/transactions ─── │  (home PC :8787) │
 └────────┬────────┘     (current + prev month)    └────────┬─────────┘
          │                                                 │
@@ -45,17 +45,17 @@ This site is the project wiki: everything needed to build, run, configure, and e
 - **Xcode** (project targets recent iOS; open the `.xcodeproj` on a Mac)
 - **Apple Developer team** (Personal Team is fine for device/simulator signing)
 - **finance-sync** portal on the LAN (default `http://openwindow.local:8787`) for Sync
-- Same **App Group** on app + widget: `group.net.roberth.FinanceWidget`
+- Same **App Group** on app + widget: `group.net.roberth.FinanceWizard`
 
 ## Repo layout (source)
 
 ```text
-FinanceWidget/                 ← git root
-  FinanceWidget/               ← main app sources
+Finance Wizard/                ← git root (local folder name)
+  FinanceWizard/               ← main app sources
   Shared/                      ← SwiftData model + analytics (app + widget)
   Widget/                      ← WidgetKit extension
   WidgetExtension.entitlements
-  FinanceWidget.xcodeproj
+  FinanceWizard.xcodeproj
   docs/                        ← this GitHub Pages site
 ```
 

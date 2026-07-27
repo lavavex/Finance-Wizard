@@ -1,6 +1,6 @@
 //
 //  FinanceSyncAPI.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  HTTP helpers for finance-sync: classify (push edits) + category list.
 //

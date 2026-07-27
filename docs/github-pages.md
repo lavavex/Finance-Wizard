@@ -12,7 +12,7 @@ These files live in **`docs/`** on the main branch. GitHub can host them as a st
 GitHub Pages works for **private** repos on paid plans; on free accounts private Pages may be limited—public repos always work. You can still keep source private and only enable Pages if your plan allows.
 
 ```bash
-cd /path/to/FinanceWidget   # git root containing docs/
+cd "/path/to/Finance Wizard"   # git root containing docs/
 git add docs/
 git commit -m "Add GitHub Pages documentation wiki"
 git push origin main
@@ -33,14 +33,14 @@ Wait a minute for the first build.
 In `docs/_config.yml`:
 
 ```yaml
-baseurl: "/FinanceWidget"
+baseurl: "/Finance-Wizard"
 ```
 
 Must match the **repository name** (case-sensitive).  
-If the repo is `youruser/FinanceWidget`, the site is usually:
+If the repo is `youruser/Finance-Wizard`, the site is usually:
 
 ```text
-https://youruser.github.io/FinanceWidget/
+https://youruser.github.io/Finance-Wizard/
 ```
 
 If the repo is a user/organization site named `youruser.github.io`, set `baseurl: ""`.

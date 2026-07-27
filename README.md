@@ -1,4 +1,4 @@
-# FinanceWidget
+# Finance Wizard
 
 Personal iOS expense tracker: sync from a home **finance-sync** server (Plaid), store in **SwiftData** (App Group), browse by card, and show **Total Spend** on a Home Screen widget.
 
@@ -16,19 +16,21 @@ Full guide lives in **[`docs/`](docs/index.md)** (GitHub Pages source).
 | Enable GitHub Pages | [docs/github-pages.md](docs/github-pages.md) |
 
 After you push to GitHub, enable **Settings → Pages → Branch: main → Folder: /docs**.  
-Site URL is typically `https://<user>.github.io/FinanceWidget/` (set `baseurl` in `docs/_config.yml` to match the repo name).
+Site URL is typically `https://<user>.github.io/Finance-Wizard/` (set `baseurl` in `docs/_config.yml` to match the repo name).
 
 ## Quick start
 
-1. Open `FinanceWidget.xcodeproj` in Xcode.  
-2. Sign **FinanceWidget** and **WidgetExtension** with your team.  
-3. Confirm App Group `group.net.roberth.FinanceWidget` on both targets.  
-4. Run the app → **Settings** → set server URL if needed → **Sync**.  
+1. Open `FinanceWizard.xcodeproj` in Xcode.  
+2. Sign both targets with your team: **FinanceWizard** (main app) and **WidgetExtension** (home screen widgets).  
+3. Confirm App Group `group.net.roberth.FinanceWizard` on both targets.  
+4. Run scheme **FinanceWizard** → **Settings** → set server URL if needed → **Sync**.  
+
+Bundle IDs `net.roberth.FinanceWizard` / `.Widget` install as a separate app from any older FinanceWidget build.
 
 ## Layout
 
 ```text
-FinanceWidget/     App UI, sync, settings
+FinanceWizard/     App UI, sync, settings
 Shared/            SwiftData model, store, filters, SF Symbols
 Widget/            Total Spend widget
 docs/              Project wiki (GitHub Pages)

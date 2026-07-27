@@ -1,6 +1,6 @@
 //
 //  SharedStore.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  Shared SwiftData configuration + filter/sort helpers used by app and widget.
 //
@@ -518,7 +518,7 @@ enum TransactionAnalytics {
 
 enum SharedStore {
     // Must match App Groups entitlement on BOTH app and widget targets
-    static let appGroupID = "group.net.roberth.FinanceWidget"
+    static let appGroupID = "group.net.roberth.FinanceWizard"
 
     // File name for the SwiftData store inside the App Group container
     static let storeName = "FinanceTransactions"

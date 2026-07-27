@@ -1,6 +1,6 @@
 //
 //  CategorySpendChart.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  Category spend charts.
 //  Bar icons/$ are BarMark.annotations so they stay locked to the correct bar.

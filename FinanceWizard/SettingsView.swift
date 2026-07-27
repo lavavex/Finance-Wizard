@@ -1,6 +1,6 @@
 //
 //  SettingsView.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  App settings: sync server URL and info about which months Sync pulls.
 //

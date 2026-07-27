@@ -88,7 +88,7 @@ Re-syncing the same month does **not** duplicate rows.
 `Shared/SharedStore.swift`:
 
 ```text
-groupContainer: .identifier("group.net.roberth.FinanceWidget")
+groupContainer: .identifier("group.net.roberth.FinanceWizard")
 store name: FinanceTransactions
 ```
 

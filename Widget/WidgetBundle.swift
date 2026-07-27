@@ -10,7 +10,7 @@ import SwiftUI
 
 // @main marks this as the widget extension starting point (separate from the app)
 @main
-struct FinanceWidgetBundle: WidgetBundle {
+struct FinanceWizardBundle: WidgetBundle {
     var body: some Widget {
         // Total Spend by card (list + total)
         FinanceHomeWidget()

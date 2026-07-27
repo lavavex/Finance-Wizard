@@ -1,6 +1,6 @@
 //
 //  CardsView.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  Second tab: browse spend and transactions grouped by card.
 //

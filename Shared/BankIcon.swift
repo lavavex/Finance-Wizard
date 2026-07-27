@@ -1,6 +1,6 @@
 //
 //  BankIcon.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  Dark Mode–style bank “app icons” for payment methods.
 //  iOS does not expose Wallet/bank logos to third-party apps, so we render

@@ -42,8 +42,8 @@ There is **no** hardcoded month in the app. Sync also pulls **income** for those
 
 | Piece | Location |
 |-------|----------|
-| Keys / helpers | `FinanceWidget/AppSettings.swift` |
-| UI | `FinanceWidget/SettingsView.swift` |
+| Keys / helpers | `FinanceWizard/AppSettings.swift` |
+| UI | `FinanceWizard/SettingsView.swift` |
 | Persistence | `@AppStorage` / `UserDefaults` |
 
 Settings are **device-local** (not in the App Group, not synced to the widget config).

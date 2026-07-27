@@ -1,6 +1,6 @@
 //
 //  Transaction.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  Created by lavavex on 7/26/26.
 //

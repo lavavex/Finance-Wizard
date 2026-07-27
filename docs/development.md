@@ -16,21 +16,21 @@ title: Development
 
 ```bash
 # From git root
-open FinanceWidget.xcodeproj
+open FinanceWizard.xcodeproj
 ```
 
-In Xcode: scheme **FinanceWidget** → Run (⌘R).
+In Xcode: scheme **FinanceWizard** (Finance Wizard app) → Run (⌘R).
 
 ## Where to put code
 
 | Change | Put it in |
 |--------|-----------|
-| Screens / Sync / Settings | `FinanceWidget/` |
+| Screens / Sync / Settings | `FinanceWizard/` |
 | Model, store, filters, symbols | `Shared/` (both targets) |
 | Widget UI / intents | `Widget/` |
 | Docs wiki | `docs/` |
 
-When adding a new file under `Shared/`, ensure **Target Membership** includes **FinanceWidget** and **WidgetExtension** (folder sync usually handles this).
+When adding a new file under `Shared/`, ensure **Target Membership** includes **FinanceWizard** and **WidgetExtension** (folder sync usually handles this).
 
 ## Conventions used in this project
 
@@ -41,7 +41,8 @@ When adding a new file under `Shared/`, ensure **Target Membership** includes **
 
 ## Git
 
-Repo root is the Xcode project folder (contains `.xcodeproj`, `FinanceWidget/`, `Shared/`, `Widget/`, `docs/`).
+Repo root is the Xcode project folder (contains `.xcodeproj`, `FinanceWizard/`, `Shared/`, `Widget/`, `docs/`).  
+GitHub remote for this project: `Finance-Wizard`.
 
 Suggested ignore (see project `.gitignore`):
 
@@ -53,7 +54,7 @@ Suggested ignore (see project `.gitignore`):
 
 ```bash
 # After creating empty private repo on GitHub:
-git remote add origin git@github.com:YOUR_USER/FinanceWidget.git
+git remote add origin git@github.com:YOUR_USER/Finance-Wizard.git
 git push -u origin main
 ```
 

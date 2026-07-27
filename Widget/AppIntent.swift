@@ -64,7 +64,7 @@ struct PaymentMethodQuery: EntityQuery {
 
 // MARK: - Widget configuration intent
 
-struct FinanceWidgetConfigIntent: WidgetConfigurationIntent {
+struct FinanceWizardConfigIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource { "Total Spend" }
     static var description: IntentDescription {
         IntentDescription("Choose week or month. Hide cards from the card list only — Total Spend stays the full period total.")

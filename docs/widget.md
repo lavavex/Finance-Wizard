@@ -39,7 +39,7 @@ Long-press widget → **Edit Widget**:
 
 Configuration is stored **per widget instance** (you can add two widgets with different settings).
 
-Implemented as `FinanceWidgetConfigIntent` in `Widget/AppIntent.swift`.
+Implemented as `FinanceWizardConfigIntent` in `Widget/AppIntent.swift`.
 
 ## Timeline
 
@@ -50,7 +50,7 @@ Implemented as `FinanceWidgetConfigIntent` in `Widget/AppIntent.swift`.
 
 1. Run the app and **Sync** so data exists.  
 2. Home Screen → long-press → **+**  
-3. Find **Finance Widget** / **Total Spend**  
+3. Find **Finance Wizard** / **Total Spend**  
 4. Place small/medium/large  
 5. Edit to set week/month and hide cards  
 

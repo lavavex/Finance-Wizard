@@ -19,7 +19,7 @@
                BlueprintIdentifier = "2067E8173016766000D9E2D2"
                BuildableName = "WidgetExtension.appex"
                BlueprintName = "WidgetExtension"
-               ReferencedContainer = "container:FinanceWidget.xcodeproj">
+               ReferencedContainer = "container:FinanceWizard.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
@@ -31,9 +31,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "20DF1AD430165D170007AB19"
-               BuildableName = "FinanceWidget.app"
-               BlueprintName = "FinanceWidget"
-               ReferencedContainer = "container:FinanceWidget.xcodeproj">
+               BuildableName = "FinanceWizard.app"
+               BlueprintName = "FinanceWizard"
+               ReferencedContainer = "container:FinanceWizard.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -66,16 +66,16 @@
             BlueprintIdentifier = "2067E8173016766000D9E2D2"
             BuildableName = "WidgetExtension.appex"
             BlueprintName = "WidgetExtension"
-            ReferencedContainer = "container:FinanceWidget.xcodeproj">
+            ReferencedContainer = "container:FinanceWizard.xcodeproj">
          </BuildableReference>
       </RemoteRunnable>
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "20DF1AD430165D170007AB19"
-            BuildableName = "FinanceWidget.app"
-            BlueprintName = "FinanceWidget"
-            ReferencedContainer = "container:FinanceWidget.xcodeproj">
+            BuildableName = "FinanceWizard.app"
+            BlueprintName = "FinanceWizard"
+            ReferencedContainer = "container:FinanceWizard.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <EnvironmentVariables>
@@ -109,9 +109,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "20DF1AD430165D170007AB19"
-            BuildableName = "FinanceWidget.app"
-            BlueprintName = "FinanceWidget"
-            ReferencedContainer = "container:FinanceWidget.xcodeproj">
+            BuildableName = "FinanceWizard.app"
+            BlueprintName = "FinanceWizard"
+            ReferencedContainer = "container:FinanceWizard.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

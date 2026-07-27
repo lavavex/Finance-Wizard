@@ -42,7 +42,7 @@
 		2067E81A3016766000D9E2D2 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		2067E81C3016766000D9E2D2 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		2067E8343016769100D9E2D2 /* WidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WidgetExtension.entitlements; sourceTree = "<group>"; };
-		20DF1AD530165D170007AB19 /* FinanceWidget.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FinanceWidget.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		20DF1AD530165D170007AB19 /* FinanceWizard.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FinanceWizard.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -53,12 +53,12 @@
 			);
 			target = 2067E8173016766000D9E2D2 /* WidgetExtension */;
 		};
-		20DF1AF4301672350007AB19 /* Exceptions for "FinanceWidget" folder in "FinanceWidget" target */ = {
+		20DF1AF4301672350007AB19 /* Exceptions for "FinanceWizard" folder in "FinanceWizard" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = 20DF1AD430165D170007AB19 /* FinanceWidget */;
+			target = 20DF1AD430165D170007AB19 /* FinanceWizard */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -71,12 +71,12 @@
 			path = Widget;
 			sourceTree = "<group>";
 		};
-		20DF1AD730165D170007AB19 /* FinanceWidget */ = {
+		20DF1AD730165D170007AB19 /* FinanceWizard */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				20DF1AF4301672350007AB19 /* Exceptions for "FinanceWidget" folder in "FinanceWidget" target */,
+				20DF1AF4301672350007AB19 /* Exceptions for "FinanceWizard" folder in "FinanceWizard" target */,
 			);
-			path = FinanceWidget;
+			path = FinanceWizard;
 			sourceTree = "<group>";
 		};
 		A1B2C3D430167A0100SHARED /* Shared */ = {
@@ -117,7 +117,7 @@
 				202F631030167F19008FC91B /* .gitignore */,
 				2067E8343016769100D9E2D2 /* WidgetExtension.entitlements */,
 				A1B2C3D430167A0100SHARED /* Shared */,
-				20DF1AD730165D170007AB19 /* FinanceWidget */,
+				20DF1AD730165D170007AB19 /* FinanceWizard */,
 				2067E81E3016766000D9E2D2 /* Widget */,
 				2067E8193016766000D9E2D2 /* Frameworks */,
 				20DF1AD630165D170007AB19 /* Products */,
@@ -127,7 +127,7 @@
 		20DF1AD630165D170007AB19 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				20DF1AD530165D170007AB19 /* FinanceWidget.app */,
+				20DF1AD530165D170007AB19 /* FinanceWizard.app */,
 				2067E8183016766000D9E2D2 /* WidgetExtension.appex */,
 			);
 			name = Products;
@@ -155,9 +155,9 @@
 			productReference = 2067E8183016766000D9E2D2 /* WidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		20DF1AD430165D170007AB19 /* FinanceWidget */ = {
+		20DF1AD430165D170007AB19 /* FinanceWizard */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 20DF1AE030165D180007AB19 /* Build configuration list for PBXNativeTarget "FinanceWidget" */;
+			buildConfigurationList = 20DF1AE030165D180007AB19 /* Build configuration list for PBXNativeTarget "FinanceWizard" */;
 			buildPhases = (
 				20DF1AD130165D170007AB19 /* Sources */,
 				20DF1AD230165D170007AB19 /* Frameworks */,
@@ -170,12 +170,12 @@
 				2067E82D3016766000D9E2D2 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				20DF1AD730165D170007AB19 /* FinanceWidget */,
+				20DF1AD730165D170007AB19 /* FinanceWizard */,
 				A1B2C3D430167A0100SHARED /* Shared */,
 			);
-			name = FinanceWidget;
-			productName = FinanceWidget;
-			productReference = 20DF1AD530165D170007AB19 /* FinanceWidget.app */;
+			name = FinanceWizard;
+			productName = FinanceWizard;
+			productReference = 20DF1AD530165D170007AB19 /* FinanceWizard.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -196,7 +196,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 20DF1AD030165D170007AB19 /* Build configuration list for PBXProject "FinanceWidget" */;
+			buildConfigurationList = 20DF1AD030165D170007AB19 /* Build configuration list for PBXProject "FinanceWizard" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -210,7 +210,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				20DF1AD430165D170007AB19 /* FinanceWidget */,
+				20DF1AD430165D170007AB19 /* FinanceWizard */,
 				2067E8173016766000D9E2D2 /* WidgetExtension */,
 			);
 		};
@@ -273,7 +273,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = net.roberth.FinanceWidget.Widget;
+				PRODUCT_BUNDLE_IDENTIFIER = net.roberth.FinanceWizard.Widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = iphoneos;
@@ -307,7 +307,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = net.roberth.FinanceWidget.Widget;
+				PRODUCT_BUNDLE_IDENTIFIER = net.roberth.FinanceWizard.Widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = iphoneos;
@@ -322,7 +322,7 @@
 			};
 			name = Release;
 		};
-		20DF1ADE30165D180007AB19 /* Debug configuration for PBXProject "FinanceWidget" */ = {
+		20DF1ADE30165D180007AB19 /* Debug configuration for PBXProject "FinanceWizard" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -384,7 +384,7 @@
 			};
 			name = Debug;
 		};
-		20DF1ADF30165D180007AB19 /* Release configuration for PBXProject "FinanceWidget" */ = {
+		20DF1ADF30165D180007AB19 /* Release configuration for PBXProject "FinanceWizard" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -438,12 +438,12 @@
 			};
 			name = Release;
 		};
-		20DF1AE130165D180007AB19 /* Debug configuration for PBXNativeTarget "FinanceWidget" */ = {
+		20DF1AE130165D180007AB19 /* Debug configuration for PBXNativeTarget "FinanceWizard" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = Mika;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = FinanceWidget/FinanceWidget.entitlements;
+				CODE_SIGN_ENTITLEMENTS = FinanceWizard/FinanceWizard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = ZVELT9SYXN;
@@ -452,8 +452,8 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = FinanceWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Finance Widget";
+				INFOPLIST_FILE = FinanceWizard/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Finance Wizard";
 				INFOPLIST_KEY_CFBundleIconName = Mika;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Load transactions from finance-sync on your home PC.";
@@ -472,7 +472,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = net.roberth.FinanceWidget;
+				PRODUCT_BUNDLE_IDENTIFIER = net.roberth.FinanceWizard;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -489,12 +489,12 @@
 			};
 			name = Debug;
 		};
-		20DF1AE230165D180007AB19 /* Release configuration for PBXNativeTarget "FinanceWidget" */ = {
+		20DF1AE230165D180007AB19 /* Release configuration for PBXNativeTarget "FinanceWizard" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = Mika;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = FinanceWidget/FinanceWidget.entitlements;
+				CODE_SIGN_ENTITLEMENTS = FinanceWizard/FinanceWizard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = ZVELT9SYXN;
@@ -503,8 +503,8 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = FinanceWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Finance Widget";
+				INFOPLIST_FILE = FinanceWizard/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Finance Wizard";
 				INFOPLIST_KEY_CFBundleIconName = Mika;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Load transactions from finance-sync on your home PC.";
@@ -523,7 +523,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = net.roberth.FinanceWidget;
+				PRODUCT_BUNDLE_IDENTIFIER = net.roberth.FinanceWizard;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -551,19 +551,19 @@
 			);
 			defaultConfigurationName = Release;
 		};
-		20DF1AD030165D170007AB19 /* Build configuration list for PBXProject "FinanceWidget" */ = {
+		20DF1AD030165D170007AB19 /* Build configuration list for PBXProject "FinanceWizard" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				20DF1ADE30165D180007AB19 /* Debug configuration for PBXProject "FinanceWidget" */,
-				20DF1ADF30165D180007AB19 /* Release configuration for PBXProject "FinanceWidget" */,
+				20DF1ADE30165D180007AB19 /* Debug configuration for PBXProject "FinanceWizard" */,
+				20DF1ADF30165D180007AB19 /* Release configuration for PBXProject "FinanceWizard" */,
 			);
 			defaultConfigurationName = Release;
 		};
-		20DF1AE030165D180007AB19 /* Build configuration list for PBXNativeTarget "FinanceWidget" */ = {
+		20DF1AE030165D180007AB19 /* Build configuration list for PBXNativeTarget "FinanceWizard" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				20DF1AE130165D180007AB19 /* Debug configuration for PBXNativeTarget "FinanceWidget" */,
-				20DF1AE230165D180007AB19 /* Release configuration for PBXNativeTarget "FinanceWidget" */,
+				20DF1AE130165D180007AB19 /* Debug configuration for PBXNativeTarget "FinanceWizard" */,
+				20DF1AE230165D180007AB19 /* Release configuration for PBXNativeTarget "FinanceWizard" */,
 			);
 			defaultConfigurationName = Release;
 		};

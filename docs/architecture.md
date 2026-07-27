@@ -7,17 +7,21 @@ title: Architecture
 
 ## Targets
 
-| Target | Product | Responsibility |
-|--------|---------|----------------|
-| **FinanceWidget** | iOS app | UI, Sync, import, settings, filters |
-| **WidgetExtension** | `.appex` | Home Screen **Total Spend** widget |
+Two separate products share one Xcode project and the same App Group store:
 
-The app embeds the widget extension (Embed Foundation Extensions build phase).
+| Target | Product | Bundle ID | Responsibility |
+|--------|---------|-----------|----------------|
+| **FinanceWizard** | Finance Wizard (iOS app) | `net.roberth.FinanceWizard` | UI, Sync, import, settings, filters |
+| **WidgetExtension** | Widget extension (`.appex`) | `net.roberth.FinanceWizard.Widget` | Home Screen **Total Spend** (and category) widgets |
+
+The app embeds the widget extension (Embed Foundation Extensions build phase). They ship together but are signed and built as separate targets.
+
+App Group (shared store): `group.net.roberth.FinanceWizard`
 
 ## Source folders
 
 ```text
-FinanceWidget/          Main app (SwiftUI screens, sync, settings)
+FinanceWizard/          Main app (SwiftUI screens, sync, settings)
 Shared/                 Model + store + filters (BOTH targets)
 Widget/                 WidgetKit UI + configuration intents
 docs/                   This documentation (GitHub Pages)

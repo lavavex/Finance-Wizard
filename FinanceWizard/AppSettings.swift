@@ -1,6 +1,6 @@
 //
 //  AppSettings.swift
-//  FinanceWidget
+//  Finance Wizard
 //
 //  User preferences (server URL, etc.) persisted with AppStorage / UserDefaults.
 //
