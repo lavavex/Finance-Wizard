@@ -39,11 +39,17 @@ Same as above, but **clears cursors** first so Plaid re-sends the full transacti
 ### Link bank account
 
 ```text
-1. POST /link/token/create   (client_id + secret)
-2. Open Plaid Link (in-app WebView)
-3. POST /item/public_token/exchange
-4. Store access_token (Keychain) + item metadata (UserDefaults)
+1. POST /link/token/create   (client_id + secret + redirect_uri)
+2. Load official webview URL:
+     https://cdn.plaid.com/link/v2/stable/link.html?isWebview=true&token=…
+3. OAuth “Continue to Login” navigates in-webview; bank returns to redirect_uri
+   → re-open Link with receivedRedirectUri
+4. Intercept plaidlink://connected → public_token
+5. POST /item/public_token/exchange
+6. Store access_token (Keychain) + item metadata (UserDefaults)
 ```
+
+**Redirect URI:** default `http://localhost/plaid-oauth` (Sandbox). Must be listed under Dashboard → Developers → API → Allowed redirect URIs.
 
 ## Plaid endpoints used
 

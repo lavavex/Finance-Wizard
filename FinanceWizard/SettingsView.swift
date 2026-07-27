@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var clientID: String = ""
     @State private var secret: String = ""
     @State private var environment: PlaidEnvironment = .sandbox
+    @State private var redirectURI: String = ""
     @State private var didSave = false
     @State private var showSecret = false
     @State private var showLinkSheet = false
@@ -55,6 +56,12 @@ struct SettingsView: View {
                         }
                     }
 
+                    TextField("OAuth redirect URI", text: $redirectURI)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .font(.body.monospaced())
+
                     Button("Save credentials") {
                         saveCredentials()
                     }
@@ -66,7 +73,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Plaid developer account")
                 } footer: {
-                    Text("Create free keys at dashboard.plaid.com → Developers → Keys. Use the Sandbox secret while testing with fake banks. Secrets stay on this device (Keychain). Never share them or commit them to git.")
+                    Text("Keys: dashboard.plaid.com → Developers → Keys. For OAuth banks (“Continue to Login”), add the same redirect URI under Developers → API → Allowed redirect URIs. Sandbox allows \(PlaidCredentialsStore.defaultRedirectURI). Secrets stay on this device (Keychain).")
                 }
 
                 // MARK: Linked banks
@@ -185,6 +192,7 @@ struct SettingsView: View {
         clientID = PlaidCredentialsStore.clientID
         secret = PlaidCredentialsStore.secret
         environment = PlaidCredentialsStore.environment
+        redirectURI = PlaidCredentialsStore.redirectURI
         linkedItems = PlaidItemStore.loadItems()
     }
 
@@ -192,6 +200,7 @@ struct SettingsView: View {
         PlaidCredentialsStore.clientID = clientID
         PlaidCredentialsStore.secret = secret
         PlaidCredentialsStore.environment = environment
+        PlaidCredentialsStore.redirectURI = redirectURI
         didSave = true
         statusIsError = false
         statusMessage = "Credentials saved on this device."

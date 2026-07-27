@@ -11,7 +11,12 @@ import Foundation
 enum PlaidCredentialsStore {
     private static let clientIDKey = "plaid.clientID"
     private static let environmentKey = "plaid.environment"
+    private static let redirectURIKey = "plaid.redirectURI"
     private static let secretAccount = "plaid.secret"
+
+    /// Default OAuth return URL. Sandbox allows `http://localhost…`.
+    /// Add the same URI under Plaid Dashboard → Developers → API → Allowed redirect URIs.
+    static let defaultRedirectURI = "http://localhost/plaid-oauth"
 
     static var clientID: String {
         get {
@@ -45,6 +50,19 @@ enum PlaidCredentialsStore {
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: environmentKey)
+        }
+    }
+
+    /// Must match a URI allowlisted in the Plaid Dashboard (required for OAuth banks).
+    static var redirectURI: String {
+        get {
+            let stored = UserDefaults.standard.string(forKey: redirectURIKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return stored.isEmpty ? defaultRedirectURI : stored
+        }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            UserDefaults.standard.set(trimmed.isEmpty ? nil : trimmed, forKey: redirectURIKey)
         }
     }
 
