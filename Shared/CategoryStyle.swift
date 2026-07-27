@@ -36,6 +36,8 @@ enum CategoryStyle {
     static let services = Color(red: 0.69, green: 0.32, blue: 0.87)
     /// Entertainment
     static let entertainment = Color(red: 1.00, green: 0.18, blue: 0.33)
+    /// Credit card bill payments (not real spend)
+    static let creditPayment = Color(red: 0.20, green: 0.78, blue: 0.55)
     /// Uncategorized / Other
     static let other = Color(red: 0.56, green: 0.56, blue: 0.58)
 
@@ -44,6 +46,10 @@ enum CategoryStyle {
     /// Stable color for a category name (finance-sync labels + Apple Card groups)
     static func color(for category: String) -> Color {
         // Also accepts combined group display names from pie merge
+        // Bill payments use a dedicated mint so they don’t look like Travel green
+        if isCreditCardPaymentCategory(category) {
+            return creditPayment
+        }
         switch colorGroup(for: category) {
         case .foodAndDrink: return foodAndDrink
         case .shopping: return shopping
@@ -54,6 +60,10 @@ enum CategoryStyle {
         case .health: return health
         case .other: return other
         }
+    }
+
+    static func isCreditCardPaymentCategory(_ category: String) -> Bool {
+        TransactionAnalytics.isExcludedFromSpendCategory(category)
     }
 
     /// SF Symbol for a category (same mapping as before, kept here for one import site)
@@ -112,6 +122,11 @@ enum CategoryStyle {
             return "arrow.uturn.backward.circle.fill"
         case let c where matches(c, ["other income", "income", "bonus", "promo"]):
             return "dollarsign.circle.fill"
+        case let c where matches(c, [
+            "credit card payment", "credit card payments",
+            "card payment", "card payments"
+        ]):
+            return "creditcard.and.123"
         case let c where matches(c, ["miscellaneous", "misc", "other", "uncategorized"]):
             return "ellipsis.circle.fill"
         default:

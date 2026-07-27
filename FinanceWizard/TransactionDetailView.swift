@@ -20,6 +20,7 @@ enum KnownCategory: String, CaseIterable, Identifiable {
     case carInsurance = "Car Insurance"
     case homeInternet = "Home Internet"
     case personalCare = "Personal Care"
+    case creditCardPayment = "Credit Card Payment"
     case miscellaneous = "Miscellaneous"
 
     var id: String { rawValue }
@@ -307,8 +308,11 @@ struct TransactionDetailView: View {
             transaction.paymentRailLocked = true
             transaction.overrideSource = "user"
 
-            // Learn rule for future Plaid syncs
-            if learn {
+            // Keep CreditCardPayment table + spend exclusion in sync with category choice
+            syncCreditPaymentRecord(for: transaction, category: trimmedCategory)
+
+            // Learn rule for future Plaid syncs (skip bill-payment category)
+            if learn, !TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
                 VendorRulesStore.upsert(
                     vendor: transaction.title,
                     paymentMethod: cardScoped ? transaction.paymentMethod : nil,
@@ -328,7 +332,9 @@ struct TransactionDetailView: View {
             try modelContext.save()
             WidgetCenter.shared.reloadAllTimelines()
 
-            if localExtra > 0 {
+            if TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
+                saveStatusMessage = "Saved as Credit Card Payment (excluded from Total Spend)."
+            } else if localExtra > 0 {
                 saveStatusMessage = "Saved. Updated \(localExtra + 1) transactions on this card."
             } else {
                 saveStatusMessage = "Saved on this device"
@@ -340,6 +346,42 @@ struct TransactionDetailView: View {
             }
         } catch {
             saveError = error.localizedDescription
+        }
+    }
+
+    /// Mirror category onto CreditCardPayment (Accounts “Total paid”) or remove if reclassified.
+    private func syncCreditPaymentRecord(for row: Transaction, category: String) {
+        let targetId = row.transactionId
+        var descriptor = FetchDescriptor<CreditCardPayment>(
+            predicate: #Predicate<CreditCardPayment> { p in
+                p.transactionId == targetId
+            }
+        )
+        descriptor.fetchLimit = 1
+        let existing = try? modelContext.fetch(descriptor).first
+
+        if TransactionAnalytics.isExcludedFromSpendCategory(category) {
+            if let existing {
+                existing.amount = abs(row.amount)
+                existing.date = row.date
+                existing.cardName = row.paymentMethod
+                existing.title = row.title
+            } else {
+                modelContext.insert(
+                    CreditCardPayment(
+                        transactionId: row.transactionId,
+                        amount: abs(row.amount),
+                        date: row.date,
+                        cardName: row.paymentMethod,
+                        sourceAccount: row.paymentMethod,
+                        title: row.title,
+                        creditAccountId: nil,
+                        institutionName: linkedAccount?.institutionName
+                    )
+                )
+            }
+        } else if let existing {
+            modelContext.delete(existing)
         }
     }
 

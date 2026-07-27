@@ -48,12 +48,14 @@ Each row shows:
 | Field | Editable? |
 |-------|-----------|
 | Title, amount, date, card, id | Read-only |
-| **Category** | Yes (built-in list + free text) |
+| **Category** | Yes (built-in list + free text), including **Credit Card Payment** |
 | **Points multiplier** | Yes |
 | Learn / same card / apply matching | Local rules only |
 | Points estimate | Derived (abs(amount) × multiplier) |
 
 **Save** updates SwiftData and locks category/multiplier so later Plaid syncs do not overwrite them. With **learn**, a local vendor rule is stored for future Plaid rows.
+
+**Credit Card Payment** is a first-class category for bill pays. Rows still appear in the transaction list (labeled “Bill pay”) but are **excluded** from Total Spend, category charts, widgets, and per-card spend. Sync maps Plaid card payments here automatically; choosing this category on detail also mirrors the row into Accounts → Total paid.
 
 ## Tab: Accounts
 
