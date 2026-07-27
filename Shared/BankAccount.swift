@@ -48,6 +48,13 @@ final class BankAccount {
     /// When liabilities fields were last applied (nil = never)
     var liabilitiesSyncedAt: Date?
 
+    // MARK: - Depository reward multipliers (e.g. X Money 3% debit, 0% ACH)
+
+    /// Applied to new debit-rail spend when multiplier is not locked (e.g. 0.03 ≈ 3% cashback).
+    var debitRewardMultiplier: Double?
+    /// Applied to new ACH-rail spend when multiplier is not locked (often 0 or 1).
+    var achRewardMultiplier: Double?
+
     /// Plaid-derived label (e.g. "Credit Card ···0820") before user nickname.
     var plaidDisplayName: String {
         if let mask, !mask.isEmpty {
@@ -79,6 +86,19 @@ final class BankAccount {
 
     var isCredit: Bool {
         type.lowercased() == "credit"
+    }
+
+    var isDepository: Bool {
+        type.lowercased() == "depository"
+    }
+
+    /// Reward multiplier for a payment rail, if configured on this account.
+    func rewardMultiplier(for rail: PaymentRail) -> Double? {
+        switch rail {
+        case .debit: return debitRewardMultiplier
+        case .ach: return achRewardMultiplier
+        case .other: return nil
+        }
     }
 
     /// 0…1 when limit known; nil otherwise
@@ -133,7 +153,9 @@ final class BankAccount {
         cashApr: Double? = nil,
         balanceTransferApr: Double? = nil,
         specialApr: Double? = nil,
-        liabilitiesSyncedAt: Date? = nil
+        liabilitiesSyncedAt: Date? = nil,
+        debitRewardMultiplier: Double? = nil,
+        achRewardMultiplier: Double? = nil
     ) {
         self.accountId = accountId
         self.itemId = itemId
@@ -160,6 +182,8 @@ final class BankAccount {
         self.balanceTransferApr = balanceTransferApr
         self.specialApr = specialApr
         self.liabilitiesSyncedAt = liabilitiesSyncedAt
+        self.debitRewardMultiplier = debitRewardMultiplier
+        self.achRewardMultiplier = achRewardMultiplier
     }
 
     /// Whether a transaction payment_method string belongs to this account (mask / exact).

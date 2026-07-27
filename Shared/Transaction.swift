@@ -29,6 +29,13 @@ final class Transaction {
     var multiplierLocked: Bool?
     var overrideSource: String?
 
+    /// Raw Plaid `payment_channel` (`online`, `in store`, `other`) when known.
+    var plaidPaymentChannel: String?
+    /// Effective rail: `debit` | `ach` | `other` (see PaymentRail).
+    var paymentRail: String?
+    /// When true, Sync will not overwrite `paymentRail`.
+    var paymentRailLocked: Bool?
+
     /// Effective lock flag (nil → unlocked)
     var isCategoryLocked: Bool { categoryLocked ?? false }
     /// Effective lock flag (nil → unlocked)
@@ -44,7 +51,10 @@ final class Transaction {
         multiplier: Double,
         categoryLocked: Bool = false,
         multiplierLocked: Bool = false,
-        overrideSource: String? = nil
+        overrideSource: String? = nil,
+        plaidPaymentChannel: String? = nil,
+        paymentRail: String? = nil,
+        paymentRailLocked: Bool = false
     ) {
         self.transactionId = transactionId
         self.title = title
@@ -56,5 +66,8 @@ final class Transaction {
         self.categoryLocked = categoryLocked
         self.multiplierLocked = multiplierLocked
         self.overrideSource = overrideSource
+        self.plaidPaymentChannel = plaidPaymentChannel
+        self.paymentRail = paymentRail
+        self.paymentRailLocked = paymentRailLocked
     }
 }

@@ -41,6 +41,7 @@ struct TransactionDetailView: View {
 
     @State private var categoryText: String = ""
     @State private var multiplierText: String = ""
+    @State private var selectedRail: PaymentRail = .other
     @State private var learn = true
     @State private var scopePaymentMethod = true
     @State private var applyToMatching = false
@@ -85,7 +86,7 @@ struct TransactionDetailView: View {
                 LabeledContent("Date") {
                     Text(transaction.date, style: .date)
                 }
-                LabeledContent("Card") {
+                LabeledContent("Account") {
                     HStack(spacing: 8) {
                         BankIconView(
                             paymentMethod: transaction.paymentMethod,
@@ -109,13 +110,19 @@ struct TransactionDetailView: View {
                         .multilineTextAlignment(.trailing)
                     }
                 }
+                if let channel = transaction.plaidPaymentChannel, !channel.isEmpty {
+                    LabeledContent("Plaid channel") {
+                        Text(channel)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 LabeledContent("ID") {
                     Text(transaction.transactionId)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
-                if transaction.isCategoryLocked || transaction.isMultiplierLocked {
+                if transaction.isCategoryLocked || transaction.isMultiplierLocked || transaction.isPaymentRailLocked {
                     LabeledContent("Locked") {
                         Text(lockSummary)
                             .font(.caption)
@@ -144,8 +151,22 @@ struct TransactionDetailView: View {
                 TextField("Category name", text: $categoryText)
                     .textInputAutocapitalization(.words)
 
+                Picker("Payment rail", selection: $selectedRail) {
+                    ForEach(PaymentRail.allCases) { rail in
+                        Label(rail.displayName, systemImage: rail.systemImage)
+                            .tag(rail)
+                    }
+                }
+                .onChange(of: selectedRail) { _, newRail in
+                    // Suggest account reward multiplier for this rail when not yet custom-locked
+                    if !transaction.isMultiplierLocked,
+                       let suggested = linkedAccount?.rewardMultiplier(for: newRail) {
+                        multiplierText = formatMultiplier(suggested)
+                    }
+                }
+
                 HStack {
-                    Text("Points multiplier")
+                    Text("Points / rewards mult.")
                     Spacer()
                     TextField("1", text: $multiplierText)
                         .keyboardType(.decimalPad)
@@ -157,7 +178,7 @@ struct TransactionDetailView: View {
             } header: {
                 Text("Edit")
             } footer: {
-                Text("Save updates this device only and locks the row so later Plaid syncs won’t overwrite category/multiplier. Optional learn rules apply to future matching purchases.")
+                Text("Payment rail: Debit card vs ACH (Plaid often only sends online/in store). Save locks rail + category + multiplier so Sync won’t overwrite. For X Money–style cashback, set Debit 0.03 and ACH 0 on the account, then fix mis-tagged rows here.")
             }
 
             Section {
@@ -215,6 +236,7 @@ struct TransactionDetailView: View {
         .onAppear {
             categoryText = transaction.category
             multiplierText = formatMultiplier(transaction.multiplier)
+            selectedRail = transaction.effectivePaymentRail
         }
         .task {
             let names = await FinanceSyncAPI.fetchCategories()
@@ -232,6 +254,7 @@ struct TransactionDetailView: View {
         var parts: [String] = []
         if transaction.isCategoryLocked { parts.append("category") }
         if transaction.isMultiplierLocked { parts.append("multiplier") }
+        if transaction.isPaymentRailLocked { parts.append("rail") }
         return parts.joined(separator: " + ")
     }
 
@@ -280,6 +303,8 @@ struct TransactionDetailView: View {
             transaction.multiplier = multiplier
             transaction.categoryLocked = true
             transaction.multiplierLocked = true
+            transaction.paymentRail = selectedRail.rawValue
+            transaction.paymentRailLocked = true
             transaction.overrideSource = "user"
 
             // Learn rule for future Plaid syncs

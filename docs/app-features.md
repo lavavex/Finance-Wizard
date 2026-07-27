@@ -55,21 +55,21 @@ Each row shows:
 
 **Save** updates SwiftData and locks category/multiplier so later Plaid syncs do not overwrite them. With **learn**, a local vendor rule is stored for future Plaid rows.
 
-## Tab: Cards
+## Tab: Accounts
 
-Single hub for payment methods and credit tracking:
+Hub for credit cards and checking/savings (formerly **Cards**):
 
 | Element | Meaning |
 |---------|---------|
 | **Total Spend** | Purchases in the selected period (tap → category chart) |
+| **Total paid** | Card bill payments (expandable list); not part of Total Spend |
 | **Credit balance / limit / utilization** | From Plaid balances on Sync |
-| **Min payments / next due** | From Plaid Liabilities on Sync (when the bank supports it) |
-| **Paid this period** | Card bill payments (excluded from Total Spend) |
-| **Cards list** | Balance + limit; min/due; spend + paid; utilization; Plaid institution logo |
-| **Payments list** | Bill payments for the period (institution logos) |
-| **Card detail** | Rename; balance/limit/available; APR, due date, min payment, statement; payments; purchases |
+| **Min payments / next due** | From Plaid Liabilities on Sync (when supported) |
+| **Credit cards** | Balance + limit; min/due; spend; utilization; Plaid logo |
+| **Checking & savings** | Available balance + spend; debit vs ACH reward mults on detail |
+| **Account detail** | Rename; summary with Total paid disclosure; credit terms; purchases |
 
-Open a card → **Card name** to nickname it (per account / last four). Save the bank label again to restore the default.
+Open an account → nickname it (per last four). On checking accounts, set **Debit** vs **ACH** reward multipliers (e.g. X Money 0.03 debit / 0 ACH). Transactions store a **payment rail** (inferred from Plaid + heuristics; overridable on the transaction).
 
 Period + sort controls apply across the tab. Transfers and card bill payments stay out of Transactions totals.
 

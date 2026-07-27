@@ -325,6 +325,7 @@ enum PlaidSyncEngine {
                 title: title,
                 date: date,
                 paymentMethod: paymentMethod,
+                accountId: tx.account_id,
                 modelContext: modelContext
             )
             report.expensesUpserted += 1
@@ -351,6 +352,7 @@ enum PlaidSyncEngine {
         title: String,
         date: Date,
         paymentMethod: String,
+        accountId: String,
         modelContext: ModelContext
     ) {
         let targetId = tx.transaction_id
@@ -364,7 +366,12 @@ enum PlaidSyncEngine {
         let defaultCategory = PlaidCategoryMapper.expenseCategory(from: tx.personal_finance_category)
         let rule = VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod)
         let mappedCategory = rule?.category ?? defaultCategory
-        let mappedMultiplier = rule?.multiplier ?? 1.0
+        let channel = tx.payment_channel
+        let inferredRail = PaymentRail.infer(plaidChannel: channel, title: title)
+        let bankAccount = fetchBankAccount(accountId: accountId, modelContext: modelContext)
+        let railMultiplier = bankAccount?.rewardMultiplier(for: inferredRail)
+        // Preference: vendor learn rule → account debit/ACH default → 1.0
+        let mappedMultiplier = rule?.multiplier ?? railMultiplier ?? 1.0
         let amount = -abs(tx.amount)
 
         if let existing = try? modelContext.fetch(descriptor).first {
@@ -372,11 +379,20 @@ enum PlaidSyncEngine {
             existing.amount = amount
             existing.date = date
             existing.paymentMethod = paymentMethod
+            existing.plaidPaymentChannel = channel
+            if !existing.isPaymentRailLocked {
+                existing.paymentRail = inferredRail.rawValue
+            }
             if !existing.isCategoryLocked {
                 existing.category = mappedCategory
             }
             if !existing.isMultiplierLocked {
-                existing.multiplier = mappedMultiplier
+                // Re-resolve with locked rail if user set one
+                let rail = existing.effectivePaymentRail
+                let mult = rule?.multiplier
+                    ?? bankAccount?.rewardMultiplier(for: rail)
+                    ?? 1.0
+                existing.multiplier = mult
             }
         } else {
             modelContext.insert(
@@ -390,10 +406,28 @@ enum PlaidSyncEngine {
                     multiplier: mappedMultiplier,
                     categoryLocked: false,
                     multiplierLocked: false,
-                    overrideSource: rule != nil ? "rule" : nil
+                    overrideSource: rule != nil ? "rule" : (railMultiplier != nil ? "account-rail" : nil),
+                    plaidPaymentChannel: channel,
+                    paymentRail: inferredRail.rawValue,
+                    paymentRailLocked: false
                 )
             )
         }
+    }
+
+    @MainActor
+    private static func fetchBankAccount(
+        accountId: String,
+        modelContext: ModelContext
+    ) -> BankAccount? {
+        let id = accountId
+        var descriptor = FetchDescriptor<BankAccount>(
+            predicate: #Predicate<BankAccount> { account in
+                account.accountId == id
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 
     @MainActor
