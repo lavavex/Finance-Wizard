@@ -2,14 +2,14 @@
 //  CardsView.swift
 //  Finance Wizard
 //
-//  Cards hub: one row per real account (by Plaid account_id / mask), not
-//  collapsed by bank brand. Logos come from Plaid only.
+//  Accounts hub: credit cards + checking/savings, Plaid logos, credit
+//  liabilities, and collapsible bill payments under spend.
 //
 
 import SwiftUI
 import SwiftData
 
-// MARK: - Cards tab
+// MARK: - Accounts tab (formerly Cards)
 
 struct CardsView: View {
     @Query private var transactions: [Transaction]
@@ -36,6 +36,11 @@ struct CardsView: View {
     private var creditAccounts: [BankAccount] {
         _ = nicknameEpoch
         return accounts.filter(\.isCredit)
+    }
+
+    private var depositoryAccounts: [BankAccount] {
+        _ = nicknameEpoch
+        return accounts.filter(\.isDepository)
     }
 
     private var periodPayments: [CreditCardPayment] {
@@ -75,18 +80,13 @@ struct CardsView: View {
         creditAccounts.contains { $0.isOverdue == true }
     }
 
-    /// One row per credit account (unique account_id), plus orphan spend methods.
-    private var unifiedCardRows: [UnifiedCardRow] {
+    /// Credit card rows only (by Plaid account_id).
+    private var creditRows: [UnifiedCardRow] {
         _ = nicknameEpoch
-
-        var claimedPaymentMethods = Set<String>()
         var rows: [UnifiedCardRow] = []
 
-        // 1) Each Plaid credit account is its own card — never merge by brand.
         for account in creditAccounts.sorted(by: { max(0, $0.currentBalance) > max(0, $1.currentBalance) }) {
             let methods = paymentMethodsMatching(account: account)
-            for m in methods { claimedPaymentMethods.insert(m) }
-
             let spendTxs = periodTransactions.filter {
                 methods.contains(TransactionAnalytics.cardName(for: $0))
             }
@@ -102,59 +102,82 @@ struct CardsView: View {
                     spent: spent,
                     transactionCount: spendTxs.count,
                     creditAccount: account,
+                    bankAccount: account,
                     paidInPeriod: paidFor(credit: account, paymentMethods: methods)
                 )
             )
         }
+        return rows
+    }
 
-        // 2) Spend-only methods (checking, etc.) not claimed by a credit account
-        let orphanMethods = Set(periodTransactions.map { TransactionAnalytics.cardName(for: $0) })
-            .subtracting(claimedPaymentMethods)
-            .sorted()
+    /// Checking / savings linked accounts.
+    private var depositoryRows: [UnifiedCardRow] {
+        _ = nicknameEpoch
+        var rows: [UnifiedCardRow] = []
+        let claimedByCredit = Set(creditRows.flatMap(\.matchingPaymentMethods))
 
-        for method in orphanMethods {
+        for account in depositoryAccounts.sorted(by: {
+            ($0.availableBalance ?? $0.currentBalance) > ($1.availableBalance ?? $1.currentBalance)
+        }) {
+            let methods = paymentMethodsMatching(account: account)
             let spendTxs = periodTransactions.filter {
-                TransactionAnalytics.cardName(for: $0) == method
+                let name = TransactionAnalytics.cardName(for: $0)
+                return methods.contains(name) && !claimedByCredit.contains(name)
             }
             let spent = TransactionAnalytics.totalSpend(in: spendTxs)
-            guard spent > 0 || !spendTxs.isEmpty else { continue }
-
-            // Prefer depository account if exact match
-            let depository = accounts.first { account in
-                !account.isCredit && paymentMethodsMatching(account: account).contains(method)
-            }
+            let primaryMethod = methods.sorted().first ?? account.plaidDisplayName
 
             rows.append(
                 UnifiedCardRow(
-                    id: "method:\(method)",
-                    displayName: CardLabelStore.label(
-                        paymentMethod: method,
-                        accountId: depository?.accountId,
-                        fallback: method
-                    ),
-                    rawPaymentMethod: method,
-                    matchingPaymentMethods: [method],
+                    id: account.accountId,
+                    displayName: account.displayName,
+                    rawPaymentMethod: primaryMethod,
+                    matchingPaymentMethods: methods,
                     spent: spent,
                     transactionCount: spendTxs.count,
                     creditAccount: nil,
-                    bankAccount: depository,
+                    bankAccount: account,
                     paidInPeriod: 0
                 )
             )
         }
+        return rows
+    }
 
-        return rows.sorted { lhs, rhs in
-            let balanceL = lhs.creditAccount.map { max(0, $0.currentBalance) } ?? -1
-            let balanceR = rhs.creditAccount.map { max(0, $0.currentBalance) } ?? -1
-            if balanceL != balanceR { return balanceL > balanceR }
-            if lhs.spent != rhs.spent { return lhs.spent > rhs.spent }
-            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+    /// Spend methods not matched to any linked account.
+    private var otherSpendRows: [UnifiedCardRow] {
+        _ = nicknameEpoch
+        let claimed = Set(creditRows.flatMap(\.matchingPaymentMethods))
+            .union(depositoryRows.flatMap(\.matchingPaymentMethods))
+
+        let orphanMethods = Set(periodTransactions.map { TransactionAnalytics.cardName(for: $0) })
+            .subtracting(claimed)
+            .sorted()
+
+        return orphanMethods.compactMap { method in
+            let spendTxs = periodTransactions.filter {
+                TransactionAnalytics.cardName(for: $0) == method
+            }
+            let spent = TransactionAnalytics.totalSpend(in: spendTxs)
+            guard spent > 0 || !spendTxs.isEmpty else { return nil }
+            return UnifiedCardRow(
+                id: "method:\(method)",
+                displayName: CardLabelStore.label(paymentMethod: method, fallback: method),
+                rawPaymentMethod: method,
+                matchingPaymentMethods: [method],
+                spent: spent,
+                transactionCount: spendTxs.count,
+                creditAccount: nil,
+                bankAccount: nil,
+                paidInPeriod: 0
+            )
         }
     }
 
     var body: some View {
         NavigationStack {
             List {
+                // MARK: Overview
                 Section {
                     NavigationLink {
                         CategorySpendView(period: period, referenceDate: referenceDate)
@@ -176,7 +199,15 @@ struct CardsView: View {
                         }
                     }
 
-                    if !creditAccounts.isEmpty || totalPaidInPeriod > 0 {
+                    TotalPaidDisclosure(
+                        total: totalPaidInPeriod,
+                        payments: periodPayments,
+                        periodLabel: periodLabel,
+                        institutionId: nil,
+                        resolveInstitutionId: { institutionId(for: $0) }
+                    )
+
+                    if !creditAccounts.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -233,75 +264,58 @@ struct CardsView: View {
                                     }
                                 }
                             }
-
-                            HStack {
-                                Text("Paid in \(periodLabel.lowercased())")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(totalPaidInPeriod, format: .currency(code: "USD"))
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.green)
-                            }
                         }
                         .padding(.vertical, 4)
                     }
                 } header: {
                     Text("Overview")
                 } footer: {
-                    Text("Each linked account is listed separately (by card number). Open a card to rename it. Logos and credit details come from Plaid.")
+                    Text("Bill payments are under Total paid (not spend). Logos and credit terms come from Plaid.")
                 }
 
+                // MARK: Credit cards
                 Section {
-                    if unifiedCardRows.isEmpty {
-                        Text("No cards in \(periodLabel.lowercased()). Sync data or pick another range.")
+                    if creditRows.isEmpty {
+                        Text("No credit cards linked. Link a bank or pick another period.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(unifiedCardRows) { row in
-                            NavigationLink {
-                                CardDetailView(
-                                    displayName: row.displayName,
-                                    rawPaymentMethod: row.rawPaymentMethod,
-                                    matchingPaymentMethods: row.matchingPaymentMethods,
-                                    period: period,
-                                    referenceDate: referenceDate,
-                                    sort: sort,
-                                    creditAccount: row.creditAccount,
-                                    bankAccount: row.bankAccount ?? row.creditAccount,
-                                    periodPayments: paymentsMatching(
-                                        credit: row.creditAccount,
-                                        paymentMethods: row.matchingPaymentMethods
-                                    ),
-                                    onNicknameChanged: { nicknameEpoch += 1 }
-                                )
-                            } label: {
-                                UnifiedCardLabel(row: row)
-                            }
+                        ForEach(creditRows) { row in
+                            accountNavigationLink(row: row)
                         }
                     }
                 } header: {
-                    Text("Cards")
+                    Text("Credit cards")
                 }
 
+                // MARK: Checking / savings
                 Section {
-                    if periodPayments.isEmpty {
-                        Text("No card payments in \(periodLabel.lowercased()).")
+                    if depositoryRows.isEmpty {
+                        Text("No checking or savings accounts linked yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(periodPayments, id: \.transactionId) { payment in
-                            CreditPaymentRow(
-                                payment: payment,
-                                institutionId: institutionId(for: payment)
-                            )
+                        ForEach(depositoryRows) { row in
+                            accountNavigationLink(row: row)
                         }
                     }
                 } header: {
-                    Text("Payments · \(periodLabel)")
+                    Text("Checking & savings")
                 } footer: {
-                    Text("Card bill payments don’t count toward Total Spend.")
+                    Text("Set debit vs ACH rewards on an account when cashback differs (e.g. 3% debit, 0% ACH).")
+                }
+
+                if !otherSpendRows.isEmpty {
+                    Section {
+                        ForEach(otherSpendRows) { row in
+                            accountNavigationLink(row: row)
+                        }
+                    } header: {
+                        Text("Other spend")
+                    } footer: {
+                        Text("Payment methods that don’t match a linked account yet.")
+                    }
                 }
             }
-            .navigationTitle("Cards")
+            .navigationTitle("Accounts")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
@@ -327,9 +341,31 @@ struct CardsView: View {
         }
     }
 
-    // MARK: - Strict matching (mask / exact only — never brand-wide)
+    @ViewBuilder
+    private func accountNavigationLink(row: UnifiedCardRow) -> some View {
+        NavigationLink {
+            CardDetailView(
+                displayName: row.displayName,
+                rawPaymentMethod: row.rawPaymentMethod,
+                matchingPaymentMethods: row.matchingPaymentMethods,
+                period: period,
+                referenceDate: referenceDate,
+                sort: sort,
+                creditAccount: row.creditAccount,
+                bankAccount: row.bankAccount ?? row.creditAccount,
+                periodPayments: paymentsMatching(
+                    credit: row.creditAccount,
+                    paymentMethods: row.matchingPaymentMethods
+                ),
+                onNicknameChanged: { nicknameEpoch += 1 }
+            )
+        } label: {
+            UnifiedCardLabel(row: row)
+        }
+    }
 
-    /// Payment-method strings that belong to this Plaid account.
+    // MARK: - Matching
+
     private func paymentMethodsMatching(account: BankAccount) -> Set<String> {
         var methods = Set<String>()
         let allMethods = Set(transactions.map { TransactionAnalytics.cardName(for: $0) })
@@ -340,8 +376,6 @@ struct CardsView: View {
                 methods.insert(method)
             }
         }
-
-        // Always include the account’s own Plaid label even with no spend yet
         methods.insert(account.plaidDisplayName)
         return methods
     }
@@ -349,11 +383,7 @@ struct CardsView: View {
     private func methodBelongs(_ method: String, to account: BankAccount) -> Bool {
         if namesMatch(method, account.plaidDisplayName) { return true }
         if namesMatch(method, account.name) { return true }
-        // Mask is the reliable disambiguator for multiple Chase cards
-        if let mask = account.mask, !mask.isEmpty {
-            // "Credit Card ···0820" / "Chase Freedom ...0820" / "····0820"
-            if method.contains(mask) { return true }
-        }
+        if let mask = account.mask, !mask.isEmpty, method.contains(mask) { return true }
         return false
     }
 
@@ -402,6 +432,48 @@ struct CardsView: View {
     }
 }
 
+// MARK: - Total paid disclosure
+
+struct TotalPaidDisclosure: View {
+    let total: Double
+    let payments: [CreditCardPayment]
+    let periodLabel: String
+    var institutionId: String?
+    var resolveInstitutionId: ((CreditCardPayment) -> String?)? = nil
+
+    var body: some View {
+        DisclosureGroup {
+            if payments.isEmpty {
+                Text("No card bill payments in \(periodLabel.lowercased()).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(payments, id: \.transactionId) { payment in
+                    CreditPaymentRow(
+                        payment: payment,
+                        institutionId: resolveInstitutionId?(payment) ?? institutionId
+                    )
+                    .padding(.vertical, 2)
+                }
+            }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Total paid")
+                        .font(.subheadline.weight(.semibold))
+                    Text(periodLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(total, format: .currency(code: "USD"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(total > 0 ? .green : .secondary)
+            }
+        }
+    }
+}
+
 // MARK: - Row model
 
 private struct UnifiedCardRow: Identifiable {
@@ -441,15 +513,11 @@ private struct UnifiedCardLabel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.displayName)
                         .font(.body.weight(.semibold))
-                    if let account = row.creditAccount {
+                    if let account = row.creditAccount ?? row.bankAccount {
                         Text(account.subtitleDetail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                    } else if let mask = row.bankAccount?.mask, !mask.isEmpty {
-                        Text("···\(mask)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     } else {
                         Text(row.transactionCount > 0
                              ? "\(row.transactionCount) purchases"
@@ -472,6 +540,14 @@ private struct UnifiedCardLabel: View {
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
+                    }
+                } else if let account = row.bankAccount, account.isDepository {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(account.availableBalance ?? account.currentBalance, format: .currency(code: "USD"))
+                            .font(.body.weight(.semibold))
+                        Text("Available")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                 } else {
                     VStack(alignment: .trailing, spacing: 2) {
@@ -541,7 +617,7 @@ private struct UnifiedCardLabel: View {
     }
 }
 
-// MARK: - Card detail
+// MARK: - Account detail
 
 struct CardDetailView: View {
     let displayName: String
@@ -556,9 +632,14 @@ struct CardDetailView: View {
     var onNicknameChanged: (() -> Void)? = nil
 
     @Query private var transactions: [Transaction]
+    @Environment(\.modelContext) private var modelContext
+
     @State private var nicknameDraft: String = ""
     @State private var didSaveNickname = false
     @State private var titleName: String = ""
+    @State private var debitMultText: String = ""
+    @State private var achMultText: String = ""
+    @State private var didSaveRewards = false
 
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
@@ -590,6 +671,10 @@ struct CardDetailView: View {
 
     private var account: BankAccount? { creditAccount ?? bankAccount }
 
+    private var isDepositoryDetail: Bool {
+        creditAccount == nil && (bankAccount?.isDepository == true || bankAccount != nil && creditAccount == nil)
+    }
+
     var body: some View {
         List {
             Section {
@@ -618,6 +703,19 @@ struct CardDetailView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                } else if let bank = bankAccount {
+                    LabeledContent("Plaid name") {
+                        Text(bank.plaidDisplayName)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    if let mask = bank.mask, !mask.isEmpty {
+                        LabeledContent("Last four") {
+                            Text(mask)
+                                .font(.body.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 } else {
                     LabeledContent("Account") {
                         Text(rawPaymentMethod)
@@ -634,9 +732,9 @@ struct CardDetailView: View {
                         .font(.caption)
                 }
             } header: {
-                Text("Card name")
+                Text("Account name")
             } footer: {
-                Text("Nicknames are per account (by card number). Multiple Chase cards stay separate.")
+                Text("Nicknames are per account (by last four). Multiple cards at the same bank stay separate.")
             }
 
             Section {
@@ -667,6 +765,19 @@ struct CardDetailView: View {
                             UtilizationBar(value: util, label: "Utilization")
                         }
                     }
+                } else if let bank = bankAccount, bank.isDepository {
+                    HStack {
+                        Text("Available")
+                        Spacer()
+                        Text(bank.availableBalance ?? bank.currentBalance, format: .currency(code: "USD"))
+                            .font(.title3.weight(.semibold))
+                    }
+                    HStack {
+                        Text("Ledger balance")
+                        Spacer()
+                        Text(bank.currentBalance, format: .currency(code: "USD"))
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 HStack {
@@ -679,15 +790,56 @@ struct CardDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                HStack {
-                    Text("Paid this period")
-                    Spacer()
-                    Text(paidTotal, format: .currency(code: "USD"))
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(paidTotal > 0 ? .green : .secondary)
+                // Bill payments under spend — expandable list
+                if creditAccount != nil || paidTotal > 0 || !periodPayments.isEmpty {
+                    TotalPaidDisclosure(
+                        total: paidTotal,
+                        payments: periodPayments,
+                        periodLabel: periodLabel,
+                        institutionId: account?.institutionId
+                    )
                 }
             } header: {
                 Text("Summary")
+            }
+
+            if let bank = bankAccount, bank.isDepository || creditAccount == nil && bankAccount != nil {
+                if bank.isDepository {
+                    Section {
+                        HStack {
+                            Text("Debit card rewards")
+                            Spacer()
+                            TextField("e.g. 0.03", text: $debitMultText)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(maxWidth: 100)
+                            Text("×")
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Text("ACH rewards")
+                            Spacer()
+                            TextField("e.g. 0", text: $achMultText)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(maxWidth: 100)
+                            Text("×")
+                                .foregroundStyle(.secondary)
+                        }
+                        Button("Save rewards") {
+                            saveRewardMultipliers()
+                        }
+                        if didSaveRewards {
+                            Label("Saved", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.caption)
+                        }
+                    } header: {
+                        Text("Debit vs ACH rewards")
+                    } footer: {
+                        Text("Applied on Sync to unlocked purchases by rail. Example: X Money → Debit 0.03 (3% cashback), ACH 0. Use transaction detail to correct Debit vs ACH when Plaid is wrong.")
+                    }
+                }
             }
 
             if let credit = creditAccount, credit.hasLiabilitiesDetails {
@@ -769,20 +921,9 @@ struct CardDetailView: View {
                 }
             }
 
-            if !periodPayments.isEmpty {
-                Section("Payments · \(periodLabel)") {
-                    ForEach(periodPayments, id: \.transactionId) { payment in
-                        CreditPaymentRow(
-                            payment: payment,
-                            institutionId: account?.institutionId
-                        )
-                    }
-                }
-            }
-
             Section("Purchases") {
                 if cardRows.isEmpty {
-                    Text("No purchases for this card in the selected period.")
+                    Text("No purchases for this account in the selected period.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(cardRows) { transaction in
@@ -792,7 +933,8 @@ struct CardDetailView: View {
                             TransactionRowView(
                                 transaction: transaction,
                                 institutionId: account?.institutionId,
-                                institutionName: account?.institutionName
+                                institutionName: account?.institutionName,
+                                showPaymentRail: bankAccount?.isDepository == true || creditAccount == nil
                             )
                         }
                     }
@@ -804,6 +946,10 @@ struct CardDetailView: View {
         .onAppear {
             titleName = displayName
             nicknameDraft = displayName
+            if let bank = bankAccount {
+                debitMultText = formatOptionalMult(bank.debitRewardMultiplier)
+                achMultText = formatOptionalMult(bank.achRewardMultiplier)
+            }
         }
     }
 
@@ -828,6 +974,31 @@ struct CardDetailView: View {
         }
     }
 
+    private func saveRewardMultipliers() {
+        guard let bank = bankAccount else { return }
+        bank.debitRewardMultiplier = parseOptionalMult(debitMultText)
+        bank.achRewardMultiplier = parseOptionalMult(achMultText)
+        try? modelContext.save()
+        didSaveRewards = true
+        onNicknameChanged?()
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            didSaveRewards = false
+        }
+    }
+
+    private func formatOptionalMult(_ value: Double?) -> String {
+        guard let value else { return "" }
+        return value.formatted(.number.precision(.fractionLength(0...4)))
+    }
+
+    private func parseOptionalMult(_ text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+        if trimmed.isEmpty { return nil }
+        return Double(trimmed)
+    }
+
     private func formatAPR(_ value: Double) -> String {
         "\(value.formatted(.number.precision(.fractionLength(0...2))))%"
     }
@@ -850,10 +1021,10 @@ struct TransactionRowView: View {
     let transaction: Transaction
     var institutionId: String? = nil
     var institutionName: String? = nil
+    var showPaymentRail: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
-            // Category for the spend type; institution mark when we know the card's bank
             ZStack(alignment: .bottomTrailing) {
                 Image(systemName: CategoryStyle.symbolName(for: transaction.category))
                     .font(.title3)
@@ -876,9 +1047,17 @@ struct TransactionRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.title)
                     .font(.body)
-                Text("\(transaction.category) · \(displayPaymentMethod)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text("\(transaction.category) · \(displayPaymentMethod)")
+                    if showPaymentRail {
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                        Text(transaction.effectivePaymentRail.shortLabel)
+                            .foregroundStyle(railColor)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 Text(transaction.date, style: .date)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -896,6 +1075,14 @@ struct TransactionRowView: View {
 
     private var displayPaymentMethod: String {
         CardLabelStore.label(paymentMethod: transaction.paymentMethod)
+    }
+
+    private var railColor: Color {
+        switch transaction.effectivePaymentRail {
+        case .debit: return .blue
+        case .ach: return .orange
+        case .other: return .secondary
+        }
     }
 }
 

@@ -71,10 +71,10 @@ struct ContentView: View {
                     Label("Transactions", systemImage: "list.bullet")
                 }
 
-            // Tab 2: spend by card + credit utilization / payments
+            // Tab 2: accounts (credit + checking), spend, bill payments
             CardsView()
                 .tabItem {
-                    Label("Cards", systemImage: "creditcard")
+                    Label("Accounts", systemImage: "building.columns")
                 }
 
             // Tab 3: Plaid credentials + linked banks
