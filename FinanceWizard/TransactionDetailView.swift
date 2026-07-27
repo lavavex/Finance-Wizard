@@ -2,14 +2,14 @@
 //  TransactionDetailView.swift
 //  Finance Wizard
 //
-//  Tap a transaction → view details, edit category / multiplier, push to server.
+//  Tap a transaction → view details, edit category / multiplier (local only).
 //
 
 import SwiftUI
 import SwiftData
 import WidgetKit
 
-// Built-in fallback categories if GET /api/categories is empty/unreachable
+// Built-in expense categories for the picker
 enum KnownCategory: String, CaseIterable, Identifiable {
     case dining = "Dining"
     case gas = "Gas (Car)"
@@ -35,27 +35,21 @@ enum KnownCategory: String, CaseIterable, Identifiable {
 
 // Detail + edit screen for one SwiftData transaction
 struct TransactionDetailView: View {
-    // The live model object (edits write through to SwiftData after server accepts)
     @Bindable var transaction: Transaction
 
     @Environment(\.modelContext) private var modelContext
 
-    // Draft fields
     @State private var categoryText: String = ""
     @State private var multiplierText: String = ""
-    // Push options (map to classify API body)
     @State private var learn = true
-    // Default on: points multipliers are per-card (Freedom 5x ≠ Apple Card 1x)
     @State private var scopePaymentMethod = true
     @State private var applyToMatching = false
-    // Categories from server (or fallback)
     @State private var categoryOptions: [String] = KnownCategory.defaultNames
     @State private var isSaving = false
     @State private var saveError: String?
     @State private var didSave = false
     @State private var saveStatusMessage: String?
 
-    // All local rows — used when applyToMatching updates the same vendor on device
     @Query private var allTransactions: [Transaction]
 
     private var selectedPreset: String? {
@@ -64,7 +58,6 @@ struct TransactionDetailView: View {
 
     var body: some View {
         Form {
-            // Read-only identity / money
             Section {
                 HStack(spacing: 12) {
                     Image(systemName: CategoryStyle.symbolName(for: categoryText.isEmpty ? transaction.category : categoryText))
@@ -101,7 +94,7 @@ struct TransactionDetailView: View {
                         .textSelection(.enabled)
                 }
                 if transaction.isCategoryLocked || transaction.isMultiplierLocked {
-                    LabeledContent("Locked on server") {
+                    LabeledContent("Locked") {
                         Text(lockSummary)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -116,7 +109,6 @@ struct TransactionDetailView: View {
                 }
             }
 
-            // Editable fields
             Section {
                 Picker("Category", selection: categoryPickerBinding) {
                     ForEach(categoryOptions, id: \.self) { name in
@@ -143,24 +135,21 @@ struct TransactionDetailView: View {
             } header: {
                 Text("Edit")
             } footer: {
-                Text("Save pushes to finance-sync and locks this row so later Plaid syncs won’t overwrite it (when learn is on, the vendor rule is remembered too).")
+                Text("Save updates this device only and locks the row so later Plaid syncs won’t overwrite category/multiplier. Optional learn rules apply to future matching purchases.")
             }
 
-            // Server classify options
             Section {
                 Toggle("Remember for this vendor (learn)", isOn: $learn)
                 Toggle("Only same card/account", isOn: $scopePaymentMethod)
-                    // Bulk apply always stays on this card so multipliers never jump cards
                     .disabled(applyToMatching)
                 Toggle("Apply to other matching transactions", isOn: $applyToMatching)
                     .onChange(of: applyToMatching) { _, isOn in
-                        // Matching updates always include the multiplier — lock to this card
                         if isOn { scopePaymentMethod = true }
                     }
             } header: {
-                Text("Server options")
+                Text("Local rules")
             } footer: {
-                Text("Learn stores a rule for future purchases. Apply to matching only updates other rows on the same card so points multipliers never copy across cards.")
+                Text("Learn stores a rule on this device for future Plaid rows. Apply to matching only updates other rows on the same card so points multipliers never copy across cards.")
             }
 
             Section("Points (estimate)") {
@@ -175,7 +164,7 @@ struct TransactionDetailView: View {
 
             if didSave {
                 Section {
-                    Label(saveStatusMessage ?? "Saved to device and server", systemImage: "checkmark.circle.fill")
+                    Label(saveStatusMessage ?? "Saved on this device", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 }
             }
@@ -206,11 +195,9 @@ struct TransactionDetailView: View {
             multiplierText = formatMultiplier(transaction.multiplier)
         }
         .task {
-            // Prefer live category list from the portal
-            let remote = await FinanceSyncAPI.fetchCategories()
-            if !remote.isEmpty {
-                // Merge server list with current value so custom categories still appear
-                var merged = remote
+            let names = await FinanceSyncAPI.fetchCategories()
+            if !names.isEmpty {
+                var merged = names
                 if !merged.contains(transaction.category), !transaction.category.isEmpty {
                     merged.insert(transaction.category, at: 0)
                 }
@@ -244,7 +231,6 @@ struct TransactionDetailView: View {
         return value.formatted()
     }
 
-    // Validate → POST classify → update local SwiftData (+ optional matching rows)
     @MainActor
     private func saveEdits() async {
         let trimmedCategory = categoryText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -265,28 +251,25 @@ struct TransactionDetailView: View {
         defer { isSaving = false }
 
         do {
-            // When bulk-applying, always scope to this card so the multiplier
-            // never lands on the same vendor charged to a different card.
             let cardScoped = scopePaymentMethod || applyToMatching
 
-            // 1) Push to finance-sync (locks + optional learn / bulk apply on server)
-            try await FinanceSyncAPI.classify(
-                transactionId: transaction.transactionId,
-                category: trimmedCategory,
-                multiplier: multiplier,
-                learn: learn,
-                scopePaymentMethod: cardScoped,
-                applyToMatching: applyToMatching
-            )
-
-            // 2) Update this row locally
+            // Local row
             transaction.category = trimmedCategory
             transaction.multiplier = multiplier
             transaction.categoryLocked = true
             transaction.multiplierLocked = true
             transaction.overrideSource = "user"
 
-            // 3) Mirror bulk apply on device — same vendor + same card only
+            // Learn rule for future Plaid syncs
+            if learn {
+                VendorRulesStore.upsert(
+                    vendor: transaction.title,
+                    paymentMethod: cardScoped ? transaction.paymentMethod : nil,
+                    category: trimmedCategory,
+                    multiplier: multiplier
+                )
+            }
+
             var localExtra = 0
             if applyToMatching {
                 localExtra = applyLocalMatching(
@@ -299,9 +282,9 @@ struct TransactionDetailView: View {
             WidgetCenter.shared.reloadAllTimelines()
 
             if localExtra > 0 {
-                saveStatusMessage = "Saved. Updated \(localExtra + 1) local transactions on this card."
+                saveStatusMessage = "Saved. Updated \(localExtra + 1) transactions on this card."
             } else {
-                saveStatusMessage = "Saved to device and server"
+                saveStatusMessage = "Saved on this device"
             }
             didSave = true
             Task {
@@ -309,13 +292,10 @@ struct TransactionDetailView: View {
                 didSave = false
             }
         } catch {
-            // Do not write local-only if server rejected — keeps device/server consistent
             saveError = error.localizedDescription
         }
     }
 
-    // Local bulk update for matching vendors on the *same card* only.
-    // Multipliers are per payment method — never copy Freedom 5x onto Apple Card, etc.
     @discardableResult
     private func applyLocalMatching(category: String, multiplier: Double) -> Int {
         let vendor = transaction.title
@@ -324,9 +304,7 @@ struct TransactionDetailView: View {
 
         for row in allTransactions {
             if row.transactionId == transaction.transactionId { continue }
-            // Same merchant name (simple equality; server uses looser matching)
             guard row.title.caseInsensitiveCompare(vendor) == .orderedSame else { continue }
-            // Always same card for bulk multiplier/category apply
             guard row.paymentMethod.caseInsensitiveCompare(card) == .orderedSame else { continue }
 
             row.category = category

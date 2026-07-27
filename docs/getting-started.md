@@ -17,11 +17,9 @@ title: Getting started
 1. Select the **FinanceWizard** target (Finance Wizard app) → **Signing & Capabilities**.
 2. Choose your **Team** (Personal Team works for development).
 3. Repeat for **WidgetExtension** (must sign with the same team).
-4. Bundle IDs (separate from any older FinanceWidget install):
+4. Bundle IDs:
    - App: `net.roberth.FinanceWizard`
    - Widget: `net.roberth.FinanceWizard.Widget`
-
-These IDs make **Finance Wizard** a distinct app from a previous **FinanceWidget** build on the same device. If you change them, update App Group capability consistency (next section).
 
 ## 3. App Groups (required)
 
@@ -43,48 +41,41 @@ Entitlements files:
 
 Without the shared group, the widget cannot see transactions the app saves.
 
-## 4. Local network / HTTP (for Sync)
-
-The default server is plain **HTTP** on the LAN (`http://openwindow.local:8787`).
-
-1. Confirm **Info** / `Info.plist` allows local networking / ATS exceptions for local HTTP (already set up during development with `NSAllowsLocalNetworking` / arbitrary loads as needed).
-2. **Privacy – Local Network Usage Description** should explain why the app talks to the PC.
-3. On first Sync, iOS may prompt for **Local Network** access — allow it.
-
-## 5. Shared code membership
-
-These folders are compiled into **both** app and widget:
+## 4. Shared code membership
 
 | Folder | Role |
 |--------|------|
 | `Shared/` | `Transaction`, `SharedStore`, analytics, category SF Symbols |
+| `FinanceWizard/` | App UI + Plaid client |
+| `Widget/` | WidgetKit extension |
 
-App-only: `FinanceWizard/`  
-Widget-only: `Widget/`
+## 5. Plaid developer keys
 
-In Xcode, select a file → **File inspector** → **Target Membership** to verify.
+1. Sign up at [dashboard.plaid.com](https://dashboard.plaid.com).  
+2. Open **Developers → Keys**.  
+3. Copy **client_id** and the **Sandbox secret**.  
+4. Run the app → **Settings** → paste keys → Environment **Sandbox** → **Save credentials**.
 
 ## 6. First run checklist
 
-1. **Build and run** the **Finance Wizard** app (⌘R; scheme **FinanceWizard**).
-2. Open the **Settings** tab.
-3. Set **Sync server** if not using the default host, tap **Save server URL**.
-4. Confirm **Months pulled** shows the current and previous `YYYY-MM` values.
-5. Ensure **finance-sync** is running on the PC (port **8787**).
-6. On **Transactions**, tap **Sync**.
-7. List should fill; **By Card** should list payment methods.
-8. Add the **Total Spend** widget from the Home Screen gallery (long-press home → **+** → find the app).
+1. **Build and run** the **Finance Wizard** app (⌘R; scheme **FinanceWizard**).  
+2. **Settings → Link bank account**.  
+   - Sandbox institution: **First Platypus Bank**  
+   - Username `user_good`, password `pass_good`  
+3. On **Transactions**, open **Sync → Sync now**.  
+4. List should fill; **By Card** should list payment methods.  
+5. Add the **Total Spend** widget from the Home Screen gallery.
 
 ## 7. Optional: JSON file import
 
-Toolbar **Import** still accepts a finance-sync-style JSON export (`transactions` array) if the server is offline.
+Toolbar **Import** still accepts a JSON file with a `transactions` array (legacy export shape) if you need offline data.
 
 ## 8. Widget preview
 
-- Prefer running the **app** scheme so data is written to the App Group, then add the widget.
+- Prefer running the **app** scheme so data is written to the App Group, then add the widget.  
 - Or run the **WidgetExtension** scheme for layout debugging (data may be empty without a prior app Sync).
 
 ## Next
 
 - [Architecture](architecture.md) — how pieces fit  
-- [Sync & API](sync-and-api.md) — what Sync does on the wire  
+- [Sync & API](sync-and-api.md) — Plaid endpoints and mapping  

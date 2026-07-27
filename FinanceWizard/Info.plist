@@ -10,9 +10,9 @@
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- Needed for http:// local finance-sync during TestFlight on home network -->
+		<!-- Plaid is HTTPS; local networking kept permissive for optional offline import tools -->
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
+		<false/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>

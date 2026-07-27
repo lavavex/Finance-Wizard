@@ -30,16 +30,14 @@ struct ExportFile: Decodable {
     let transactions: [ImportedTransaction]
 }
 
-// Income stream from GET /api/income — shape matches finance-sync IncomeApiResponse / IncomeRow
+// Optional income array for offline JSON imports (legacy finance-sync shape still accepted)
 struct ImportedIncome: Decodable {
     let transaction_id: String
     let date: String
     let month_name: String?
     let year: Int?
-    /// Employer / payer / short label (display name)
     let source: String
     let category: String
-    /// Always > 0 (money in)
     let amount: Double
     let account_name: String?
     let account_mask: String?
@@ -55,10 +53,8 @@ struct IncomeExportFile: Decodable {
     let ok: Bool?
     let kind: String?
     let count: Int?
-    /// Server sum of amounts in this response (prefer for month-filtered pull)
     let total: Double?
     let categories: [String]?
-    // Optional so empty payloads without the key still decode
     let income: [ImportedIncome]?
 
     var rows: [ImportedIncome] { income ?? [] }
@@ -81,7 +77,7 @@ struct ContentView: View {
                     Label("By Card", systemImage: "creditcard")
                 }
 
-            // Tab 3: server URL and sync info
+            // Tab 3: Plaid credentials + linked banks
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
@@ -101,12 +97,13 @@ struct AllTransactionsView: View {
     @State private var importError: String?
     @State private var isSyncing = false
 
-    // Live + final Sync Status panel (Plaid result, month downloads, etc.)
+    // Live + final Sync Status panel
     @State private var syncStatusTitle: String = ""
     @State private var syncStatusDetail: String = ""
     @State private var syncStatusKind: SyncStatusKind = .idle
     /// Keeps the status section visible after a run until the next Sync
     @State private var showSyncStatus = false
+    @State private var showLinkSheet = false
 
     // Same filter concepts as the widget
     @State private var period: SnapshotPeriod = .month
@@ -155,12 +152,12 @@ struct AllTransactionsView: View {
         TransactionAnalytics.totalSpend(in: periodTransactions)
     }
 
-    // Money earned in the period (GET /api/income; always positive)
+    // Money earned in the period (always positive)
     private var totalIncome: Double {
         IncomeAnalytics.totalEarned(in: periodIncome)
     }
 
-    // Optional net: earned − spent for the same period (instruct “net” example)
+    // Optional net: earned − spent for the same period
     private var periodNet: Double {
         totalIncome - totalSpend
     }
@@ -294,17 +291,23 @@ struct AllTransactionsView: View {
                     if isSyncing {
                         ProgressView()
                     } else {
-                        // Quick sync (2 months) + full history pull
+                        // Incremental Plaid sync + optional full re-pull
                         Menu {
                             Button {
-                                Task { await syncFromServer(scope: .recent) }
+                                Task { await syncFromPlaid(resetCursors: false) }
                             } label: {
-                                Label("Sync recent months", systemImage: "arrow.triangle.2.circlepath")
+                                Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
                             }
                             Button {
-                                Task { await syncFromServer(scope: .everything) }
+                                Task { await syncFromPlaid(resetCursors: true) }
                             } label: {
-                                Label("Sync everything", systemImage: "arrow.down.circle")
+                                Label("Full re-sync", systemImage: "arrow.down.circle")
+                            }
+                            Divider()
+                            Button {
+                                showLinkSheet = true
+                            } label: {
+                                Label("Link bank account", systemImage: "building.columns")
                             }
                         } label: {
                             Text("Sync")
@@ -383,12 +386,19 @@ struct AllTransactionsView: View {
             } message: {
                 Text(importError ?? "")
             }
+            .sheet(isPresented: $showLinkSheet) {
+                PlaidLinkSheet { result in
+                    if case .failure(let error) = result {
+                        importError = error.localizedDescription
+                    }
+                }
+            }
         }
     }
 
     private var emptyMessage: String {
         if transactions.isEmpty {
-            return "No expenses yet. Tap Sync or Import."
+            return "No expenses yet. Link a bank in Settings, then tap Sync."
         }
         if periodTransactions.isEmpty {
             return "No expenses in \(periodLabel.lowercased())."
@@ -398,7 +408,7 @@ struct AllTransactionsView: View {
 
     private var incomeEmptyMessage: String {
         if incomeRows.isEmpty {
-            return "No income yet. Tap Sync to pull from the portal."
+            return "No income yet. Tap Sync after linking a bank."
         }
         return "No income in \(periodLabel.lowercased())."
     }
@@ -470,139 +480,38 @@ struct AllTransactionsView: View {
         syncStatusDetail = detail
     }
 
-    /// How much history to download after the Plaid bank pull
-    private enum SyncScope {
-        /// Current + previous calendar month only (default quick sync)
-        case recent
-        /// Unfiltered GET /api/transactions + GET /api/income (full portal tables)
-        case everything
-
-        var statusLabel: String {
-            switch self {
-            case .recent: return "recent months"
-            case .everything: return "everything"
-            }
-        }
-    }
-
-    // Sync button flow:
-    // 1) Ask the PC to pull from Plaid into SQLite (once; no fixed month)
-    // 2) GET + upsert expenses (recent months, or all rows if scope == .everything)
-    // 3) GET + upsert income the same way (separate stream; not in spend)
-    // 4) If Plaid is rate-limited (429) or busy (409), still do those GETs
-    // 5) Surface each step in Sync Status
-    private func syncFromServer(scope: SyncScope = .recent) async {
+    /// Pull transactions directly from the user’s Plaid developer account.
+    /// - Parameter resetCursors: if true, re-download full history for each Item.
+    private func syncFromPlaid(resetCursors: Bool) async {
         await MainActor.run {
             isSyncing = true
             setSyncStatus(
                 .running,
-                title: "Starting \(scope.statusLabel) sync…",
-                detail: "Connecting to \(apiBaseURL)"
+                title: resetCursors ? "Full re-sync…" : "Syncing with Plaid…",
+                detail: PlaidCredentialsStore.isConfigured
+                    ? "Environment: \(PlaidCredentialsStore.environment.displayName)"
+                    : "Missing credentials"
             )
         }
 
-        // Recent = two months; everything = no month filter on the GETs
-        let months: [String]? = scope == .recent ? AppSettings.currentAndPreviousMonths() : nil
-        let rangeLabel: String = {
-            if let months {
-                return months.joined(separator: ", ")
-            }
-            return "all rows (no month filter)"
-        }()
-
         do {
-            await MainActor.run {
-                setSyncStatus(
-                    .running,
-                    title: "Plaid bank sync…",
-                    detail: "Asking the server to pull latest data from linked banks"
-                )
-            }
-
-            // Step 1: trigger Plaid → SQLite (may 429 under local cooldown)
-            let plaidResult = try await requestPlaidSync()
-
-            // Human-readable Plaid step for the final summary
-            let plaidLine: String
-            let plaidWasWarning: Bool
-            switch plaidResult {
-            case .synced:
-                plaidLine = "Plaid: synced successfully"
-                plaidWasWarning = false
-            case .rateLimited(let retryHint):
-                plaidLine = "Plaid: rate-limited (skipped bank pull)"
-                    + (retryHint.map { " — \($0)" } ?? "")
-                plaidWasWarning = true
-            case .busy:
-                plaidLine = "Plaid: already running on server (skipped)"
-                plaidWasWarning = true
-            case .failed(let message):
-                plaidLine = "Plaid: failed — \(message)"
-                plaidWasWarning = true
-            }
-
-            await MainActor.run {
-                setSyncStatus(
-                    .running,
-                    title: "Downloading expenses…",
-                    detail: "\(plaidLine)\nScope: \(scope.statusLabel)\nFetching: \(rangeLabel)"
-                )
-            }
-
-            // Step 2: expenses (month list or full table)
-            let pulled = try await pullAndUpsertExpenses(months: months)
-            let monthLines = pulled.map { "\($0.label): \($0.count) expense(s)" }.joined(separator: "\n")
-            let totalRows = pulled.reduce(0) { $0 + $1.count }
-
-            await MainActor.run {
-                setSyncStatus(
-                    .running,
-                    title: "Downloading income…",
-                    detail: "\(plaidLine)\nScope: \(scope.statusLabel)\nFetching: \(rangeLabel)"
-                )
-            }
-
-            // Step 3: income stream — soft-fail so expenses still land
-            let incomeResult = await pullAndUpsertIncomeSoft(months: months)
-            let incomeLines: String
-            let totalIncomeRows: Int
-            let incomeWarning: String?
-            switch incomeResult {
-            case .ok(let pulled):
-                incomeLines = pulled.map { "\($0.label): \($0.count) income" }.joined(separator: "\n")
-                totalIncomeRows = pulled.reduce(0) { $0 + $1.count }
-                incomeWarning = nil
-            case .failed(let message):
-                incomeLines = "Income pull failed"
-                totalIncomeRows = 0
-                incomeWarning = message
-            }
-
-            await MainActor.run {
-                let hadWarning = plaidWasWarning || incomeWarning != nil
-                let kind: SyncStatusKind = hadWarning ? .warning : .success
-                let title: String
-                if case .synced = plaidResult, incomeWarning == nil {
-                    title = scope == .everything ? "Sync everything complete" : "Sync complete"
-                } else if case .failed = plaidResult {
-                    title = "Sync finished with Plaid error"
-                } else if incomeWarning != nil {
-                    title = "Sync complete (income issue)"
-                } else {
-                    title = "Sync complete (Plaid skipped)"
+            let report = try await PlaidSyncEngine.syncAll(
+                modelContext: modelContext,
+                resetCursors: resetCursors,
+                includePending: false
+            ) { message in
+                Task { @MainActor in
+                    setSyncStatus(.running, title: "Syncing…", detail: message)
                 }
-                var detail = """
-                Scope: \(scope.statusLabel)
-                \(plaidLine)
-                Expenses: \(totalRows) row(s)
-                \(monthLines)
-                Income: \(totalIncomeRows) row(s)
-                \(incomeLines)
-                """
-                if let incomeWarning {
-                    detail += "\nIncome error: \(incomeWarning)"
-                }
-                setSyncStatus(kind, title: title, detail: detail)
+            }
+
+            await MainActor.run {
+                let kind: SyncStatusKind = report.warnings.isEmpty ? .success : .warning
+                setSyncStatus(
+                    kind,
+                    title: report.warnings.isEmpty ? "Sync complete" : "Sync finished with warnings",
+                    detail: report.summary
+                )
                 isSyncing = false
             }
         } catch {
@@ -618,215 +527,7 @@ struct AllTransactionsView: View {
         }
     }
 
-    // GET expenses for each month, or one unfiltered GET when months == nil
-    private func pullAndUpsertExpenses(months: [String]?) async throws -> [(label: String, count: Int)] {
-        if let months {
-            var results: [(label: String, count: Int)] = []
-            for month in months {
-                await MainActor.run {
-                    setSyncStatus(
-                        .running,
-                        title: "Downloading expenses \(month)…",
-                        detail: syncStatusDetail
-                    )
-                }
-                let data = try await requestTransactionsJSON(month: month)
-                let count = try await MainActor.run {
-                    try upsertTransactions(from: data)
-                }
-                results.append((month, count))
-            }
-            return results
-        }
-
-        await MainActor.run {
-            setSyncStatus(
-                .running,
-                title: "Downloading all expenses…",
-                detail: syncStatusDetail
-            )
-        }
-        let data = try await requestTransactionsJSON(month: nil)
-        let count = try await MainActor.run {
-            try upsertTransactions(from: data)
-        }
-        return [("all", count)]
-    }
-
-    private enum IncomePullResult {
-        case ok([(label: String, count: Int)])
-        case failed(String)
-    }
-
-    // GET income for each month, or one unfiltered GET when months == nil (soft-fail)
-    private func pullAndUpsertIncomeSoft(months: [String]?) async -> IncomePullResult {
-        do {
-            if let months {
-                var results: [(label: String, count: Int)] = []
-                for month in months {
-                    await MainActor.run {
-                        setSyncStatus(
-                            .running,
-                            title: "Downloading income \(month)…",
-                            detail: syncStatusDetail
-                        )
-                    }
-                    let data = try await requestIncomeJSON(month: month)
-                    let count = try await MainActor.run {
-                        try upsertIncome(from: data)
-                    }
-                    results.append((month, count))
-                }
-                return .ok(results)
-            }
-
-            await MainActor.run {
-                setSyncStatus(
-                    .running,
-                    title: "Downloading all income…",
-                    detail: syncStatusDetail
-                )
-            }
-            let data = try await requestIncomeJSON(month: nil)
-            let count = try await MainActor.run {
-                try upsertIncome(from: data)
-            }
-            return .ok([("all", count)])
-        } catch {
-            return .failed(error.localizedDescription)
-        }
-    }
-
-    // Outcome of POST /api/plaid/sync
-    private enum PlaidSyncResult {
-        // 2xx — Plaid ran (or completed); transactions loaded via GET months
-        case synced
-        // 429 PLAID_SYNC_* cooldown / hourly cap — ignore and still pull JSON
-        case rateLimited(retryHint: String?)
-        // 409 SYNC_IN_FLIGHT — another sync running; still pull JSON
-        case busy
-        // Other HTTP / server error message
-        case failed(String)
-    }
-
-    // Base URL from Settings (UserDefaults), not a hardcoded constant
-    private var apiBaseURL: String {
-        AppSettings.serverBaseURL
-    }
-
-    // POST /api/plaid/sync — pulls banks into the PC database (all linked items)
-    private func requestPlaidSync() async throws -> PlaidSyncResult {
-        guard let url = URL(string: "\(apiBaseURL)/api/plaid/sync") else {
-            return .failed("Bad Plaid sync URL. Check Settings.")
-        }
-
-        // No month field: let the server refresh Plaid broadly; we GET months next
-        struct PlaidSyncBody: Encodable {
-            let includeTransactions: Bool
-            let unexportedOnly: Bool
-            let includePending: Bool
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(
-            PlaidSyncBody(
-                // We always GET current + previous month afterward
-                includeTransactions: false,
-                unexportedOnly: false,
-                includePending: false
-            )
-        )
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let http = response as? HTTPURLResponse
-        let status = http?.statusCode ?? 0
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-
-        // Rate limit: do not treat as fatal — caller will GET /api/transactions
-        if status == 429 {
-            // Prefer server message / retryAfterSec when present
-            var hint: String?
-            if let sec = json?["retryAfterSec"] as? Int {
-                let minutes = max(1, (sec + 59) / 60)
-                hint = "try again in ~\(minutes) min"
-            } else if let error = json?["error"] as? String {
-                hint = error
-            } else if let retryAfter = http?.value(forHTTPHeaderField: "Retry-After"),
-                      let sec = Int(retryAfter) {
-                let minutes = max(1, (sec + 59) / 60)
-                hint = "try again in ~\(minutes) min"
-            }
-            return .rateLimited(retryHint: hint)
-        }
-        // Sync already running — same fallback
-        if status == 409 {
-            return .busy
-        }
-
-        if !(200...299).contains(status) {
-            if let error = json?["error"] as? String {
-                return .failed(error)
-            }
-            return .failed("HTTP \(status)")
-        }
-
-        return .synced
-    }
-
-    // GET /api/transactions — optional month=YYYY-MM (nil = full expense table)
-    private func requestTransactionsJSON(month: String?) async throws -> Data {
-        var components = URLComponents(string: "\(apiBaseURL)/api/transactions")
-        if let month {
-            components?.queryItems = [URLQueryItem(name: "month", value: month)]
-        }
-        guard let url = components?.url else {
-            throw URLError(.badURL)
-        }
-
-        let (data, response) = try await URLSession.shared.data(from: url)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            let scope = month.map { "month \($0)" } ?? "all"
-            throw NSError(
-                domain: "Finance Wizard",
-                code: http.statusCode,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "Server returned \(http.statusCode) for transactions (\(scope))"
-                ]
-            )
-        }
-        return data
-    }
-
-    // GET /api/income — optional month=YYYY-MM (nil = full income table; pending off by default)
-    private func requestIncomeJSON(month: String?) async throws -> Data {
-        var components = URLComponents(string: "\(apiBaseURL)/api/income")
-        if let month {
-            components?.queryItems = [URLQueryItem(name: "month", value: month)]
-        }
-        // includePending defaults to false on the server
-        guard let url = components?.url else {
-            throw URLError(.badURL)
-        }
-
-        let (data, response) = try await URLSession.shared.data(from: url)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            let scope = month.map { "month \($0)" } ?? "all"
-            throw NSError(
-                domain: "Finance Wizard",
-                code: http.statusCode,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "Server returned \(http.statusCode) for income (\(scope))"
-                ]
-            )
-        }
-        return data
-    }
-
-    // Returns how many expense rows were in the JSON payload (for Sync Status)
+    // Offline JSON import (legacy finance-sync export shape still works)
     @discardableResult
     private func upsertTransactions(from data: Data) throws -> Int {
         let export = try JSONDecoder().decode(ExportFile.self, from: data)
@@ -847,10 +548,13 @@ struct AllTransactionsView: View {
                 existing.title = item.vendor
                 existing.amount = -item.amount
                 existing.date = date
-                // Server is source of truth after classify (locked fields preserved on Plaid sync)
-                existing.category = item.category
+                if !existing.isCategoryLocked {
+                    existing.category = item.category
+                }
                 existing.paymentMethod = item.payment_method
-                existing.multiplier = item.multiplier
+                if !existing.isMultiplierLocked {
+                    existing.multiplier = item.multiplier
+                }
                 existing.categoryLocked = categoryLocked
                 existing.multiplierLocked = multiplierLocked
                 existing.overrideSource = item.override_source
@@ -1071,7 +775,7 @@ struct IncomeDetailView: View {
             }
 
             Section {
-                Text("Income is separate from expenses and is not included in Total Spend, category charts, or budget export. Read-only from the app.")
+                Text("Income is separate from expenses and is not included in Total Spend or category charts. Pulled from Plaid when amount is money-in.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
