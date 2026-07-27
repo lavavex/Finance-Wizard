@@ -225,9 +225,18 @@ enum TransactionAnalytics {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> [Date] {
+        availableMonthStarts(from: transactions.map(\.date), now: now, calendar: calendar)
+    }
+
+    /// Month starts from any date list (payments, income, etc.).
+    static func availableMonthStarts(
+        from dates: [Date],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [Date] {
         var components = Set<DateComponents>()
-        for transaction in transactions {
-            components.insert(calendar.dateComponents([.year, .month], from: transaction.date))
+        for date in dates {
+            components.insert(calendar.dateComponents([.year, .month], from: date))
         }
         components.insert(calendar.dateComponents([.year, .month], from: now))
 
@@ -527,7 +536,12 @@ enum SharedStore {
     static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
         // Expenses + income share one App Group store; keep them as separate models
         // so spend analytics never accidentally include income.
-        let schema = Schema([Transaction.self, Income.self])
+        let schema = Schema([
+            Transaction.self,
+            Income.self,
+            BankAccount.self,
+            CreditCardPayment.self
+        ])
 
         if inMemory {
             let configuration = ModelConfiguration(

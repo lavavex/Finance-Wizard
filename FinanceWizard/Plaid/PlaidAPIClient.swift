@@ -340,6 +340,31 @@ enum PlaidAPIClient {
         )
     }
 
+    /// Current balances / credit limits for all accounts on an Item.
+    static func accountsGet(accessToken: String) async throws -> [PlaidAccountDetail] {
+        try PlaidCredentialsStore.requireConfigured()
+
+        struct Body: Encodable {
+            let client_id: String
+            let secret: String
+            let access_token: String
+        }
+
+        struct Response: Decodable {
+            let accounts: [PlaidAccountDetail]
+        }
+
+        let response: Response = try await post(
+            path: "/accounts/get",
+            body: Body(
+                client_id: PlaidCredentialsStore.clientID,
+                secret: PlaidCredentialsStore.secret,
+                access_token: accessToken
+            )
+        )
+        return response.accounts
+    }
+
     /// Optional: remove Item on Plaid side (invalidates access token).
     static func removeItem(accessToken: String) async throws {
         try PlaidCredentialsStore.requireConfigured()
@@ -437,6 +462,24 @@ struct PlaidAccount: Decodable {
     let mask: String?
     let type: String?
     let subtype: String?
+}
+
+/// Full account row from `/accounts/get` (includes balances).
+struct PlaidAccountDetail: Decodable {
+    let account_id: String
+    let name: String?
+    let official_name: String?
+    let mask: String?
+    let type: String?
+    let subtype: String?
+    let balances: PlaidBalances?
+}
+
+struct PlaidBalances: Decodable {
+    let available: Double?
+    let current: Double?
+    let limit: Double?
+    let iso_currency_code: String?
 }
 
 struct PlaidTransaction: Decodable {

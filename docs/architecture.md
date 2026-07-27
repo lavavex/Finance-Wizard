@@ -68,8 +68,8 @@ TabView
 ├── Transactions   (AllTransactionsView)
 │     filters: period, sort, hide cards (list only)
 │     toolbar: Sync (Plaid), Import, filters
-├── By Card        (CardsView → CardDetailView)
-│     period + sort; per-card totals and rows
+├── Cards          (CardsView → CardDetailView)
+│     period spend by card, credit utilization, payments
 └── Settings       (SettingsView)
       Plaid keys, environment, linked banks
 ```

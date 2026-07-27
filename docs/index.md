@@ -17,7 +17,7 @@ This site is the project wiki: everything needed to build, run, configure, and e
 | [Architecture](architecture.md) | Targets, folders, data flow diagram |
 | [Data model](data-model.md) | `Transaction`, `Income`, upserts, App Group store |
 | [Sync & API](sync-and-api.md) | Plaid Link, `/transactions/sync`, mapping |
-| [App features](app-features.md) | Tabs, filters, By Card, SF Symbols |
+| [App features](app-features.md) | Tabs, filters, Cards hub, SF Symbols |
 | [Widget](widget.md) | Total Spend widget, config, hide cards |
 | [Settings](settings.md) | Plaid credentials, linked banks |
 | [Development](development.md) | Shared code, git, conventions |
