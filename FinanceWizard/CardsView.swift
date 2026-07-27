@@ -111,13 +111,14 @@ struct CardsView: View {
             )
         }
 
-        return rows.sorted {
+        return rows.sorted { lhs, rhs in
             // Prefer higher balance (credit) then spend
-            let b0 = $0.creditAccount.map { max(0, $0.currentBalance) } ?? -1
-            let b1 = $1.creditAccount.map { max(0, $1.currentBalance) } ?? -1
-            if b0 != b1 { return b0 > b1 }
-            if $0.spent != $1.spent { return $0.spent > $1.spent }
-            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            // (use named params — nested $0/$1 with .map confuses the compiler)
+            let balanceL = lhs.creditAccount.map { account in max(0, account.currentBalance) } ?? -1
+            let balanceR = rhs.creditAccount.map { account in max(0, account.currentBalance) } ?? -1
+            if balanceL != balanceR { return balanceL > balanceR }
+            if lhs.spent != rhs.spent { return lhs.spent > rhs.spent }
+            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
         }
     }
 
