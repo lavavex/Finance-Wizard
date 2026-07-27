@@ -42,19 +42,23 @@ Save credentials under **Settings → Plaid developer account**. Use the secret 
 - Check the Sync Status / error text for Plaid `error_code`.  
 - If the error mentions `redirect_uri`, add that exact URI under **Dashboard → Developers → API → Allowed redirect URIs**.
 
-### “Continue to Login” does nothing
+### “webview integration mode for link is deprecated”
 
-OAuth banks open the bank login in a new window. Finance Wizard keeps that navigation **inside** the Link webview and returns via your **redirect URI**.
+Use the current app build — Link is **Hosted Link** in a system browser session, not WKWebView. Rebuild/reinstall if you still see this message.
 
-1. Settings → OAuth redirect URI (default `http://localhost/plaid-oauth` for Sandbox).  
-2. Plaid Dashboard → **Allowed redirect URIs** must include the **exact** same string.  
-3. Save credentials, close Link, open **Link bank account** again (new link_token).  
-4. Sandbox OAuth test bank: **Platypus OAuth Bank** / **First Platypus Bank - OAuth**. Non-OAuth Sandbox bank (**First Platypus Bank** with `user_good` / `pass_good`) skips this button.
+### Link browser never opens / closes immediately
 
-### OAuth bank never returns to the app
+- Allow the system authentication browser sheet when iOS prompts.  
+- Try again after **Save credentials**.  
+- Confirm Sandbox keys with Sandbox environment.
 
-- Redirect URI mismatch (dashboard vs Settings).  
-- Production/Development often need an `https://` redirect you host (Universal Links for App-to-App). Sandbox allows `http://localhost…`.
+### Link finishes but “no public_token”
+
+Rare race after Hosted Link. Wait a few seconds and link again, or check Plaid Dashboard logs. The app polls `/link/token/get` automatically after the browser closes.
+
+### OAuth bank never returns to the app (Production)
+
+App-to-app OAuth may need an **https Universal Link** in Settings + Plaid Dashboard allowlist. Sandbox Hosted Link usually does not need this.
 
 ### Sync says no banks linked
 
