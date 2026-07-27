@@ -2,203 +2,274 @@
 //  BankIcon.swift
 //  Finance Wizard
 //
-//  Dark Mode–style bank “app icons” for payment methods.
-//  iOS does not expose Wallet/bank logos to third-party apps, so we render
-//  iOS-like rounded squares with brand colors + monograms (optional asset override).
+//  Card faces + list tiles.
+//
+//  What we CAN use:
+//  • Plaid institution logos + brand colors (/institutions/get_by_id metadata)
+//  • Original product-colored faces (Freedom-blue, Sapphire-navy, …)
+//
+//  What we cannot ship by scraping Chase.com:
+//  • Official product photography of Freedom / Sapphire / etc. (copyright).
+//    Apps that show those either license the art or partner with a data
+//    provider — they don’t hotlink Chase marketing assets into the binary.
 //
 
 import SwiftUI
 import UIKit
 
-// Which institution a payment_method string belongs to
-enum BankBrand: String, CaseIterable {
-    case chase
-    case amex
-    case amazon
-    case xMoney
-    case generic
+// MARK: - List icon
 
-    // Map finance-sync payment_method labels → bank
-    static func resolve(from paymentMethod: String) -> BankBrand {
-        let m = paymentMethod.lowercased()
+struct BankIconView: View {
+    let paymentMethod: String
+    var size: CGFloat = 36
+    var accountId: String? = nil
+    var displayName: String? = nil
+    var institutionId: String? = nil
+    var institutionName: String? = nil
 
-        // Amazon / Prime Visa
-        if m.contains("prime") || m.contains("amazon") {
-            return .amazon
-        }
-        // American Express (Blue Cash Everyday®, etc.)
-        if m.contains("american express") || m.contains("amex") || m.contains("blue cash") {
-            return .amex
-        }
-        // Chase cards & checking
-        if m.contains("chase") {
-            return .chase
-        }
-        // X Money (and similar)
-        if m.contains("x money") || m == "x" || m.hasPrefix("x ") {
-            return .xMoney
-        }
-
-        return .generic
+    private var product: CardProduct {
+        let name = displayName
+            ?? CardLabelStore.label(paymentMethod: paymentMethod, accountId: accountId)
+        return CardLabelStore.product(
+            accountId: accountId,
+            paymentMethod: paymentMethod,
+            displayName: name
+        )
     }
 
-    // Optional Asset Catalog name (add images later as BankChase, etc.)
-    var assetName: String {
-        switch self {
-        case .chase: return "BankChase"
-        case .amex: return "BankAmex"
-        case .amazon: return "BankAmazon"
-        case .xMoney: return "BankXMoney"
-        case .generic: return "BankGeneric"
-        }
+    private var logo: UIImage? {
+        InstitutionLogoCache.logoImage(institutionID: institutionId)
+            ?? InstitutionLogoCache.logoImage(institutionName: institutionName)
+    }
+
+    private var brandColor: Color? {
+        InstitutionLogoCache.primaryColor(institutionID: institutionId)
+            ?? InstitutionLogoCache.primaryColor(institutionName: institutionName)
+    }
+
+    private var cornerRadius: CGFloat { size * 0.2237 }
+
+    var body: some View {
+        CardProductTile(
+            product: product,
+            size: size,
+            logo: logo,
+            brandColor: brandColor
+        )
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .accessibilityLabel(displayName ?? paymentMethod)
     }
 }
 
-// iOS Home Screen–style bank icon for lists
-struct BankIconView: View {
-    // Full payment method string from the transaction / card row
-    let paymentMethod: String
-    // Side length in points
-    var size: CGFloat = 36
+// MARK: - Full card face
 
-    private var brand: BankBrand {
-        BankBrand.resolve(from: paymentMethod)
+struct CardFaceView: View {
+    let product: CardProduct
+    var displayName: String
+    var width: CGFloat = 280
+    var institutionId: String? = nil
+    var institutionName: String? = nil
+    var mask: String? = nil
+
+    private var height: CGFloat { width / 1.586 }
+    private var radius: CGFloat { width * 0.06 }
+
+    private var logo: UIImage? {
+        InstitutionLogoCache.logoImage(institutionID: institutionId)
+            ?? InstitutionLogoCache.logoImage(institutionName: institutionName)
     }
 
-    // Continuous corner radius ~ iOS app icon proportion
-    private var cornerRadius: CGFloat {
-        size * 0.2237
+    private var brandColor: Color? {
+        InstitutionLogoCache.primaryColor(institutionID: institutionId)
+            ?? InstitutionLogoCache.primaryColor(institutionName: institutionName)
+    }
+
+    private var colors: [Color] {
+        if let brandColor {
+            return [brandColor, brandColor.opacity(0.75), Color.black.opacity(0.85)]
+        }
+        return product.gradient
     }
 
     var body: some View {
-        // Prefer a bundled asset (Any/Dark) if you add one later; else drawn glyph
-        if UIImage(named: brand.assetName) != nil {
-            Image(brand.assetName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .accessibilityLabel(paymentMethod)
-        } else {
-            drawnIcon
-                .frame(width: size, height: size)
-                .accessibilityLabel(paymentMethod)
-        }
-    }
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
 
-    // Programmatic dark-mode style icon (no external download)
-    @ViewBuilder
-    private var drawnIcon: some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-
-        switch brand {
-        case .chase:
-            // Chase-like deep blue tile + white monogram
-            shape
-                .fill(
+        shape
+            .fill(
+                LinearGradient(
+                    colors: colors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay {
+                // Plastic sheen
+                shape.fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.07, green: 0.35, blue: 0.55),
-                            Color(red: 0.05, green: 0.22, blue: 0.40)
+                            Color.white.opacity(0.22),
+                            Color.white.opacity(0.04),
+                            Color.clear,
+                            Color.black.opacity(0.15)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
-                .overlay {
-                    Text("C")
-                        .font(.system(size: size * 0.48, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-                .overlay {
-                    shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-                }
-
-        case .amex:
-            // Amex-like blue tile
-            shape
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.00, green: 0.40, blue: 0.75),
-                            Color(red: 0.00, green: 0.25, blue: 0.50)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
+            }
+            .overlay(alignment: .topLeading) {
+                // EMV chip (stylized)
+                RoundedRectangle(cornerRadius: width * 0.012, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.90, green: 0.80, blue: 0.45),
+                                Color(red: 0.70, green: 0.58, blue: 0.28)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-                .overlay {
-                    Text("AX")
-                        .font(.system(size: size * 0.32, weight: .heavy, design: .rounded))
-                        .foregroundStyle(.white)
-                        .tracking(-0.5)
-                }
-                .overlay {
-                    shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-                }
-
-        case .amazon:
-            // Dark tile + Amazon orange accent (Prime Visa)
-            shape
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.14, green: 0.14, blue: 0.16),
-                            Color(red: 0.08, green: 0.08, blue: 0.09)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .overlay {
-                    VStack(spacing: size * 0.02) {
-                        Text("a")
-                            .font(.system(size: size * 0.42, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        // Smile-like accent bar
-                        Capsule()
-                            .fill(Color(red: 1.0, green: 0.60, blue: 0.0))
-                            .frame(width: size * 0.45, height: size * 0.06)
+                    .frame(width: width * 0.13, height: width * 0.10)
+                    .overlay {
+                        // Contact pads
+                        VStack(spacing: 1) {
+                            ForEach(0..<3, id: \.self) { _ in
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.15))
+                                    .frame(height: 1)
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                    .padding(width * 0.08)
+            }
+            .overlay(alignment: .topTrailing) {
+                Group {
+                    if let logo {
+                        Image(uiImage: logo)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: width * 0.16, height: width * 0.16)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                    } else if let accent = product.accentColor {
+                        Circle()
+                            .fill(accent.opacity(0.9))
+                            .frame(width: width * 0.09, height: width * 0.09)
                     }
                 }
-                .overlay {
-                    shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                .padding(width * 0.08)
+            }
+            .overlay(alignment: .bottomLeading) {
+                VStack(alignment: .leading, spacing: width * 0.015) {
+                    Text(displayName)
+                        .font(.system(size: width * 0.055, weight: .semibold, design: .rounded))
+                        .foregroundStyle(product.monogramColor)
+                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        Text(product.displayName)
+                            .font(.system(size: width * 0.038, weight: .medium, design: .rounded))
+                            .foregroundStyle(product.monogramColor.opacity(0.8))
+                            .lineLimit(1)
+                        if let mask, !mask.isEmpty {
+                            Text("···\(mask)")
+                                .font(.system(size: width * 0.038, weight: .medium, design: .monospaced))
+                                .foregroundStyle(product.monogramColor.opacity(0.7))
+                        }
+                    }
                 }
+                .padding(width * 0.08)
+            }
+            .overlay {
+                shape.strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75)
+            }
+            .frame(width: width, height: height)
+            .shadow(color: .black.opacity(0.28), radius: 10, y: 5)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(displayName), \(product.displayName)")
+    }
+}
 
-        case .xMoney:
-            // Near-black tile + white X
-            shape
-                .fill(Color(red: 0.08, green: 0.08, blue: 0.08))
-                .overlay {
-                    Text("𝕏")
-                        .font(.system(size: size * 0.42, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .overlay {
-                    shape.strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
-                }
+// MARK: - Tile
 
-        case .generic:
-            // Neutral dark gray + card glyph
-            shape
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.25, green: 0.27, blue: 0.30),
-                            Color(red: 0.15, green: 0.16, blue: 0.18)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+struct CardProductTile: View {
+    let product: CardProduct
+    var size: CGFloat
+    var logo: UIImage? = nil
+    var brandColor: Color? = nil
+
+    private var fillColors: [Color] {
+        if let brandColor {
+            return [brandColor, brandColor.opacity(0.8)]
+        }
+        return product.gradient
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.2237, style: .continuous)
+
+        shape
+            .fill(
+                LinearGradient(
+                    colors: fillColors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
                 )
-                .overlay {
+            )
+            .overlay {
+                if let logo {
+                    Image(uiImage: logo)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(size * 0.18)
+                        .clipShape(RoundedRectangle(cornerRadius: size * 0.12, style: .continuous))
+                } else if product == .appleCard {
+                    Image(systemName: "apple.logo")
+                        .font(.system(size: size * 0.40, weight: .medium))
+                        .foregroundStyle(product.monogramColor)
+                } else if product == .generic {
                     Image(systemName: "creditcard.fill")
                         .font(.system(size: size * 0.38, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.95))
+                } else if product == .amazonPrimeVisa {
+                    VStack(spacing: size * 0.02) {
+                        Text(product.monogram)
+                            .font(.system(size: size * 0.40, weight: .bold, design: .rounded))
+                            .foregroundStyle(product.monogramColor)
+                        Capsule()
+                            .fill(product.accentColor ?? .orange)
+                            .frame(width: size * 0.42, height: size * 0.06)
+                    }
+                } else {
+                    Text(product.monogram)
+                        .font(.system(size: size * (product.monogram.count > 1 ? 0.30 : 0.42), weight: .bold, design: .rounded))
+                        .foregroundStyle(product.monogramColor)
+                        .tracking(-0.5)
                 }
-                .overlay {
-                    shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
-                }
+            }
+            .overlay {
+                shape.strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+            }
+    }
+}
+
+// Legacy
+enum BankBrand: String, CaseIterable {
+    case chase, amex, amazon, xMoney, generic
+
+    static func resolve(from paymentMethod: String) -> BankBrand {
+        switch CardProduct.resolve(from: paymentMethod) {
+        case .chaseFreedom, .chaseFreedomUnlimited, .chaseFreedomFlex,
+             .chaseSapphirePreferred, .chaseSapphireReserve, .chaseSlate:
+            return .chase
+        case .amexBlueCash, .amexGold, .amexPlatinum:
+            return .amex
+        case .amazonPrimeVisa:
+            return .amazon
+        default:
+            return .generic
         }
     }
 }

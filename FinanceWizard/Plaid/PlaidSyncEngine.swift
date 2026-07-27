@@ -184,13 +184,31 @@ enum PlaidSyncEngine {
             PlaidItemStore.updateCursor(itemID: item.id, cursor: cursor)
         }
 
-        // Balances / credit limits
+        // Balances / credit limits + institution logo (Plaid metadata, not product card photos)
         progress?("\(item.institutionName): balances…")
+        var institutionId: String?
+        do {
+            institutionId = try await PlaidAPIClient.itemInstitutionID(accessToken: item.accessToken)
+            if let institutionId {
+                if let branding = try? await PlaidAPIClient.institutionBranding(institutionID: institutionId) {
+                    InstitutionLogoCache.store(
+                        institutionID: branding.institutionID,
+                        name: branding.name,
+                        logoBase64: branding.logoBase64,
+                        primaryColorHex: branding.primaryColorHex
+                    )
+                }
+            }
+        } catch {
+            report.warnings.append("\(item.institutionName) institution: \(error.localizedDescription)")
+        }
+
         do {
             let details = try await PlaidAPIClient.accountsGet(accessToken: item.accessToken)
             report.accountsUpdated = upsertAccounts(
                 details,
                 item: item,
+                institutionId: institutionId,
                 modelContext: modelContext
             )
         } catch {
@@ -464,6 +482,7 @@ enum PlaidSyncEngine {
     private static func upsertAccounts(
         _ details: [PlaidAccountDetail],
         item: PlaidLinkedItem,
+        institutionId: String?,
         modelContext: ModelContext
     ) -> Int {
         var count = 0
@@ -494,6 +513,9 @@ enum PlaidSyncEngine {
                 existing.currentBalance = current
                 existing.availableBalance = available
                 existing.creditLimit = limit
+                if let institutionId {
+                    existing.institutionId = institutionId
+                }
                 existing.lastSyncedAt = Date()
             } else {
                 modelContext.insert(
@@ -509,6 +531,7 @@ enum PlaidSyncEngine {
                         currentBalance: current,
                         availableBalance: available,
                         creditLimit: limit,
+                        institutionId: institutionId,
                         lastSyncedAt: Date()
                     )
                 )

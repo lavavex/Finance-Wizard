@@ -3,6 +3,7 @@
 //  Finance Wizard
 //
 //  Cards hub: period spend by payment method, credit utilization, and card payments.
+//  User nicknames (e.g. "Chase Freedom") live in CardLabelStore.
 //
 
 import SwiftUI
@@ -18,6 +19,8 @@ struct CardsView: View {
     @State private var period: SnapshotPeriod = .month
     @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
     @State private var sort: TransactionSort = .dateNewest
+    /// Bumped when the user renames a card so labels re-resolve.
+    @State private var nicknameEpoch = 0
 
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
@@ -40,7 +43,9 @@ struct CardsView: View {
     }
 
     private var creditAccounts: [BankAccount] {
-        accounts.filter(\.isCredit)
+        // nicknameEpoch forces recompute after rename
+        _ = nicknameEpoch
+        return accounts.filter(\.isCredit)
     }
 
     private var periodPayments: [CreditCardPayment] {
@@ -66,11 +71,17 @@ struct CardsView: View {
 
     /// Payment-method rows from spend, plus credit accounts that had no spend this period.
     private var unifiedCardRows: [UnifiedCardRow] {
+        _ = nicknameEpoch
         var rows: [UnifiedCardRow] = cardSummaries.map { summary in
             let credit = matchCreditAccount(toPaymentMethod: summary.cardName)
+            let display = resolveDisplayName(
+                paymentMethod: summary.cardName,
+                credit: credit
+            )
             return UnifiedCardRow(
                 id: summary.cardName,
-                displayName: summary.cardName,
+                displayName: display,
+                rawPaymentMethod: summary.cardName,
                 spent: summary.spent,
                 transactionCount: summary.transactionCount,
                 creditAccount: credit,
@@ -78,31 +89,33 @@ struct CardsView: View {
             )
         }
 
-        // Credit accounts with balance/limit but no matching spend row yet
-        let knownNames = Set(rows.map(\.displayName))
+        let matchedAccountIds = Set(rows.compactMap(\.creditAccount?.accountId))
         for account in creditAccounts {
+            if matchedAccountIds.contains(account.accountId) { continue }
             let already = rows.contains { row in
-                if let c = row.creditAccount { return c.accountId == account.accountId }
-                return namesMatch(row.displayName, account.displayName)
-                    || namesMatch(row.displayName, account.name)
+                namesMatch(row.rawPaymentMethod, account.plaidDisplayName)
+                    || namesMatch(row.rawPaymentMethod, account.name)
+                    || namesMatch(row.displayName, account.displayName)
             }
             if already { continue }
-            // Avoid duplicate display names
-            if knownNames.contains(account.displayName) { continue }
             rows.append(
                 UnifiedCardRow(
                     id: account.accountId,
                     displayName: account.displayName,
+                    rawPaymentMethod: account.plaidDisplayName,
                     spent: 0,
                     transactionCount: 0,
                     creditAccount: account,
-                    paidInPeriod: paidFor(paymentMethod: account.displayName, credit: account)
+                    paidInPeriod: paidFor(paymentMethod: account.plaidDisplayName, credit: account)
                 )
             )
         }
 
         return rows.sorted {
-            // Credit cards with balance first by spend, then alpha
+            // Prefer higher balance (credit) then spend
+            let b0 = $0.creditAccount.map { max(0, $0.currentBalance) } ?? -1
+            let b1 = $1.creditAccount.map { max(0, $1.currentBalance) } ?? -1
+            if b0 != b1 { return b0 > b1 }
             if $0.spent != $1.spent { return $0.spent > $1.spent }
             return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
@@ -173,11 +186,7 @@ struct CardsView: View {
                 } header: {
                     Text("Overview")
                 } footer: {
-                    if creditAccounts.isEmpty {
-                        Text("Link credit cards and Sync to see balances, limits, and utilization.")
-                    } else {
-                        Text("Spend is purchases this period. Credit balance / limit come from Plaid on Sync. Bill payments don’t count as spend.")
-                    }
+                    Text("Open a card to rename it (e.g. “Chase Freedom”). Balance / limit come from Plaid; bill payments don’t count as spend.")
                 }
 
                 // MARK: Cards
@@ -189,15 +198,17 @@ struct CardsView: View {
                         ForEach(unifiedCardRows) { row in
                             NavigationLink {
                                 CardDetailView(
-                                    cardName: row.displayName,
+                                    displayName: row.displayName,
+                                    rawPaymentMethod: row.rawPaymentMethod,
                                     period: period,
                                     referenceDate: referenceDate,
                                     sort: sort,
                                     creditAccount: row.creditAccount,
                                     periodPayments: paymentsMatching(
-                                        paymentMethod: row.displayName,
+                                        paymentMethod: row.rawPaymentMethod,
                                         credit: row.creditAccount
-                                    )
+                                    ),
+                                    onNicknameChanged: { nicknameEpoch += 1 }
                                 )
                             } label: {
                                 UnifiedCardLabel(row: row)
@@ -252,13 +263,25 @@ struct CardsView: View {
 
     // MARK: Matching helpers
 
+    private func resolveDisplayName(paymentMethod: String, credit: BankAccount?) -> String {
+        if let credit {
+            return CardLabelStore.label(
+                accountId: credit.accountId,
+                fallback: CardLabelStore.label(paymentMethod: paymentMethod, fallback: credit.displayName)
+            )
+        }
+        return CardLabelStore.label(paymentMethod: paymentMethod, fallback: paymentMethod)
+    }
+
     private func matchCreditAccount(toPaymentMethod name: String) -> BankAccount? {
         creditAccounts.first { account in
-            namesMatch(name, account.displayName)
+            namesMatch(name, account.plaidDisplayName)
                 || namesMatch(name, account.name)
+                || namesMatch(name, account.displayName)
                 || name.localizedCaseInsensitiveContains(account.name)
                 || account.name.localizedCaseInsensitiveContains(name)
                 || fuzzyBrandMatch(name, account.name)
+                || (account.mask.map { name.contains($0) } ?? false)
         }
     }
 
@@ -303,7 +326,10 @@ struct CardsView: View {
 
 private struct UnifiedCardRow: Identifiable {
     let id: String
+    /// User-facing name (nickname or Plaid label)
     let displayName: String
+    /// Original payment-method / Plaid string used to filter transactions
+    let rawPaymentMethod: String
     let spent: Double
     let transactionCount: Int
     let creditAccount: BankAccount?
@@ -315,69 +341,105 @@ private struct UnifiedCardLabel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                BankIconView(paymentMethod: row.displayName, size: 36)
+            HStack(alignment: .top, spacing: 12) {
+                BankIconView(
+                    paymentMethod: row.rawPaymentMethod,
+                    size: 40,
+                    accountId: row.creditAccount?.accountId,
+                    displayName: row.displayName,
+                    institutionId: row.creditAccount?.institutionId,
+                    institutionName: row.creditAccount?.institutionName
+                )
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.displayName)
-                        .font(.body.weight(.medium))
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(row.spent, format: .currency(code: "USD"))
                         .font(.body.weight(.semibold))
-                    if row.paidInPeriod > 0 {
-                        Text("Paid \(row.paidInPeriod.formatted(.currency(code: "USD")))")
+                    if let account = row.creditAccount {
+                        Text(account.subtitleDetail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text(row.transactionCount > 0
+                             ? "\(row.transactionCount) purchases"
+                             : "No purchases this period")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                // Primary metrics: Balance + Limit for credit; Spend for non-credit
+                if let account = row.creditAccount {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(max(0, account.currentBalance), format: .currency(code: "USD"))
+                            .font(.body.weight(.semibold))
+                        if let limit = account.creditLimit, limit > 0 {
+                            Text("Limit \(limit.formatted(.currency(code: "USD")))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Balance")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                } else {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(row.spent, format: .currency(code: "USD"))
+                            .font(.body.weight(.semibold))
+                        Text("Spend")
                             .font(.caption2)
-                            .foregroundStyle(.green)
+                            .foregroundStyle(.tertiary)
                     }
                 }
             }
 
-            if let account = row.creditAccount {
-                if let util = account.utilization {
-                    UtilizationBar(value: util, label: nil)
-                } else if let limit = account.creditLimit, limit > 0 {
-                    Text("Balance \(max(0, account.currentBalance).formatted(.currency(code: "USD"))) of \(limit.formatted(.currency(code: "USD")))")
-                        .font(.caption2)
+            if let util = row.creditAccount?.utilization {
+                UtilizationBar(value: util, label: nil)
+            }
+
+            // Secondary: spend + paid
+            HStack {
+                Text("Spend \(row.spent.formatted(.currency(code: "USD")))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if row.transactionCount > 0 {
+                    Text("·")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Text("\(row.transactionCount) purchases")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                } else if account.currentBalance > 0 {
-                    Text("Balance \(account.currentBalance.formatted(.currency(code: "USD")))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if row.paidInPeriod > 0 {
+                    Text("Paid \(row.paidInPeriod.formatted(.currency(code: "USD")))")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
                 }
             }
         }
         .padding(.vertical, 2)
     }
-
-    private var subtitle: String {
-        var parts: [String] = []
-        if row.transactionCount > 0 {
-            parts.append("\(row.transactionCount) purchases")
-        }
-        if let account = row.creditAccount {
-            parts.append("Balance \(max(0, account.currentBalance).formatted(.currency(code: "USD")))")
-        } else if row.transactionCount == 0 {
-            parts.append("No purchases this period")
-        }
-        return parts.isEmpty ? "Card" : parts.joined(separator: " · ")
-    }
 }
 
-// MARK: - Card detail
+// MARK: - Card detail (+ rename)
 
 struct CardDetailView: View {
-    let cardName: String
+    let displayName: String
+    /// Transaction.paymentMethod string (Plaid-style), not the nickname
+    let rawPaymentMethod: String
     let period: SnapshotPeriod
     let referenceDate: Date
     let sort: TransactionSort
     var creditAccount: BankAccount? = nil
     var periodPayments: [CreditCardPayment] = []
+    var onNicknameChanged: (() -> Void)? = nil
 
     @Query private var transactions: [Transaction]
+    @State private var nicknameDraft: String = ""
+    @State private var selectedProduct: CardProduct = .generic
+    @State private var didSaveNickname = false
+    @State private var titleName: String = ""
 
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
@@ -389,8 +451,13 @@ struct CardDetailView: View {
             period: period,
             referenceDate: referenceDate
         )
-        let forCard = inPeriod.filter {
-            TransactionAnalytics.cardName(for: $0) == cardName
+        let forCard = inPeriod.filter { tx in
+            let name = TransactionAnalytics.cardName(for: tx)
+            if name == rawPaymentMethod { return true }
+            if let credit = creditAccount {
+                return name == credit.plaidDisplayName || name == credit.name
+            }
+            return false
         }
         return TransactionAnalytics.sorted(forCard, by: sort)
     }
@@ -403,31 +470,93 @@ struct CardDetailView: View {
         CreditAnalytics.totalPaid(in: periodPayments)
     }
 
+    private var faceName: String {
+        let n = titleName.isEmpty ? displayName : titleName
+        return n
+    }
+
     var body: some View {
         List {
             Section {
                 HStack {
-                    Text("Spend")
                     Spacer()
-                    Text(cardSpend, format: .currency(code: "USD"))
-                        .font(.headline)
+                    CardFaceView(
+                        product: selectedProduct,
+                        displayName: faceName,
+                        width: 280,
+                        institutionId: creditAccount?.institutionId,
+                        institutionName: creditAccount?.institutionName,
+                        mask: creditAccount?.mask
+                    )
+                    Spacer()
                 }
-                Text("\(periodLabel) · \(cardRows.count) purchases")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+            }
 
+            Section {
+                TextField("Display name", text: $nicknameDraft)
+                    .textInputAutocapitalization(.words)
+                    .onChange(of: nicknameDraft) { _, newValue in
+                        // Live preview: infer art from typed name unless user forced a pick
+                        let inferred = CardProduct.resolve(from: newValue)
+                        if inferred != .generic {
+                            selectedProduct = inferred
+                        }
+                    }
+
+                Picker("Card art", selection: $selectedProduct) {
+                    ForEach(CardProduct.pickerCases) { product in
+                        HStack {
+                            CardProductTile(product: product, size: 28)
+                            Text(product.displayName)
+                        }
+                        .tag(product)
+                    }
+                }
+
+                if let credit = creditAccount {
+                    LabeledContent("Plaid name") {
+                        Text(credit.plaidDisplayName)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                } else {
+                    LabeledContent("Account") {
+                        Text(rawPaymentMethod)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+
+                Button("Save name & art") {
+                    saveNickname()
+                }
+                if didSaveNickname {
+                    Label("Saved", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                }
+            } header: {
+                Text("Card identity")
+            } footer: {
+                Text("On Sync we load the bank logo from Plaid (official path). Full product photos from Chase.com can’t be bundled without a license — pick a product name for matching colors + the Plaid logo on a plastic-style face.")
+            }
+
+            Section {
                 if let account = creditAccount {
                     HStack {
                         Text("Balance")
                         Spacer()
                         Text(max(0, account.currentBalance), format: .currency(code: "USD"))
-                            .font(.body.weight(.semibold))
+                            .font(.title3.weight(.semibold))
                     }
                     if let limit = account.creditLimit, limit > 0 {
                         HStack {
                             Text("Limit")
                             Spacer()
                             Text(limit, format: .currency(code: "USD"))
+                                .font(.body.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         }
                         if let util = account.utilization {
@@ -436,15 +565,25 @@ struct CardDetailView: View {
                     }
                 }
 
-                if paidTotal > 0 {
-                    HStack {
-                        Text("Paid this period")
-                        Spacer()
-                        Text(paidTotal, format: .currency(code: "USD"))
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.green)
-                    }
+                HStack {
+                    Text("Spend")
+                    Spacer()
+                    Text(cardSpend, format: .currency(code: "USD"))
+                        .foregroundStyle(.secondary)
                 }
+                Text("\(periodLabel) · \(cardRows.count) purchases")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Text("Paid this period")
+                    Spacer()
+                    Text(paidTotal, format: .currency(code: "USD"))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(paidTotal > 0 ? .green : .secondary)
+                }
+            } header: {
+                Text("Summary")
             }
 
             if !periodPayments.isEmpty {
@@ -470,8 +609,50 @@ struct CardDetailView: View {
                 }
             }
         }
-        .navigationTitle(cardName)
+        .navigationTitle(titleName.isEmpty ? displayName : titleName)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            titleName = displayName
+            nicknameDraft = displayName
+            selectedProduct = CardLabelStore.product(
+                accountId: creditAccount?.accountId,
+                paymentMethod: rawPaymentMethod,
+                displayName: displayName
+            )
+        }
+    }
+
+    private func saveNickname() {
+        let value = nicknameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let plaidFallback = creditAccount?.plaidDisplayName ?? rawPaymentMethod
+        let custom: String? = (value.isEmpty || value == plaidFallback) ? nil : value
+        CardLabelStore.setLabel(
+            custom,
+            accountId: creditAccount?.accountId,
+            paymentMethod: rawPaymentMethod
+        )
+        // Persist product art (explicit pick or inferred from name)
+        let productToSave: CardProduct = {
+            if selectedProduct != .generic { return selectedProduct }
+            if let custom { return CardProduct.resolve(from: custom) }
+            return .generic
+        }()
+        CardLabelStore.setProduct(
+            productToSave == .generic ? nil : productToSave,
+            accountId: creditAccount?.accountId,
+            paymentMethod: rawPaymentMethod
+        )
+        if productToSave != .generic {
+            selectedProduct = productToSave
+        }
+        titleName = custom ?? plaidFallback
+        nicknameDraft = titleName
+        didSaveNickname = true
+        onNicknameChanged?()
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            didSaveNickname = false
+        }
     }
 }
 
@@ -490,7 +671,7 @@ struct TransactionRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.title)
                     .font(.body)
-                Text("\(transaction.category) · \(transaction.paymentMethod)")
+                Text("\(transaction.category) · \(displayPaymentMethod)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(transaction.date, style: .date)
@@ -507,6 +688,10 @@ struct TransactionRowView: View {
             }
         }
     }
+
+    private var displayPaymentMethod: String {
+        CardLabelStore.label(paymentMethod: transaction.paymentMethod)
+    }
 }
 
 // MARK: - Shared credit UI pieces
@@ -514,13 +699,20 @@ struct TransactionRowView: View {
 struct CreditPaymentRow: View {
     let payment: CreditCardPayment
 
+    private var cardLabel: String {
+        if let id = payment.creditAccountId {
+            return CardLabelStore.label(accountId: id, fallback: payment.cardName)
+        }
+        return CardLabelStore.label(paymentMethod: payment.cardName, fallback: payment.cardName)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.down.circle.fill")
                 .foregroundStyle(.green)
                 .font(.title3)
             VStack(alignment: .leading, spacing: 2) {
-                Text(payment.cardName)
+                Text(cardLabel)
                     .font(.body.weight(.medium))
                 Text(payment.title)
                     .font(.caption)

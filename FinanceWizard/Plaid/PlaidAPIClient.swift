@@ -340,6 +340,82 @@ enum PlaidAPIClient {
         )
     }
 
+    /// Institution id for a linked Item (`/item/get`).
+    static func itemInstitutionID(accessToken: String) async throws -> String? {
+        try PlaidCredentialsStore.requireConfigured()
+
+        struct Body: Encodable {
+            let client_id: String
+            let secret: String
+            let access_token: String
+        }
+
+        struct Response: Decodable {
+            let item: Item
+
+            struct Item: Decodable {
+                let institution_id: String?
+            }
+        }
+
+        let response: Response = try await post(
+            path: "/item/get",
+            body: Body(
+                client_id: PlaidCredentialsStore.clientID,
+                secret: PlaidCredentialsStore.secret,
+                access_token: accessToken
+            )
+        )
+        return response.item.institution_id
+    }
+
+    /// Logo + brand color via `/institutions/get_by_id` (optional metadata).
+    /// This is the supported way to show bank branding — not product card photography.
+    static func institutionBranding(institutionID: String) async throws -> PlaidInstitutionBranding {
+        try PlaidCredentialsStore.requireConfigured()
+
+        struct Body: Encodable {
+            let client_id: String
+            let secret: String
+            let institution_id: String
+            let country_codes: [String]
+            let options: Options
+
+            struct Options: Encodable {
+                let include_optional_metadata: Bool
+            }
+        }
+
+        struct Response: Decodable {
+            let institution: Institution
+
+            struct Institution: Decodable {
+                let institution_id: String
+                let name: String?
+                let logo: String?
+                let primary_color: String?
+                let url: String?
+            }
+        }
+
+        let response: Response = try await post(
+            path: "/institutions/get_by_id",
+            body: Body(
+                client_id: PlaidCredentialsStore.clientID,
+                secret: PlaidCredentialsStore.secret,
+                institution_id: institutionID,
+                country_codes: ["US"],
+                options: .init(include_optional_metadata: true)
+            )
+        )
+        return PlaidInstitutionBranding(
+            institutionID: response.institution.institution_id,
+            name: response.institution.name,
+            logoBase64: response.institution.logo,
+            primaryColorHex: response.institution.primary_color
+        )
+    }
+
     /// Current balances / credit limits for all accounts on an Item.
     static func accountsGet(accessToken: String) async throws -> [PlaidAccountDetail] {
         try PlaidCredentialsStore.requireConfigured()
@@ -473,6 +549,14 @@ struct PlaidAccountDetail: Decodable {
     let type: String?
     let subtype: String?
     let balances: PlaidBalances?
+}
+
+struct PlaidInstitutionBranding: Sendable {
+    let institutionID: String
+    let name: String?
+    /// Base64 PNG (no data: prefix) when Plaid has a logo
+    let logoBase64: String?
+    let primaryColorHex: String?
 }
 
 struct PlaidBalances: Decodable {

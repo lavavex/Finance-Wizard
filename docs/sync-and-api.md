@@ -85,6 +85,7 @@ Plaid amount convention:
 - **Transfers** (savings ↔ checking, internal moves) are **skipped** — never enter spend or income.  
 - **Credit card bill payments** are stored as `CreditCardPayment` for the Credit tab (payoff tracking), not as spend/income.  
 - **Credit balances / limits** come from `POST /accounts/get` on each Sync.  
+- **Bank logo / brand color** from `POST /item/get` → `POST /institutions/get_by_id` (`include_optional_metadata`).  
 - Pending rows are skipped by default.  
 - Each Sync also cleans older expense/income rows whose titles look like transfers or card payments.
 
