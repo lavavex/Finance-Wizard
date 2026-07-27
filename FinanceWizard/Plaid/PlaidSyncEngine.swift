@@ -291,7 +291,9 @@ enum PlaidSyncEngine {
     ) {
         let targetId = tx.transaction_id
         var descriptor = FetchDescriptor<Transaction>(
-            predicate: #Predicate { $0.transactionId == targetId }
+            predicate: #Predicate<Transaction> { row in
+                row.transactionId == targetId
+            }
         )
         descriptor.fetchLimit = 1
 
@@ -341,7 +343,9 @@ enum PlaidSyncEngine {
     ) {
         let targetId = tx.transaction_id
         var descriptor = FetchDescriptor<Income>(
-            predicate: #Predicate { $0.transactionId == targetId }
+            predicate: #Predicate<Income> { row in
+                row.transactionId == targetId
+            }
         )
         descriptor.fetchLimit = 1
 
@@ -399,7 +403,9 @@ enum PlaidSyncEngine {
     ) {
         let targetId = tx.transaction_id
         var descriptor = FetchDescriptor<CreditCardPayment>(
-            predicate: #Predicate { $0.transactionId == targetId }
+            predicate: #Predicate<CreditCardPayment> { row in
+                row.transactionId == targetId
+            }
         )
         descriptor.fetchLimit = 1
 
@@ -462,6 +468,8 @@ enum PlaidSyncEngine {
     ) -> Int {
         var count = 0
         for detail in details {
+            // #Predicate only accepts simple local constants (not detail.account_id)
+            let accountId = detail.account_id
             let name = detail.name ?? detail.official_name ?? item.institutionName
             let type = detail.type ?? "other"
             let current = detail.balances?.current ?? 0
@@ -469,7 +477,9 @@ enum PlaidSyncEngine {
             let limit = detail.balances?.limit
 
             var descriptor = FetchDescriptor<BankAccount>(
-                predicate: #Predicate { $0.accountId == detail.account_id }
+                predicate: #Predicate<BankAccount> { account in
+                    account.accountId == accountId
+                }
             )
             descriptor.fetchLimit = 1
 
@@ -488,7 +498,7 @@ enum PlaidSyncEngine {
             } else {
                 modelContext.insert(
                     BankAccount(
-                        accountId: detail.account_id,
+                        accountId: accountId,
                         itemId: item.id,
                         name: name,
                         officialName: detail.official_name,
@@ -552,8 +562,12 @@ enum PlaidSyncEngine {
     @MainActor
     @discardableResult
     private static func deleteExpenseOnly(transactionID: String, modelContext: ModelContext) -> Bool {
+        // Capture as local constant for #Predicate (parameter refs can fail on some toolchains)
+        let targetId = transactionID
         var desc = FetchDescriptor<Transaction>(
-            predicate: #Predicate { $0.transactionId == transactionID }
+            predicate: #Predicate<Transaction> { row in
+                row.transactionId == targetId
+            }
         )
         desc.fetchLimit = 1
         if let row = try? modelContext.fetch(desc).first {
@@ -566,8 +580,11 @@ enum PlaidSyncEngine {
     @MainActor
     @discardableResult
     private static func deleteIncomeOnly(transactionID: String, modelContext: ModelContext) -> Bool {
+        let targetId = transactionID
         var desc = FetchDescriptor<Income>(
-            predicate: #Predicate { $0.transactionId == transactionID }
+            predicate: #Predicate<Income> { row in
+                row.transactionId == targetId
+            }
         )
         desc.fetchLimit = 1
         if let row = try? modelContext.fetch(desc).first {
@@ -580,8 +597,11 @@ enum PlaidSyncEngine {
     @MainActor
     @discardableResult
     private static func deleteCreditPaymentOnly(transactionID: String, modelContext: ModelContext) -> Bool {
+        let targetId = transactionID
         var desc = FetchDescriptor<CreditCardPayment>(
-            predicate: #Predicate { $0.transactionId == transactionID }
+            predicate: #Predicate<CreditCardPayment> { row in
+                row.transactionId == targetId
+            }
         )
         desc.fetchLimit = 1
         if let row = try? modelContext.fetch(desc).first {

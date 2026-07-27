@@ -537,7 +537,9 @@ struct AllTransactionsView: View {
             let targetId = item.transaction_id
 
             var descriptor = FetchDescriptor<Transaction>(
-                predicate: #Predicate { $0.transactionId == targetId }
+                predicate: #Predicate<Transaction> { row in
+                    row.transactionId == targetId
+                }
             )
             descriptor.fetchLimit = 1
 
@@ -596,7 +598,9 @@ struct AllTransactionsView: View {
 
             let targetId = item.transaction_id
             var descriptor = FetchDescriptor<Income>(
-                predicate: #Predicate { $0.transactionId == targetId }
+                predicate: #Predicate<Income> { row in
+                    row.transactionId == targetId
+                }
             )
             descriptor.fetchLimit = 1
 
