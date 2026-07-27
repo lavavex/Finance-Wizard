@@ -167,7 +167,7 @@ struct SettingsView: View {
                     }
                 }
 
-                // MARK: Debug export
+                // MARK: Export / backup (always visible for sharing data with debugging)
                 Section {
                     Button {
                         showDebugExportConfirm = true
@@ -178,14 +178,14 @@ struct SettingsView: View {
                                 Text("Preparing export…")
                             }
                         } else {
-                            Label("Export data for debug", systemImage: "square.and.arrow.up")
+                            Label("Export database for debug", systemImage: "externaldrive.badge.timemachine")
                         }
                     }
                     .disabled(isExportingDebug)
                 } header: {
-                    Text("Debug")
+                    Text("Data export")
                 } footer: {
-                    Text("Builds a zip with a full JSON snapshot of local transactions, accounts, income, payments, nicknames, and vendor rules, plus the raw SwiftData store files when present. Plaid secrets and access tokens are never included. Contains real merchant names and balances — only share with someone you trust.")
+                    Text("Share a zip of your local database snapshot (transactions, accounts, payments) for troubleshooting. Does not include Plaid secrets or access tokens. Contains real merchant names and balances.")
                 }
 
                 // MARK: About
@@ -201,8 +201,17 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    Button {
+                        showDebugExportConfirm = true
+                    } label: {
+                        Label("Export database for debug", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(isExportingDebug)
+                } header: {
+                    Text("About")
                 } footer: {
-                    Text("Version and build match MARKETING_VERSION / CURRENT_PROJECT_VERSION from the Xcode project (same values Xcode Cloud embeds in the archive).")
+                    Text("Version \(AppBuildInfo.versionBuildLabel). Export is also listed above under Data export. Rebuild/install the latest app if you do not see it.")
                 }
             }
             .navigationTitle("Settings")
