@@ -110,6 +110,8 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
     var benefits: [CardBenefitItem]
     /// Category name → rate override (same units as defaultMultiplier).
     var categoryMultipliers: [String: Double]
+    /// Merchant title needles (lowercase) → rate. Partner earn that is **not** category-wide.
+    var merchantMultipliers: [String: Double]?
     /// Catalog product id when applied (e.g. chase_prime_visa).
     var productKey: String?
     var productDisplayName: String?
@@ -124,6 +126,11 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         set { temporaryBoosts = newValue.isEmpty ? nil : newValue }
     }
 
+    var merchants: [String: Double] {
+        get { merchantMultipliers ?? [:] }
+        set { merchantMultipliers = newValue.isEmpty ? nil : newValue }
+    }
+
     static func empty(id: String) -> CardBenefitsProfile {
         CardBenefitsProfile(
             id: id,
@@ -134,10 +141,23 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
             notes: "",
             benefits: [],
             categoryMultipliers: [:],
+            merchantMultipliers: nil,
             productKey: nil,
             productDisplayName: nil,
             temporaryBoosts: nil
         )
+    }
+
+    /// Pretty label for a merchant needle (“whole foods” → “Whole Foods”).
+    static func displayNameForMerchantNeedle(_ needle: String) -> String {
+        needle
+            .split(separator: " ")
+            .map { part -> String in
+                let s = String(part)
+                guard let first = s.first else { return s }
+                return String(first).uppercased() + s.dropFirst()
+            }
+            .joined(separator: " ")
     }
 
     /// Active temporary boost for a reward category on a given day (highest rate wins).
@@ -213,24 +233,44 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         }
     }
 
-    /// Compact list for chips / default editor: boosts that beat (or undercut) the
-    /// base rate, plus a single **Everything Else** row for the default.
-    /// Apple Card 2% / X Money 3% → one “Everything Else 2%” chip, not 15 duplicates.
+    /// Compact list for chips / default editor: merchant partners, category boosts,
+    /// plus a single **Everything Else** row for the default.
+    /// Apple Card 2% → “Everything Else 2%” + “Walgreens 3%”, not “Drugstores 3%”.
     func summaryCategoryRates() -> [CategoryEarnRate] {
         let everything = RewardCategory.everythingElse.rawValue
         var rows: [CategoryEarnRate] = []
+        var seen = Set<String>()
 
-        // Boosts / reductions (not Everything Else)
+        // Merchant partners first (specific stores, not categories)
+        for (needle, rate) in merchants where rateDiffersFromDefault(rate) {
+            let label = Self.displayNameForMerchantNeedle(needle)
+            let key = label.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            rows.append(
+                CategoryEarnRate(
+                    category: label,
+                    rate: rate,
+                    isCustom: true,
+                    isKnown: false
+                )
+            )
+        }
+
+        // Category boosts / reductions (not Everything Else)
         for row in allCategoryRates() where row.isCustom && row.category != everything {
+            let key = row.category.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
             rows.append(row)
         }
 
         // Active temporary boosts that aren't already covered
-        let seen = Set(rows.map { $0.category.lowercased() })
         for boost in boosts where boost.isActive() {
             let key = boost.category.lowercased()
             guard !seen.contains(key), key != everything.lowercased() else { continue }
             guard rateDiffersFromDefault(boost.rate) else { continue }
+            seen.insert(key)
             rows.append(
                 CategoryEarnRate(
                     category: boost.category,
@@ -280,30 +320,58 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
            abs(v - defaultMultiplier) < 0.000_1 {
             removeRate(forCategory: RewardCategory.everythingElse.rawValue)
         }
+        var m = merchants
+        for (key, value) in m where abs(value - defaultMultiplier) < 0.000_1 {
+            m.removeValue(forKey: key)
+        }
+        merchants = m
     }
 
     mutating func setRate(_ rate: Double?, forCategory category: String) {
-        let name = RewardCategory.canonicalName(for: category)
-            ?? category.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
+        let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        // Known reward categories → category map. Anything else is a merchant partner needle.
+        if let known = RewardCategory.canonicalName(for: trimmed) {
+            setCategoryRate(rate, name: known)
+            return
+        }
+        setMerchantRate(rate, needle: trimmed)
+    }
+
+    private mutating func setCategoryRate(_ rate: Double?, name: String) {
         guard let rate, rate >= 0 else {
             removeRate(forCategory: name)
             return
         }
-        // If equal to default, drop override so default changes still apply
         if abs(rate - defaultMultiplier) < 0.000_1 {
             categoryMultipliers.removeValue(forKey: name)
-            // Also clear any case-variant keys
             for key in categoryMultipliers.keys where key.caseInsensitiveCompare(name) == .orderedSame {
                 categoryMultipliers.removeValue(forKey: key)
             }
             return
         }
-        // Normalize key to known canonical name when possible
         for key in categoryMultipliers.keys where key.caseInsensitiveCompare(name) == .orderedSame {
             categoryMultipliers.removeValue(forKey: key)
         }
         categoryMultipliers[name] = rate
+    }
+
+    mutating func setMerchantRate(_ rate: Double?, needle: String) {
+        let key = needle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return }
+        var map = merchants
+        guard let rate, rate >= 0 else {
+            map.removeValue(forKey: key)
+            merchants = map
+            return
+        }
+        if abs(rate - defaultMultiplier) < 0.000_1 {
+            map.removeValue(forKey: key)
+        } else {
+            map[key] = rate
+        }
+        merchants = map
     }
 
     mutating func removeRate(forCategory category: String) {
@@ -312,10 +380,15 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         for key in categoryMultipliers.keys where key.caseInsensitiveCompare(name) == .orderedSame {
             categoryMultipliers.removeValue(forKey: key)
         }
+        // Also clear merchant needle if user deleted a merchant chip
+        var map = merchants
+        map.removeValue(forKey: name.lowercased())
+        merchants = map
     }
 
     mutating func resetAllCategoryRates() {
         categoryMultipliers = [:]
+        merchantMultipliers = nil
     }
 
     private func lookupOverride(_ category: String) -> Double? {
@@ -324,6 +397,17 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         return categoryMultipliers.first {
             $0.key.caseInsensitiveCompare(key) == .orderedSame
         }?.value
+    }
+
+    /// Best merchant partner rate for a transaction title (longest needle wins).
+    func matchingMerchantBoost(title: String) -> (needle: String, displayName: String, rate: Double)? {
+        let t = title.lowercased()
+        guard !t.isEmpty, !merchants.isEmpty else { return nil }
+        let hits = merchants
+            .filter { needle, _ in !needle.isEmpty && t.contains(needle) }
+            .sorted { $0.key.count > $1.key.count }
+        guard let best = hits.first else { return nil }
+        return (best.key, Self.displayNameForMerchantNeedle(best.key), best.value)
     }
 
     /// Rate for a **reward** category name (temp boost → override → default / Everything Else).
@@ -339,14 +423,25 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         return defaultMultiplier
     }
 
-    /// Rate for a live transaction (maps general category + title → reward category).
+    /// Rate for a live transaction: **merchant partner first**, then reward category.
     func rate(
         forTransactionCategory general: String,
         title: String = "",
         on date: Date = Date()
     ) -> Double {
+        if let merchant = matchingMerchantBoost(title: title) {
+            return merchant.rate
+        }
         let reward = RewardCategory.forTransaction(generalCategory: general, title: title)
         return rate(forCategory: reward.rawValue, on: date)
+    }
+
+    /// Bucket label for analytics / chips: merchant display name or reward category.
+    func earnLabel(generalCategory: String, title: String) -> String {
+        if let merchant = matchingMerchantBoost(title: title) {
+            return merchant.displayName
+        }
+        return RewardCategory.forTransaction(generalCategory: generalCategory, title: title).rawValue
     }
 
     /// Alias used by analytics / sync.
@@ -402,8 +497,15 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         title: String,
         on date: Date = Date()
     ) -> Double {
-        let rc = RewardCategory.forTransaction(generalCategory: generalCategory, title: title)
-        return rewardUnits(spendDollars: spendDollars, category: rc.rawValue, on: date)
+        let dollars = abs(spendDollars)
+        let r = rate(forTransactionCategory: generalCategory, title: title, on: date)
+        switch rewardKind {
+        case .points:
+            return dollars * r
+        case .cashback:
+            let factor = r > 1 ? r / 100 : r
+            return dollars * factor
+        }
     }
 
     func rewardValueUSD(
@@ -412,8 +514,13 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         title: String,
         on date: Date = Date()
     ) -> Double {
-        let rc = RewardCategory.forTransaction(generalCategory: generalCategory, title: title)
-        return rewardValueUSD(spendDollars: spendDollars, category: rc.rawValue, on: date)
+        switch rewardKind {
+        case .cashback:
+            return rewardUnits(spendDollars: spendDollars, generalCategory: generalCategory, title: title, on: date)
+        case .points:
+            let pts = rewardUnits(spendDollars: spendDollars, generalCategory: generalCategory, title: title, on: date)
+            return pts * (pointValueCents / 100)
+        }
     }
 
     /// Est. rewards value for a calendar year of the given period’s run-rate, minus annual fee.
@@ -577,15 +684,26 @@ enum BenefitsAnalytics {
         var value = 0.0
         var spend = 0.0
 
+        // Per-bucket rates for merchant vs category (used when aggregating)
+        var bucketRate: [String: Double] = [:]
+
         for tx in txs {
             let dollars = abs(tx.amount)
             spend += dollars
-            let reward = tx.effectiveRewardCategory.rawValue
-            catSpend[reward, default: 0] += dollars
-            catCount[reward, default: 0] += 1
+            let general = TransactionAnalytics.categoryName(for: tx)
+            let label: String = {
+                if let override = tx.rewardCategoryOverride?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !override.isEmpty {
+                    return override
+                }
+                return profile.earnLabel(generalCategory: general, title: tx.title)
+            }()
+            catSpend[label, default: 0] += dollars
+            catCount[label, default: 0] += 1
 
             if tx.isMultiplierLocked {
                 let m = tx.multiplier
+                bucketRate[label] = m
                 applyLockedMultiplier(
                     dollars: dollars,
                     multiplier: m,
@@ -594,28 +712,55 @@ enum BenefitsAnalytics {
                     value: &value
                 )
             } else {
+                let r = profile.rate(
+                    forTransactionCategory: general,
+                    title: tx.title,
+                    on: tx.date
+                )
+                bucketRate[label] = r
                 units += profile.rewardUnits(
                     spendDollars: dollars,
-                    category: reward,
+                    generalCategory: general,
+                    title: tx.title,
                     on: tx.date
                 )
                 value += profile.rewardValueUSD(
                     spendDollars: dollars,
-                    category: reward,
+                    generalCategory: general,
+                    title: tx.title,
                     on: tx.date
                 )
             }
         }
 
         let categories = catSpend.map { name, s -> CategoryBreakdown in
-            let rate = profile.rate(forCategory: name)
+            let isMerchant = profile.merchants.keys.contains { needle in
+                name.lowercased() == CardBenefitsProfile.displayNameForMerchantNeedle(needle).lowercased()
+                    || name.lowercased() == needle
+            }
+            let rate = bucketRate[name]
+                ?? profile.matchingMerchantBoost(title: name)?.rate
+                ?? profile.rate(forCategory: name)
+            let isCustom = isMerchant
+                || profile.lookupIsCustom(name)
+                || profile.activeTemporaryBoost(forCategory: name) != nil
             return CategoryBreakdown(
                 category: name,
                 spend: s,
                 rate: rate,
-                rewardsUnits: profile.rewardUnits(spendDollars: s, category: name),
-                rewardsValueUSD: profile.rewardValueUSD(spendDollars: s, category: name),
-                isCustomRate: profile.lookupIsCustom(name) || profile.activeTemporaryBoost(forCategory: name) != nil,
+                rewardsUnits: {
+                    switch profile.rewardKind {
+                    case .points: return s * rate
+                    case .cashback: return s * (rate > 1 ? rate / 100 : rate)
+                    }
+                }(),
+                rewardsValueUSD: {
+                    switch profile.rewardKind {
+                    case .cashback: return s * (rate > 1 ? rate / 100 : rate)
+                    case .points: return s * rate * (profile.pointValueCents / 100)
+                    }
+                }(),
+                isCustomRate: isCustom,
                 transactionCount: catCount[name] ?? 0
             )
         }
@@ -1025,7 +1170,7 @@ enum CardBenefitsStore {
             break
         }
 
-        // 4) Re-seed from catalog so chips match current RewardCategory product defs
+        // 4) Re-seed from catalog so chips match current RewardCategory + merchant defs
         if let key = p.productKey, let product = CardProductCatalog.product(id: key) {
             p.rewardKind = product.rewardKind
             p.defaultMultiplier = product.defaultRate
@@ -1035,6 +1180,11 @@ enum CardBenefitsStore {
             p.categoryMultipliers = product.categoryRates.filter {
                 abs($0.value - product.defaultRate) > 0.000_1
             }
+            // Merchant partners (Walgreens 3%, Amazon.com 5%, …) — not category proxies
+            p.merchantMultipliers = product.merchantRates
+                .filter { abs($0.value - product.defaultRate) > 0.000_1 }
+                .reduce(into: [:]) { $0[$1.key.lowercased()] = $1.value }
+            if p.merchantMultipliers?.isEmpty == true { p.merchantMultipliers = nil }
             p.productDisplayName = product.displayName
             // Refresh canned perks/notes when still empty or still look legacy
             if p.benefits.isEmpty {
@@ -1045,7 +1195,9 @@ enum CardBenefitsStore {
                 || p.notes.contains("proxy")
                 || p.notes.contains("stand-in")
                 || p.notes.contains("1% physical")
-                || p.notes.contains("titanium") {
+                || p.notes.contains("titanium")
+                || p.notes.contains("Drugstores 3%")
+                || p.notes.contains("Shopping@5%") {
                 p.notes = product.notes
             }
         }
@@ -1058,7 +1210,25 @@ enum CardBenefitsStore {
             p = CardProductCatalog.makeProfile(id: p.id, product: product)
         }
 
-        // 6) Strip leftover “Dining 3% / Shopping 3% / …” when they equal the default
+        // 6) Legacy category proxies → merchant needles
+        if p.productKey == "apple_card" {
+            if p.categoryMultipliers["Drugstores"] != nil || p.categoryMultipliers["Amazon / Whole Foods"] != nil {
+                p.categoryMultipliers.removeValue(forKey: "Drugstores")
+                p.categoryMultipliers.removeValue(forKey: "Amazon / Whole Foods")
+            }
+        }
+        if p.productKey == "chase_prime_visa" || p.productKey == "chase_amazon_visa" {
+            if let v = p.categoryMultipliers["Amazon / Whole Foods"] {
+                var m = p.merchants
+                m["amazon.com"] = m["amazon.com"] ?? v
+                m["whole foods"] = m["whole foods"] ?? v
+                p.merchants = m
+                p.categoryMultipliers.removeValue(forKey: "Amazon / Whole Foods")
+            }
+            p.categoryMultipliers.removeValue(forKey: "Shopping") // was a bad Amazon proxy
+        }
+
+        // 7) Strip leftover flat defaults
         p.compactRatesMatchingDefault()
 
         return p

@@ -21,14 +21,47 @@ struct CardProductPreset: Identifiable, Hashable, Sendable {
     var defaultRate: Double
     var pointValueCents: Double
     var annualFee: Double?
-    /// App category → rate (same units as defaultRate).
+    /// Reward **category** → rate (Dining, Gas, …). Use only when the boost is really category-wide.
     var categoryRates: [String: Double]
+    /// Merchant **title needles** (lowercase) → rate. Use when the boost is only at specific merchants
+    /// (e.g. `"walgreens": 3`, `"amazon.com": 5`) — not a whole category.
+    var merchantRates: [String: Double]
     var notes: String
     var benefits: [CardBenefitItem]
     /// Match against Plaid officialName / name / institution (lowercase needles).
     var matchNeedles: [String]
     /// MaxRewards path for attribution (no scraping at runtime).
     var maxRewardsPath: String?
+
+    init(
+        id: String,
+        displayName: String,
+        issuer: String,
+        rewardKind: RewardKind,
+        defaultRate: Double,
+        pointValueCents: Double,
+        annualFee: Double?,
+        categoryRates: [String: Double],
+        merchantRates: [String: Double] = [:],
+        notes: String,
+        benefits: [CardBenefitItem],
+        matchNeedles: [String],
+        maxRewardsPath: String?
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.issuer = issuer
+        self.rewardKind = rewardKind
+        self.defaultRate = defaultRate
+        self.pointValueCents = pointValueCents
+        self.annualFee = annualFee
+        self.categoryRates = categoryRates
+        self.merchantRates = merchantRates
+        self.notes = notes
+        self.benefits = benefits
+        self.matchNeedles = matchNeedles
+        self.maxRewardsPath = maxRewardsPath
+    }
 }
 
 enum CardProductCatalog {
@@ -194,18 +227,25 @@ enum CardProductCatalog {
             pointValueCents: 1,
             annualFee: 0,
             categoryRates: [
-                "Amazon / Whole Foods": 5,
-                "Travel (Portal)": 5,
+                "Travel (Portal)": 5, // Chase Travel is a booking channel, not a single storefront
                 "Dining": 2,
                 "Gas": 2,
                 "Transit": 2
+            ],
+            merchantRates: [
+                // 5% is merchant-specific — not “all Shopping”
+                "amazon.com": 5,
+                "amzn.com": 5,
+                "amazon fresh": 5,
+                "whole foods": 5,
+                "wholefoods": 5
             ],
             notes: """
             Source: maxrewards.com/credit-cards/prime-visa
             • 5% Amazon.com, Amazon Fresh, Whole Foods, Chase Travel (eligible Prime)
             • 2% gas stations, restaurants, local transit & commuting (incl. rideshare)
             • 1% all other · $0 AF · no foreign transaction fee
-            Shopping@5% is a proxy for Amazon/Whole Foods — lower for non-Amazon shopping.
+            Amazon boost is merchant-matched (title contains amazon / whole foods), not category Shopping.
             """,
             benefits: [
                 .init(title: "No annual fee", detail: "$0"),
@@ -230,12 +270,18 @@ enum CardProductCatalog {
             pointValueCents: 1,
             annualFee: 0,
             categoryRates: [
-                "Shopping": 3,
-                "Travel (Other)": 3,
+                "Travel (Other)": 3, // portal / travel book — not merchant-specific
                 "Dining": 2,
                 "Gas": 2
             ],
-            notes: "Without Prime: 3% Amazon/Whole Foods/Chase Travel; 2% gas, restaurants, transit; 1% other (Chase/Amazon program).",
+            merchantRates: [
+                "amazon.com": 3,
+                "amzn.com": 3,
+                "amazon fresh": 3,
+                "whole foods": 3,
+                "wholefoods": 3
+            ],
+            notes: "Without Prime: 3% Amazon/Whole Foods/Chase Travel (Amazon is merchant-matched); 2% gas, restaurants; 1% other.",
             benefits: [
                 .init(title: "No annual fee", detail: "$0")
             ],
@@ -371,22 +417,31 @@ enum CardProductCatalog {
             defaultRate: 2,
             pointValueCents: 1,
             annualFee: 0,
-            categoryRates: [
-                // Only rates *above* the 2% base. Amazon is NOT an Apple Card 3% partner
-                // (that’s Chase Prime Visa). Optional partner boost: drugstores ≈ Walgreens/etc.
-                "Drugstores": 3
+            categoryRates: [:], // partners are merchants, not “all Drugstores”
+            merchantRates: [
+                // Select Apple Pay partners (3%) — merchant title match, not whole categories.
+                "walgreens": 3,
+                "duane reade": 3,
+                "nike": 3,
+                "uber": 3, // Uber / Uber Eats
+                "panera": 3,
+                "exxon": 3,
+                "mobil": 3,
+                "ace hardware": 3,
+                "apple.com": 3,
+                "apple store": 3
             ],
             notes: """
-            Finance Wizard default: 2% cash back on all Apple Card purchases (Everything Else).
-            Amazon / Whole Foods is 2% here — not 3% (Prime Visa is the Amazon 5%/3% card).
-            Optional Drugstores 3% stands in for select Apple Pay partners (e.g. Walgreens).
-            Official also has 1% titanium swipe; lock a txn if you need that exception.
+            Finance Wizard default: 2% Daily Cash (Everything Else).
+            3% only at listed partner merchants (title match) — not “Drugstores” or “Shopping”.
+            Amazon is 2% on Apple Card (use Prime Visa for Amazon earn).
+            1% titanium swipe: lock individual transactions if needed.
             """,
             benefits: [
                 .init(title: "No annual fee", detail: "$0"),
                 .init(title: "No foreign transaction fee", detail: ""),
                 .init(title: "No late fees", detail: ""),
-                .init(title: "Daily Cash", detail: "Default modeled as 2% (higher categories win)")
+                .init(title: "Daily Cash", detail: "2% base; 3% at partner merchants")
             ],
             matchNeedles: ["apple card"],
             maxRewardsPath: "/credit-cards/apple-card"
@@ -476,6 +531,14 @@ enum CardProductCatalog {
         // (so Apple Card 2% / X Money 3% don’t fan out into every reward category).
         profile.categoryMultipliers = product.categoryRates.filter {
             abs($0.value - product.defaultRate) > 0.000_1
+        }
+        profile.merchantMultipliers = product.merchantRates
+            .filter { abs($0.value - product.defaultRate) > 0.000_1 }
+            .reduce(into: [:]) { dict, pair in
+                dict[pair.key.lowercased()] = pair.value
+            }
+        if profile.merchantMultipliers?.isEmpty == true {
+            profile.merchantMultipliers = nil
         }
         profile.notes = product.notes
         profile.benefits = product.benefits
