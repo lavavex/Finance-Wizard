@@ -19,6 +19,8 @@ struct CategorySpendChartView: View {
     /// Max pie slices after Apple Card color merge (bars use pre-limited `categories`).
     var pieSliceLimit: Int? = nil
 
+    @Environment(\.screenshotPrivacy) private var screenshotPrivacy
+
     private var categoryNames: [String] { categories.map(\.category) }
 
     // Fixed Apple Card–style colors per category name (not by bar index)
@@ -88,7 +90,11 @@ struct CategorySpendChartView: View {
     }
 
     private func dollarString(_ value: Double) -> String {
-        value.rounded().formatted(.currency(code: "USD").precision(.fractionLength(0)))
+        ScreenshotPrivacy.money(
+            value.rounded(),
+            fractionLength: 0...0,
+            privacy: screenshotPrivacy
+        )
     }
 
     private func applyCategoryColors<V: View>(_ content: V) -> some View {
@@ -142,7 +148,7 @@ struct CategorySpendChartView: View {
                 .chartXScale(domain: spendDomain)
                 .chartYAxis(.hidden)
                 .chartXAxis {
-                    if ultraCompact {
+                    if ultraCompact || screenshotPrivacy {
                         AxisMarks(values: .automatic(desiredCount: 2)) { _ in
                             AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
                         }
@@ -196,7 +202,7 @@ struct CategorySpendChartView: View {
                 .chartYScale(domain: spendDomain)
                 .chartXAxis(.hidden)
                 .chartYAxis {
-                    if ultraCompact {
+                    if ultraCompact || screenshotPrivacy {
                         AxisMarks(values: .automatic(desiredCount: 3)) { _ in
                             AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
                         }

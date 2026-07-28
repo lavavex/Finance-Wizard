@@ -63,6 +63,8 @@ struct IncomeExportFile: Decodable {
 // MARK: - Root tabs
 
 struct ContentView: View {
+    @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
+
     var body: some View {
         TabView {
             // Tab 1: full list with the same period / sort / hide-card filters as the widget
@@ -89,6 +91,7 @@ struct ContentView: View {
                     Label("Settings", systemImage: "gearshape")
                 }
         }
+        .environment(\.screenshotPrivacy, screenshotPrivacy)
     }
 }
 
@@ -237,7 +240,7 @@ struct AllTransactionsView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             Spacer()
-                            Text(totalSpend, format: .currency(code: "USD"))
+                            MoneyText(totalSpend)
                                 .font(.title2.bold())
                                 .foregroundStyle(.primary)
                         }
@@ -251,7 +254,7 @@ struct AllTransactionsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(totalIncome, format: .currency(code: "USD"))
+                        MoneyText(totalIncome)
                             .font(.title2.bold())
                             .foregroundStyle(.green)
                     }
@@ -264,7 +267,7 @@ struct AllTransactionsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(periodNet, format: .currency(code: "USD"))
+                        MoneyText(periodNet)
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(periodNet >= 0 ? .green : .primary)
                     }
@@ -303,7 +306,7 @@ struct AllTransactionsView: View {
                             Label("Subscriptions", systemImage: "repeat.circle")
                             Spacer()
                             if subscriptionMonthly > 0 {
-                                Text("~\(subscriptionMonthly.formatted(.currency(code: "USD")))/mo")
+                                MoneyText(subscriptionMonthly, prefix: "~", suffix: "/mo")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -814,6 +817,8 @@ struct IncomeRowView: View {
     var institutionId: String? = nil
     var institutionName: String? = nil
 
+    @Environment(\.screenshotPrivacy) private var screenshotPrivacy
+
     var body: some View {
         HStack(spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
@@ -837,7 +842,9 @@ struct IncomeRowView: View {
                 // Display: source (employer / payer)
                 Text(income.source)
                     .font(.body)
-                Text("\(income.category) · \(income.accountDisplay)")
+                Text(
+                    "\(income.category) · \(ScreenshotPrivacy.cardText(income.accountDisplay, privacy: screenshotPrivacy))"
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 6) {
@@ -852,7 +859,7 @@ struct IncomeRowView: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            Text(income.amount, format: .currency(code: "USD"))
+            MoneyText(income.amount)
                 .foregroundStyle(.green)
         }
     }
@@ -882,7 +889,7 @@ struct IncomeDetailView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(income.source)
                             .font(.title3.weight(.semibold))
-                        Text(income.amount, format: .currency(code: "USD"))
+                        MoneyText(income.amount)
                             .font(.title2.bold())
                             .foregroundStyle(.green)
                     }
@@ -907,9 +914,9 @@ struct IncomeDetailView: View {
                                 institutionName: linkedAccount?.institutionName ?? income.sourceInstitution
                             )
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text(accountName)
+                                CardText(accountName)
                                 if let mask = income.accountMask, !mask.isEmpty {
-                                    Text("···\(mask)")
+                                    CardText("···\(mask)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }

@@ -175,7 +175,7 @@ private struct ReviewQueueRow: View {
                     .font(.body.weight(.medium))
                     .lineLimit(1)
                 Spacer()
-                Text(item.transaction.amount, format: .currency(code: "USD"))
+                MoneyText(item.transaction.amount)
                     .font(.body.weight(.semibold))
             }
             HStack(spacing: 6) {

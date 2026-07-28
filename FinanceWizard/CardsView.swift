@@ -216,7 +216,7 @@ struct CardsView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             Spacer()
-                            Text(periodTotalSpend, format: .currency(code: "USD"))
+                            MoneyText(periodTotalSpend)
                                 .font(.title3.bold())
                         }
                     }
@@ -236,7 +236,7 @@ struct CardsView: View {
                                     Text("Credit balance")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    Text(totalOwed, format: .currency(code: "USD"))
+                                    MoneyText(totalOwed)
                                         .font(.title3.weight(.semibold))
                                 }
                                 Spacer()
@@ -244,7 +244,7 @@ struct CardsView: View {
                                     Text("Limit")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    Text(totalLimit > 0 ? totalLimit : 0, format: .currency(code: "USD"))
+                                    MoneyText(totalLimit > 0 ? totalLimit : 0)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(.secondary)
                                 }
@@ -261,7 +261,7 @@ struct CardsView: View {
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                         if totalMinimumDue > 0 {
-                                            Text(totalMinimumDue, format: .currency(code: "USD"))
+                                            MoneyText(totalMinimumDue)
                                                 .font(.subheadline.weight(.semibold))
                                         } else {
                                             Text("—")
@@ -528,7 +528,7 @@ private struct UpcomingBillRow: View {
                 institutionName: account.institutionName
             )
             VStack(alignment: .leading, spacing: 2) {
-                Text(account.displayName)
+                CardText(account.displayName)
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
                 if let util = account.utilization {
@@ -540,11 +540,11 @@ private struct UpcomingBillRow: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 if let min = account.minimumPaymentAmount {
-                    Text(min, format: .currency(code: "USD"))
+                    MoneyText(min)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(urgencyColor)
                 } else {
-                    Text(max(0, account.currentBalance), format: .currency(code: "USD"))
+                    MoneyText(max(0, account.currentBalance))
                         .font(.body.weight(.semibold))
                         .foregroundStyle(urgencyColor)
                 }
@@ -604,7 +604,7 @@ struct TotalPaidDisclosure: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(total, format: .currency(code: "USD"))
+                MoneyText(total)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(total > 0 ? .green : .secondary)
             }
@@ -649,10 +649,10 @@ private struct UnifiedCardLabel: View {
                     institutionName: row.institutionName
                 )
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(row.displayName)
+                    CardText(row.displayName)
                         .font(.body.weight(.semibold))
                     if let account = row.creditAccount ?? row.bankAccount {
-                        Text(account.subtitleDetail)
+                        CardText(account.subtitleDetail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -667,10 +667,10 @@ private struct UnifiedCardLabel: View {
                 Spacer(minLength: 8)
                 if let account = row.creditAccount {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(max(0, account.currentBalance), format: .currency(code: "USD"))
+                        MoneyText(max(0, account.currentBalance))
                             .font(.body.weight(.semibold))
                         if let limit = account.creditLimit, limit > 0 {
-                            Text("Limit \(limit.formatted(.currency(code: "USD")))")
+                            MoneyText(limit, prefix: "Limit ")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -681,7 +681,7 @@ private struct UnifiedCardLabel: View {
                     }
                 } else if let account = row.bankAccount, account.isDepository {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(account.availableBalance ?? account.currentBalance, format: .currency(code: "USD"))
+                        MoneyText(account.availableBalance ?? account.currentBalance)
                             .font(.body.weight(.semibold))
                         Text("Available")
                             .font(.caption2)
@@ -689,7 +689,7 @@ private struct UnifiedCardLabel: View {
                     }
                 } else {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(row.spent, format: .currency(code: "USD"))
+                        MoneyText(row.spent)
                             .font(.body.weight(.semibold))
                         Text("Spend")
                             .font(.caption2)
@@ -705,7 +705,7 @@ private struct UnifiedCardLabel: View {
             if let credit = row.creditAccount, credit.hasLiabilitiesDetails {
                 HStack(spacing: 8) {
                     if let minPay = credit.minimumPaymentAmount {
-                        Text("Min \(minPay.formatted(.currency(code: "USD")))")
+                        MoneyText(minPay, prefix: "Min ")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -732,7 +732,7 @@ private struct UnifiedCardLabel: View {
             }
 
             HStack {
-                Text("Spend \(row.spent.formatted(.currency(code: "USD")))")
+                MoneyText(row.spent, prefix: "Spend ")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if row.transactionCount > 0 {
@@ -745,7 +745,7 @@ private struct UnifiedCardLabel: View {
                 }
                 Spacer()
                 if row.paidInPeriod > 0 {
-                    Text("Paid \(row.paidInPeriod.formatted(.currency(code: "USD")))")
+                    MoneyText(row.paidInPeriod, prefix: "Paid ")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.green)
                 }
@@ -830,33 +830,33 @@ struct CardDetailView: View {
                     .textInputAutocapitalization(.words)
                 if let credit = creditAccount {
                     LabeledContent("Bank name") {
-                        Text(credit.plaidDisplayName)
+                        CardText(credit.plaidDisplayName)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
                     }
                     if let mask = credit.mask, !mask.isEmpty {
                         LabeledContent("Last four") {
-                            Text(mask)
+                            CardText(mask)
                                 .font(.body.monospaced())
                                 .foregroundStyle(.secondary)
                         }
                     }
                 } else if let bank = bankAccount {
                     LabeledContent("Bank name") {
-                        Text(bank.plaidDisplayName)
+                        CardText(bank.plaidDisplayName)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
                     }
                     if let mask = bank.mask, !mask.isEmpty {
                         LabeledContent("Last four") {
-                            Text(mask)
+                            CardText(mask)
                                 .font(.body.monospaced())
                                 .foregroundStyle(.secondary)
                         }
                     }
                 } else {
                     LabeledContent("Account") {
-                        Text(rawPaymentMethod)
+                        CardText(rawPaymentMethod)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
                     }
@@ -878,14 +878,14 @@ struct CardDetailView: View {
                     HStack {
                         Text("Balance")
                         Spacer()
-                        Text(max(0, credit.currentBalance), format: .currency(code: "USD"))
+                        MoneyText(max(0, credit.currentBalance))
                             .font(.title3.weight(.semibold))
                     }
                     if let available = credit.availableBalance {
                         HStack {
                             Text("Available credit")
                             Spacer()
-                            Text(available, format: .currency(code: "USD"))
+                            MoneyText(available)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -893,7 +893,7 @@ struct CardDetailView: View {
                         HStack {
                             Text("Limit")
                             Spacer()
-                            Text(limit, format: .currency(code: "USD"))
+                            MoneyText(limit)
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         }
@@ -905,13 +905,13 @@ struct CardDetailView: View {
                     HStack {
                         Text("Available")
                         Spacer()
-                        Text(bank.availableBalance ?? bank.currentBalance, format: .currency(code: "USD"))
+                        MoneyText(bank.availableBalance ?? bank.currentBalance)
                             .font(.title3.weight(.semibold))
                     }
                     HStack {
                         Text("Ledger balance")
                         Spacer()
-                        Text(bank.currentBalance, format: .currency(code: "USD"))
+                        MoneyText(bank.currentBalance)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -919,7 +919,7 @@ struct CardDetailView: View {
                 HStack {
                     Text("Spend")
                     Spacer()
-                    Text(cardSpend, format: .currency(code: "USD"))
+                    MoneyText(cardSpend)
                         .foregroundStyle(.secondary)
                 }
                 Text("\(periodLabel) · \(cardRows.count) purchases")
@@ -987,7 +987,7 @@ struct CardDetailView: View {
                     }
                     if let minPay = credit.minimumPaymentAmount {
                         LabeledContent("Minimum payment") {
-                            Text(minPay, format: .currency(code: "USD"))
+                            MoneyText(minPay)
                         }
                     }
                     if let due = credit.nextPaymentDueDate {
@@ -1005,7 +1005,7 @@ struct CardDetailView: View {
                     if let lastAmt = credit.lastPaymentAmount {
                         LabeledContent("Last payment") {
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text(lastAmt, format: .currency(code: "USD"))
+                                MoneyText(lastAmt)
                                 if let d = credit.lastPaymentDate {
                                     Text(d, style: .date)
                                         .font(.caption)
@@ -1017,7 +1017,7 @@ struct CardDetailView: View {
                     if let stmt = credit.lastStatementBalance {
                         LabeledContent("Last statement") {
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text(stmt, format: .currency(code: "USD"))
+                                MoneyText(stmt)
                                 if let d = credit.lastStatementIssueDate {
                                     Text(d, style: .date)
                                         .font(.caption)
@@ -1157,6 +1157,8 @@ struct TransactionRowView: View {
     var institutionName: String? = nil
     var showPaymentRail: Bool = false
 
+    @Environment(\.screenshotPrivacy) private var screenshotPrivacy
+
     var body: some View {
         HStack(spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
@@ -1182,7 +1184,9 @@ struct TransactionRowView: View {
                 Text(transaction.title)
                     .font(.body)
                 HStack(spacing: 4) {
-                    Text("\(transaction.category) · \(displayPaymentMethod)")
+                    Text(
+                        "\(transaction.category) · \(ScreenshotPrivacy.cardText(displayPaymentMethod, privacy: screenshotPrivacy))"
+                    )
                     if showPaymentRail {
                         Text("·")
                             .foregroundStyle(.tertiary)
@@ -1198,7 +1202,7 @@ struct TransactionRowView: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
-                Text(transaction.amount, format: .currency(code: "USD"))
+                MoneyText(transaction.amount)
                     .foregroundStyle(
                         TransactionAnalytics.isExcludedFromSpend(transaction)
                             ? Color.secondary
@@ -1262,7 +1266,7 @@ struct CreditPaymentRow: View {
                     .offset(x: 4, y: 4)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(cardLabel)
+                CardText(cardLabel)
                     .font(.body.weight(.medium))
                 Text(payment.title)
                     .font(.caption)
@@ -1273,7 +1277,7 @@ struct CreditPaymentRow: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer()
-            Text(payment.amount, format: .currency(code: "USD"))
+            MoneyText(payment.amount)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(.green)
         }
