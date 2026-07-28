@@ -62,36 +62,69 @@ struct IncomeExportFile: Decodable {
 
 // MARK: - Root tabs
 
+private enum AppTab: Hashable {
+    case transactions
+    case accounts
+    case benefits
+    case settings
+}
+
 struct ContentView: View {
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
+    @State private var selectedTab: AppTab = .transactions
+    /// Only build heavy tabs after the user opens them (first switch is still work; launch is not).
+    @State private var loadedTabs: Set<AppTab> = [.transactions]
+
+    /// Marks the tab loaded on select so the first paint builds content (not a blank frame).
+    private var tabSelection: Binding<AppTab> {
+        Binding(
+            get: { selectedTab },
+            set: { newValue in
+                loadedTabs.insert(newValue)
+                selectedTab = newValue
+            }
+        )
+    }
 
     var body: some View {
-        TabView {
-            // Tab 1: full list with the same period / sort / hide-card filters as the widget
+        TabView(selection: tabSelection) {
             AllTransactionsView()
-                .tabItem {
-                    Label("Transactions", systemImage: "list.bullet")
-                }
+                .tabItem { Label("Transactions", systemImage: "list.bullet") }
+                .tag(AppTab.transactions)
 
-            // Tab 2: accounts (credit + checking), spend, bill payments
-            CardsView()
-                .tabItem {
-                    Label("Accounts", systemImage: "building.columns")
-                }
+            lazyTab(.accounts) {
+                CardsView()
+            }
+            .tabItem { Label("Accounts", systemImage: "building.columns") }
+            .tag(AppTab.accounts)
 
-            // Tab 3: credit card rewards & benefits
-            BenefitsView()
-                .tabItem {
-                    Label("Benefits", systemImage: "gift")
-                }
+            lazyTab(.benefits) {
+                BenefitsView()
+            }
+            .tabItem { Label("Benefits", systemImage: "gift") }
+            .tag(AppTab.benefits)
 
-            // Tab 4: Plaid credentials + linked banks
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
+            lazyTab(.settings) {
+                SettingsView()
+            }
+            .tabItem { Label("Settings", systemImage: "gearshape") }
+            .tag(AppTab.settings)
         }
         .environment(\.screenshotPrivacy, screenshotPrivacy)
+    }
+
+    @ViewBuilder
+    private func lazyTab<Content: View>(
+        _ tab: AppTab,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if loadedTabs.contains(tab) {
+            content()
+        } else {
+            // Placeholder until first selection — avoids building all tabs at launch.
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 }
 

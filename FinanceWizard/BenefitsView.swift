@@ -18,49 +18,21 @@ struct BenefitsView: View {
     @State private var profileEpoch = 0
     @State private var productToast: String?
 
+    /// Cached list model — never recompute BenefitsAnalytics inside `body` accessors.
+    @State private var summaries: [BenefitsAnalytics.CardPeriodSummary] = []
+    @State private var totalValue: Double = 0
+    @State private var totalSpend: Double = 0
+    @State private var feePaybackRollup: (projected: Double, fees: Double, net: Double)?
+    @State private var cardsNeedingProduct: [BenefitsAnalytics.CardPeriodSummary] = []
+    @State private var isLoadingSummaries = true
+    @State private var didApplyCatalog = false
+
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
     }
 
-    private var summaries: [BenefitsAnalytics.CardPeriodSummary] {
-        _ = profileEpoch
-        return BenefitsAnalytics.summaries(
-            accounts: accounts,
-            transactions: transactions,
-            period: period,
-            referenceDate: referenceDate
-        )
-    }
-
-    private var totalValue: Double {
-        summaries.reduce(0) { $0 + $1.estimatedValueUSD }
-    }
-
-    private var totalSpend: Double {
-        summaries.reduce(0) { $0 + $1.spend }
-    }
-
-    private var cardsNeedingProduct: [BenefitsAnalytics.CardPeriodSummary] {
-        summaries.filter { $0.profile.productKey == nil }
-    }
-
-    /// Sum of annual fee payback nets for cards that have a fee.
-    private var feePaybackRollup: (projected: Double, fees: Double, net: Double)? {
-        var projected = 0.0
-        var fees = 0.0
-        var any = false
-        for row in summaries {
-            if let pb = row.profile.annualFeePayback(
-                periodValueUSD: row.estimatedValueUSD,
-                period: period
-            ) {
-                any = true
-                projected += pb.projectedAnnual
-                fees += pb.fee
-            }
-        }
-        guard any else { return nil }
-        return (projected, fees, projected - fees)
+    private var refreshToken: String {
+        "\(period.rawValue)|\(referenceDate.timeIntervalSince1970)|\(transactions.count)|\(accounts.count)|\(profileEpoch)"
     }
 
     var body: some View {
@@ -73,8 +45,12 @@ struct BenefitsView: View {
                                 Text("Estimated rewards")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                MoneyText(totalValue)
-                                    .font(.title2.weight(.bold))
+                                if isLoadingSummaries && summaries.isEmpty {
+                                    ProgressView()
+                                } else {
+                                    MoneyText(totalValue)
+                                        .font(.title2.weight(.bold))
+                                }
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 2) {
@@ -160,7 +136,13 @@ struct BenefitsView: View {
                 }
 
                 Section {
-                    if summaries.isEmpty {
+                    if isLoadingSummaries && summaries.isEmpty {
+                        HStack {
+                            ProgressView()
+                            Text("Calculating rewards…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if summaries.isEmpty {
                         ContentUnavailableView {
                             Label("No card spend", systemImage: "gift")
                         } description: {
@@ -168,6 +150,7 @@ struct BenefitsView: View {
                         } actions: {
                             Button("Apply known product rates") {
                                 applyCatalogDefaults()
+                                refreshSummaries()
                             }
                             .buttonStyle(.borderedProminent)
                         }
@@ -196,6 +179,7 @@ struct BenefitsView: View {
                 Section {
                     Button {
                         applyCatalogDefaults()
+                        refreshSummaries()
                     } label: {
                         Label("Apply known product rates", systemImage: "sparkles")
                     }
@@ -214,10 +198,54 @@ struct BenefitsView: View {
                     )
                 }
             }
-            .task {
-                applyCatalogDefaults()
+            .task(id: refreshToken) {
+                if !didApplyCatalog {
+                    applyCatalogDefaults()
+                    didApplyCatalog = true
+                }
+                refreshSummaries()
                 InstitutionLogoCache.prefetch(accounts: accounts)
             }
+        }
+    }
+
+    private func refreshSummaries() {
+        isLoadingSummaries = summaries.isEmpty
+        let period = self.period
+        let referenceDate = self.referenceDate
+        let accounts = self.accounts
+        let transactions = self.transactions
+
+        // Yield so the tab chrome can paint before heavy work.
+        Task { @MainActor in
+            await Task.yield()
+            let rows = BenefitsAnalytics.summaries(
+                accounts: accounts,
+                transactions: transactions,
+                period: period,
+                referenceDate: referenceDate,
+                includeCategoryBreakdown: false
+            )
+            summaries = rows
+            totalValue = rows.reduce(0) { $0 + $1.estimatedValueUSD }
+            totalSpend = rows.reduce(0) { $0 + $1.spend }
+            cardsNeedingProduct = rows.filter { $0.profile.productKey == nil }
+
+            var projected = 0.0
+            var fees = 0.0
+            var any = false
+            for row in rows {
+                if let pb = row.profile.annualFeePayback(
+                    periodValueUSD: row.estimatedValueUSD,
+                    period: period
+                ) {
+                    any = true
+                    projected += pb.projectedAnnual
+                    fees += pb.fee
+                }
+            }
+            feePaybackRollup = any ? (projected, fees, projected - fees) : nil
+            isLoadingSummaries = false
         }
     }
 
@@ -1007,29 +1035,59 @@ private struct TemporaryBoostsEditorSection: View {
     @Binding var tempHasEndDate: Bool
     var onAdd: () -> Void
 
-    private var boosts: [TemporaryBoost] {
-        profile.temporaryBoosts ?? []
-    }
-
     var body: some View {
+        let boosts = profile.temporaryBoosts ?? []
         Section {
             if boosts.isEmpty {
-                Text("No temporary boosts yet.")
+                Text("Add rotating categories (e.g. Freedom Flex 5%) or limited-time boosts.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(boosts, id: \.id) { boost in
-                    TemporaryBoostRow(
-                        boost: boost,
-                        rateLabel: profile.formatRate(boost.rate),
-                        onRemove: { profile.removeTemporaryBoost(id: boost.id) }
-                    )
+                ForEach(boosts, id: \.id) { (boost: TemporaryBoost) in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(boost.category)
+                                .font(.body.weight(.medium))
+                            Spacer()
+                            Text(profile.formatRate(boost.rate))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.indigo)
+                        }
+                        HStack {
+                            if let through = boost.activeThrough {
+                                Text("Through \(through.formatted(date: .abbreviated, time: .omitted))")
+                                    .font(.caption2)
+                                    .foregroundStyle(boost.isActive() ? Color.secondary : Color.orange)
+                            } else {
+                                Text("No end date")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if !boost.isActive() {
+                                Text("· Expired")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(Color.orange)
+                            }
+                        }
+                        if !boost.note.isEmpty {
+                            Text(boost.note)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            profile.removeTemporaryBoost(id: boost.id)
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    }
                 }
             }
 
             Picker("Category", selection: $tempCategory) {
-                ForEach(RewardCategory.allCases) { rc in
-                    Text(rc.rawValue).tag(rc.rawValue)
+                ForEach(RewardCategory.allCases) { cat in
+                    Text(cat.rawValue).tag(cat.rawValue)
                 }
             }
             HStack {
@@ -1042,68 +1100,17 @@ private struct TemporaryBoostsEditorSection: View {
                 Text(profile.rewardKind.rateSuffix)
                     .foregroundStyle(.secondary)
             }
-            Toggle("Ends on date", isOn: $tempHasEndDate)
+            Toggle("Ends on a date", isOn: $tempHasEndDate)
             if tempHasEndDate {
                 DatePicker("Active through", selection: $tempThrough, displayedComponents: .date)
             }
             TextField("Note (optional)", text: $tempNote)
-            Button("Add temporary boost", action: onAdd)
+            Button("Add temporary boost") { onAdd() }
                 .disabled(tempRateText.trimmingCharacters(in: .whitespaces).isEmpty)
         } header: {
-            Text("Temporary boosts")
+            Text("Temporary / rotating boosts")
+        } footer: {
+            Text("Overrides the category rate while active. Freedom Flex calendar, limited-time promos, etc.")
         }
     }
-}
-
-private struct TemporaryBoostRow: View {
-    let boost: TemporaryBoost
-    let rateLabel: String
-    var onRemove: () -> Void
-
-    private var statusLine: String {
-        guard let end = boost.activeThrough else { return "No end date" }
-        let date = end.formatted(date: .abbreviated, time: .omitted)
-        return boost.isActive() ? "Active through \(date)" : "Ended \(date)"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(boost.category)
-                    .font(.body.weight(.medium))
-                Spacer()
-                Text(rateLabel)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.indigo)
-            }
-            HStack {
-                Text(statusLine)
-                    .font(.caption)
-                    .foregroundStyle(
-                        (boost.isActive() || boost.activeThrough == nil)
-                        ? Color.secondary
-                        : Color.orange
-                    )
-                if !boost.note.isEmpty {
-                    Text("· \(boost.note)")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-            }
-        }
-        .swipeActions {
-            Button(role: .destructive, action: onRemove) {
-                Label("Remove", systemImage: "trash")
-            }
-        }
-    }
-}
-
-#Preview {
-    BenefitsView()
-        .modelContainer(
-            for: [Transaction.self, BankAccount.self, CreditCardPayment.self],
-            inMemory: true
-        )
 }
