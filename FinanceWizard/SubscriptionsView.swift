@@ -28,7 +28,7 @@ struct SubscriptionsView: View {
                         Text("Est. monthly burn")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(monthlyBurn, format: .currency(code: "USD"))
+                        MoneyText(monthlyBurn)
                             .font(.title2.weight(.bold))
                     }
                     Spacer()
@@ -68,7 +68,7 @@ struct SubscriptionsView: View {
                                         .foregroundStyle(.tertiary)
                                         .lineLimit(1)
                                     if !item.paymentMethods.isEmpty {
-                                        Text(item.paymentMethods.joined(separator: " · "))
+                                        CardText(item.paymentMethods.joined(separator: " · "))
                                             .font(.caption2)
                                             .foregroundStyle(.tertiary)
                                             .lineLimit(1)
@@ -76,9 +76,9 @@ struct SubscriptionsView: View {
                                 }
                                 Spacer(minLength: 8)
                                 VStack(alignment: .trailing, spacing: 2) {
-                                    Text(item.typicalAmount, format: .currency(code: "USD"))
+                                    MoneyText(item.typicalAmount)
                                         .font(.body.weight(.semibold))
-                                    Text("~\(item.estimatedMonthly.formatted(.currency(code: "USD")))/mo")
+                                    MoneyText(item.estimatedMonthly, prefix: "~", suffix: "/mo")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -116,13 +116,13 @@ private struct SubscriptionDetailView: View {
         List {
             Section {
                 LabeledContent("Typical amount") {
-                    Text(candidate.typicalAmount, format: .currency(code: "USD"))
+                    MoneyText(candidate.typicalAmount)
                 }
                 LabeledContent("Cadence") {
                     Text(candidate.cadence.displayName)
                 }
                 LabeledContent("Est. monthly") {
-                    Text(candidate.estimatedMonthly, format: .currency(code: "USD"))
+                    MoneyText(candidate.estimatedMonthly)
                 }
                 LabeledContent("Seen") {
                     Text("\(candidate.occurrenceCount) times")

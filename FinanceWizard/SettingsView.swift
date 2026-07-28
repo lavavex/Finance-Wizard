@@ -28,9 +28,22 @@ struct SettingsView: View {
     @State private var showDebugShare = false
     @State private var showDebugExportConfirm = false
 
+    @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
+
     var body: some View {
         NavigationStack {
             Form {
+                // MARK: Screenshot privacy
+                Section {
+                    Toggle(isOn: $screenshotPrivacy) {
+                        Label("Hide for screenshots", systemImage: "eye.slash")
+                    }
+                } header: {
+                    Text("Privacy")
+                } footer: {
+                    Text("Masks dollar amounts and card last-four digits so you can share screenshots safely. Turn off when you’re done.")
+                }
+
                 // MARK: Credentials
                 Section {
                     TextField("client_id", text: $clientID)

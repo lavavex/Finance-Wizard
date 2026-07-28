@@ -214,7 +214,7 @@ struct InstitutionLogoHeader: View {
                 .clipped()
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(displayName)
+                CardText(displayName)
                     .font(.title3.weight(.semibold))
                 if let institutionName, !institutionName.isEmpty {
                     Text(institutionName)
@@ -222,7 +222,7 @@ struct InstitutionLogoHeader: View {
                         .foregroundStyle(.secondary)
                 }
                 if let mask, !mask.isEmpty {
-                    Text("···\(mask)")
+                    CardText("···\(mask)")
                         .font(.caption.monospaced())
                         .foregroundStyle(.tertiary)
                 }

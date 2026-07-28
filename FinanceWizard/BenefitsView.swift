@@ -73,7 +73,7 @@ struct BenefitsView: View {
                                 Text("Estimated rewards")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text(totalValue, format: .currency(code: "USD"))
+                                MoneyText(totalValue)
                                     .font(.title2.weight(.bold))
                             }
                             Spacer()
@@ -81,7 +81,7 @@ struct BenefitsView: View {
                                 Text("Card spend")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text(totalSpend, format: .currency(code: "USD"))
+                                MoneyText(totalSpend)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.secondary)
                             }
@@ -97,16 +97,16 @@ struct BenefitsView: View {
                                     Text("Fee payback (annualized)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    Text(payback.net, format: .currency(code: "USD"))
+                                    MoneyText(payback.net)
                                         .font(.title3.weight(.semibold))
                                         .foregroundStyle(payback.net >= 0 ? .green : .orange)
                                 }
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 2) {
-                                    Text("Rewards \(payback.projected.formatted(.currency(code: "USD")))")
+                                    MoneyText(payback.projected, prefix: "Rewards ")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
-                                    Text("Fees \(payback.fees.formatted(.currency(code: "USD")))")
+                                    MoneyText(payback.fees, prefix: "Fees ")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -142,7 +142,7 @@ struct BenefitsView: View {
                             } label: {
                                 Label {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(row.displayName)
+                                        CardText(row.displayName)
                                             .font(.body.weight(.semibold))
                                         Text("Choose which card this is")
                                             .font(.caption)
@@ -265,7 +265,7 @@ private struct BenefitsCardRow: View {
                         ?? (summary.displayName.localizedCaseInsensitiveContains("apple") ? "Apple Card" : nil)
                 )
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(summary.displayName)
+                    CardText(summary.displayName)
                         .font(.body.weight(.semibold))
                     // Product type is baked into displayName ("Freedom Unlimited 1234") when chosen.
                     Text("\(summary.transactionCount) purchases · \(summary.profile.rewardKind.displayName)")
@@ -275,7 +275,7 @@ private struct BenefitsCardRow: View {
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(summary.estimatedValueUSD, format: .currency(code: "USD"))
+                    MoneyText(summary.estimatedValueUSD)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.green)
                     Text(rewardUnitsLabel)
@@ -441,10 +441,10 @@ struct CardBenefitsDetailView: View {
             // MARK: Period totals
             Section {
                 LabeledContent("Spend") {
-                    Text(live.spend, format: .currency(code: "USD"))
+                    MoneyText(live.spend)
                 }
                 LabeledContent("Est. value") {
-                    Text(live.value, format: .currency(code: "USD"))
+                    MoneyText(live.value)
                         .foregroundStyle(.green)
                         .fontWeight(.semibold)
                 }
@@ -455,13 +455,13 @@ struct CardBenefitsDetailView: View {
                 }
                 if let pb = profile.annualFeePayback(periodValueUSD: live.value, period: period) {
                     LabeledContent("Annualized rewards") {
-                        Text(pb.projectedAnnual, format: .currency(code: "USD"))
+                        MoneyText(pb.projectedAnnual)
                     }
                     LabeledContent("Annual fee") {
-                        Text(pb.fee, format: .currency(code: "USD"))
+                        MoneyText(pb.fee)
                     }
                     LabeledContent("Fee payback") {
-                        Text(pb.net, format: .currency(code: "USD"))
+                        MoneyText(pb.net)
                             .foregroundStyle(pb.net >= 0 ? .green : .orange)
                             .fontWeight(.semibold)
                     }
@@ -484,7 +484,10 @@ struct CardBenefitsDetailView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(row.category)
                                     .font(.body.weight(.medium))
-                                Text("\(row.transactionCount) · \(row.spend.formatted(.currency(code: "USD"))) spend")
+                                HStack(spacing: 4) {
+                                    Text("\(row.transactionCount) ·")
+                                    MoneyText(row.spend, suffix: " spend")
+                                }
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -493,7 +496,7 @@ struct CardBenefitsDetailView: View {
                                 Text(profile.formatRate(row.rate))
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(row.isCustomRate ? CategoryStyle.color(forReward: row.category) : .secondary)
-                                Text(row.rewardsValueUSD, format: .currency(code: "USD"))
+                                MoneyText(row.rewardsValueUSD)
                                     .font(.caption)
                                     .foregroundStyle(.green)
                             }

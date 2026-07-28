@@ -151,7 +151,7 @@ struct TransactionDetailView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(transaction.title)
                             .font(.title3.weight(.semibold))
-                        Text(transaction.amount, format: .currency(code: "USD"))
+                        MoneyText(transaction.amount)
                             .font(.title2.bold())
                             .foregroundStyle(transaction.amount >= 0 ? .green : .primary)
                     }
@@ -177,7 +177,7 @@ struct TransactionDetailView: View {
                             institutionId: linkedAccount?.institutionId,
                             institutionName: linkedAccount?.institutionName
                         )
-                        Text(
+                        CardText(
                             CardLabelStore.label(
                                 paymentMethod: transaction.paymentMethod,
                                 accountId: linkedAccount?.accountId,
@@ -312,7 +312,7 @@ struct TransactionDetailView: View {
                     Text(points, format: .number.precision(.fractionLength(0...2)))
                 }
                 LabeledContent("~ Value @ 1¢/pt") {
-                    Text(points * 0.01, format: .currency(code: "USD"))
+                    MoneyText(points * 0.01)
                 }
             }
 

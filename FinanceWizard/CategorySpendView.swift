@@ -56,7 +56,7 @@ struct CategorySpendView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(snapshot.totalSpend, format: .currency(code: "USD"))
+                    MoneyText(snapshot.totalSpend)
                         .font(.title2.bold())
                 }
                 Text("\(snapshot.transactionCount) transactions · \(snapshot.categories.count) categories")
@@ -110,7 +110,7 @@ struct CategorySpendView: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text(item.spent, format: .currency(code: "USD"))
+                            MoneyText(item.spent)
                                 .fontWeight(.semibold)
                         }
                     }
