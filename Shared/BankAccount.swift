@@ -68,17 +68,24 @@ final class BankAccount {
         CardLabelStore.label(accountId: accountId, fallback: plaidDisplayName)
     }
 
-    /// Subtitle under the nickname (mask / original Plaid name).
+    /// Subtitle under the nickname (institution / original Plaid name).
+    /// Omits last-four when the display name already ends with it (product pick → "Card 1234").
     var subtitleDetail: String {
+        let customLabel = CardLabelStore.label(accountId: accountId, fallback: plaidDisplayName)
         var parts: [String] = []
         if !institutionName.isEmpty {
             parts.append(institutionName)
         }
         if let mask, !mask.isEmpty {
-            parts.append("···\(mask)")
+            let endsWithMask = customLabel
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .hasSuffix(mask)
+            if !endsWithMask {
+                parts.append("···\(mask)")
+            }
         }
-        // If user renamed, also show original account name
-        if CardLabelStore.label(accountId: accountId, fallback: plaidDisplayName) != plaidDisplayName {
+        // If user renamed (e.g. product + last 4), also show original Plaid account name
+        if customLabel != plaidDisplayName {
             parts.insert(plaidDisplayName, at: 0)
         }
         return parts.joined(separator: " · ")
@@ -193,6 +200,10 @@ final class BankAccount {
         if m.caseInsensitiveCompare(plaid) == .orderedSame { return true }
         if m.caseInsensitiveCompare(name) == .orderedSame { return true }
         if let mask, !mask.isEmpty, m.contains(mask) { return true }
+        // Synthetic Apple Card account matches CSV / Wallet payment method
+        if AppleCardAccount.isAppleCard(account: self), AppleCardAccount.isAppleCard(paymentMethod: method) {
+            return true
+        }
         return false
     }
 

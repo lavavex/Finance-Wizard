@@ -47,8 +47,8 @@ struct AppleCardCSVImportReport: Sendable {
 }
 
 enum AppleCardCSVImporter {
-    static let paymentMethod = "Apple Card"
-    static let institutionName = "Apple Card"
+    static let paymentMethod = AppleCardAccount.paymentMethod
+    static let institutionName = AppleCardAccount.institutionName
 
     /// Upsert rows from Apple Card CSV into SwiftData.
     @MainActor
@@ -66,6 +66,9 @@ enum AppleCardCSVImporter {
             throw AppleCardCSVImportError.noRecognizedColumns
         }
 
+        // Treat Apple Card as a linked credit account (not “Other spend”).
+        _ = AppleCardAccount.ensureLinked(in: modelContext)
+
         var report = AppleCardCSVImportReport()
         let body = rows.dropFirst()
         guard !body.isEmpty else { throw AppleCardCSVImportError.noRows }
@@ -77,6 +80,7 @@ enum AppleCardCSVImporter {
             }
         }
 
+        AppleCardAccount.reapplyUnlockedMultipliers(in: modelContext)
         try modelContext.save()
         return report
     }
@@ -161,6 +165,16 @@ enum AppleCardCSVImporter {
 
         case .purchase:
             let category = mapAppleCategory(appleCategory)
+            // 2% base Daily Cash; higher reward categories applied via CardBenefitsStore.
+            let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+            let mult = CardBenefitsStore.resolvedMultiplier(
+                accountId: AppleCardAccount.accountId,
+                paymentMethod: paymentMethod,
+                generalCategory: category,
+                title: title,
+                accounts: accounts,
+                on: date
+            )
             upsertExpense(
                 id: stableId,
                 title: title,
@@ -168,7 +182,7 @@ enum AppleCardCSVImporter {
                 date: date,
                 category: category,
                 categoryLocked: false,
-                multiplier: 1,
+                multiplier: mult > 0 ? mult : 2,
                 multiplierLocked: false,
                 overrideSource: "apple-card-csv",
                 paymentRail: PaymentRail.debit.rawValue,
@@ -316,6 +330,7 @@ enum AppleCardCSVImporter {
             existing.cardName = paymentMethod
             existing.title = title
             existing.institutionName = institutionName
+            existing.creditAccountId = AppleCardAccount.accountId
         } else {
             modelContext.insert(
                 CreditCardPayment(
@@ -325,7 +340,7 @@ enum AppleCardCSVImporter {
                     cardName: paymentMethod,
                     sourceAccount: nil,
                     title: title,
-                    creditAccountId: nil,
+                    creditAccountId: AppleCardAccount.accountId,
                     institutionName: institutionName
                 )
             )

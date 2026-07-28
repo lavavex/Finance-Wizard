@@ -29,6 +29,20 @@ title: Troubleshooting
 2. Team selected for both targets.  
 3. Clean build folder, delete app from device/simulator, reinstall.  
 
+## Xcode console noise (usually ignore)
+
+### `CFPrefsPlistSource` / `group.net.roberth.FinanceWizard` / `kCFPreferencesAnyUser with a container`
+
+App Group prefs warning. Common on Simulator when something touches the group container. SwiftData still uses the App Group for the store; logo **files** use the group folder. We avoid `UserDefaults(suiteName:)` for logo metadata to reduce this spam. If widgets can’t see shared data, re-check App Group entitlements + signing—not this log alone.
+
+### `non-launching port is incompatible with service identifier "com.apple.PointerUI…"`
+
+Apple system / Simulator pointer UI. Unrelated to Finance Wizard. Safe to ignore.
+
+### `UIContextMenuInteraction updateVisibleMenuWithBlock: while no context menu is visible`
+
+UIKit/SwiftUI trying to refresh a menu that isn’t open (often toolbar `Menu`). Harmless; “This won’t do anything” means no user impact.
+
 ## Plaid / Sync
 
 ### “Add your Plaid client_id and secret in Settings”

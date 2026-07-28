@@ -9,31 +9,6 @@ import SwiftUI
 import SwiftData
 import WidgetKit
 
-// Built-in expense categories for the picker
-enum KnownCategory: String, CaseIterable, Identifiable {
-    case dining = "Dining"
-    case gas = "Gas (Car)"
-    case groceries = "Groceries"
-    case subscriptions = "Subscriptions"
-    case shopping = "Shopping"
-    case travel = "Travel"
-    case carInsurance = "Car Insurance"
-    case homeInternet = "Home Internet"
-    case personalCare = "Personal Care"
-    case creditCardPayment = "Credit Card Payment"
-    case miscellaneous = "Miscellaneous"
-
-    var id: String { rawValue }
-
-    var systemImage: String {
-        CategoryStyle.symbolName(for: rawValue)
-    }
-
-    static var defaultNames: [String] {
-        allCases.map(\.rawValue)
-    }
-}
-
 // Detail + edit screen for one SwiftData transaction
 struct TransactionDetailView: View {
     @Bindable var transaction: Transaction
@@ -43,6 +18,9 @@ struct TransactionDetailView: View {
     @State private var categoryText: String = ""
     @State private var multiplierText: String = ""
     @State private var selectedRail: PaymentRail = .other
+    /// nil = auto from general category + title; else locked reward bucket name
+    @State private var rewardOverrideMode: RewardTravelMode = .auto
+    @State private var subscriptionMode: SubscriptionDeclareMode = .auto
     @State private var learn = true
     @State private var scopePaymentMethod = true
     @State private var applyToMatching = false
@@ -55,12 +33,110 @@ struct TransactionDetailView: View {
     @Query private var allTransactions: [Transaction]
     @Query private var bankAccounts: [BankAccount]
 
+    /// User control for subscription radar (yearly is the common missing case).
+    private enum SubscriptionDeclareMode: String, CaseIterable, Identifiable {
+        case auto
+        case yearly
+        case monthly
+        case weekly
+        case none
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .auto: return "Auto-detect"
+            case .yearly: return "Yearly subscription"
+            case .monthly: return "Monthly subscription"
+            case .weekly: return "Weekly subscription"
+            case .none: return "Not a subscription"
+            }
+        }
+
+        var storageValue: String? {
+            switch self {
+            case .auto: return nil
+            case .yearly: return SubscriptionCadence.yearly.rawValue
+            case .monthly: return SubscriptionCadence.monthly.rawValue
+            case .weekly: return SubscriptionCadence.weekly.rawValue
+            case .none: return "none"
+            }
+        }
+
+        static func from(transaction: Transaction) -> SubscriptionDeclareMode {
+            if transaction.isDeclaredNotSubscription { return .none }
+            switch transaction.declaredSubscriptionCadence {
+            case .yearly: return .yearly
+            case .monthly: return .monthly
+            case .weekly: return .weekly
+            case .none: return .auto
+            }
+        }
+    }
+
+    private enum RewardTravelMode: String, CaseIterable, Identifiable {
+        case auto
+        case portal
+        case otherTravel
+        case clear
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .auto: return "Auto"
+            case .portal: return "Portal"
+            case .otherTravel: return "Direct / other"
+            case .clear: return "Auto"
+            }
+        }
+    }
+
     private var selectedPreset: String? {
         categoryOptions.first { $0 == categoryText }
     }
 
     private var linkedAccount: BankAccount? {
         BankAccount.matching(paymentMethod: transaction.paymentMethod, in: bankAccounts)
+    }
+
+    private var benefitsProfile: CardBenefitsProfile {
+        CardBenefitsStore.profile(
+            accountId: linkedAccount?.accountId,
+            paymentMethod: transaction.paymentMethod,
+            accounts: bankAccounts
+        )
+    }
+
+    private var mappedRewardCategory: RewardCategory {
+        if rewardOverrideMode == .portal { return .travelPortal }
+        if rewardOverrideMode == .otherTravel { return .travelOther }
+        if let raw = transaction.rewardCategoryOverride,
+           let match = RewardCategory.allCases.first(where: {
+               $0.rawValue.caseInsensitiveCompare(raw) == .orderedSame
+           }) {
+            return match
+        }
+        return RewardCategory.forTransaction(
+            generalCategory: categoryText.isEmpty ? transaction.category : categoryText,
+            title: transaction.title
+        )
+    }
+
+    private var suggestedRewardRate: Double {
+        benefitsProfile.rate(
+            forCategory: mappedRewardCategory.rawValue,
+            on: transaction.date
+        )
+    }
+
+    private var showsTravelRewardPicker: Bool {
+        let general = (categoryText.isEmpty ? transaction.category : categoryText).lowercased()
+        let reward = mappedRewardCategory
+        return general.contains("travel")
+            || reward == .travelPortal
+            || reward == .travelOther
+            || transaction.rewardCategoryOverride != nil
     }
 
     var body: some View {
@@ -152,6 +228,32 @@ struct TransactionDetailView: View {
                 TextField("Category name", text: $categoryText)
                     .textInputAutocapitalization(.words)
 
+                // Dual system: general spend category vs Benefits earn bucket
+                LabeledContent("Reward category") {
+                    HStack(spacing: 6) {
+                        Image(systemName: CategoryStyle.symbolName(forReward: mappedRewardCategory.rawValue))
+                            .foregroundStyle(CategoryStyle.color(forReward: mappedRewardCategory.rawValue))
+                        Text(mappedRewardCategory.rawValue)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+                LabeledContent("Card rate") {
+                    Text(benefitsProfile.formatRate(suggestedRewardRate))
+                        .foregroundStyle(.secondary)
+                }
+
+                if showsTravelRewardPicker {
+                    Picker("Travel earn", selection: $rewardOverrideMode) {
+                        Text("Auto").tag(RewardTravelMode.auto)
+                        Text("Portal").tag(RewardTravelMode.portal)
+                        Text("Direct / other").tag(RewardTravelMode.otherTravel)
+                    }
+                    .onChange(of: rewardOverrideMode) { _, mode in
+                        applyTravelModeToMultiplier(mode)
+                    }
+                }
+
                 Picker("Payment rail", selection: $selectedRail) {
                     ForEach(PaymentRail.allCases) { rail in
                         Label(rail.displayName, systemImage: rail.systemImage)
@@ -173,13 +275,34 @@ struct TransactionDetailView: View {
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(maxWidth: 100)
-                    Text("x")
+                    Text(benefitsProfile.rewardKind.rateSuffix)
                         .foregroundStyle(.secondary)
                 }
             } header: {
                 Text("Edit")
             } footer: {
-                Text("Payment rail: Debit card vs ACH (Plaid often only sends online/in store). Save locks rail + category + multiplier so Sync won’t overwrite. For X Money–style cashback, set Debit 0.03 and ACH 0 on the account, then fix mis-tagged rows here.")
+                Text("General category drives charts; reward category drives Benefits rates (e.g. Personal Care → Drugstores). Travel: mark Portal vs Direct so Sapphire/portal rates apply. Save locks category, rail, reward bucket, and multiplier.")
+            }
+
+            Section {
+                Picker("Subscription", selection: $subscriptionMode) {
+                    ForEach(SubscriptionDeclareMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                if subscriptionMode == .yearly {
+                    Text("Counts toward Subscriptions even as a one-off annual charge. Est. monthly burn = amount ÷ 12.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if subscriptionMode == .auto {
+                    Text("Auto-detect looks for fixed amounts on a regular schedule. Monthly subs with no charge in 3+ months are treated as cancelled.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Subscriptions")
+            } footer: {
+                Text("Use Yearly for annual bills (insurance, domains, software). Mark Not a subscription to hide a merchant from the list.")
             }
 
             Section {
@@ -238,6 +361,18 @@ struct TransactionDetailView: View {
             categoryText = transaction.category
             multiplierText = formatMultiplier(transaction.multiplier)
             selectedRail = transaction.effectivePaymentRail
+            subscriptionMode = .from(transaction: transaction)
+            if let raw = transaction.rewardCategoryOverride {
+                if raw.caseInsensitiveCompare(RewardCategory.travelPortal.rawValue) == .orderedSame {
+                    rewardOverrideMode = .portal
+                } else if raw.caseInsensitiveCompare(RewardCategory.travelOther.rawValue) == .orderedSame {
+                    rewardOverrideMode = .otherTravel
+                } else {
+                    rewardOverrideMode = .auto
+                }
+            } else {
+                rewardOverrideMode = .auto
+            }
         }
         .task {
             let names = await FinanceSyncAPI.fetchCategories()
@@ -277,6 +412,22 @@ struct TransactionDetailView: View {
         return value.formatted()
     }
 
+    private func applyTravelModeToMultiplier(_ mode: RewardTravelMode) {
+        let reward: RewardCategory = {
+            switch mode {
+            case .portal: return .travelPortal
+            case .otherTravel: return .travelOther
+            case .auto, .clear:
+                return RewardCategory.forTransaction(
+                    generalCategory: categoryText.isEmpty ? transaction.category : categoryText,
+                    title: transaction.title
+                )
+            }
+        }()
+        let rate = benefitsProfile.rate(forCategory: reward.rawValue, on: transaction.date)
+        multiplierText = formatMultiplier(rate)
+    }
+
     @MainActor
     private func saveEdits() async {
         let trimmedCategory = categoryText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -306,6 +457,15 @@ struct TransactionDetailView: View {
             transaction.multiplierLocked = true
             transaction.paymentRail = selectedRail.rawValue
             transaction.paymentRailLocked = true
+            switch rewardOverrideMode {
+            case .portal:
+                transaction.rewardCategoryOverride = RewardCategory.travelPortal.rawValue
+            case .otherTravel:
+                transaction.rewardCategoryOverride = RewardCategory.travelOther.rawValue
+            case .auto, .clear:
+                transaction.rewardCategoryOverride = nil
+            }
+            transaction.subscriptionCadenceOverride = subscriptionMode.storageValue
             transaction.overrideSource = "user"
 
             // Keep CreditCardPayment table + spend exclusion in sync with category choice
@@ -332,7 +492,9 @@ struct TransactionDetailView: View {
             try modelContext.save()
             WidgetCenter.shared.reloadAllTimelines()
 
-            if TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
+            if subscriptionMode == .yearly {
+                saveStatusMessage = "Saved as yearly subscription."
+            } else if TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
                 saveStatusMessage = "Saved as Credit Card Payment (excluded from Total Spend)."
             } else if localExtra > 0 {
                 saveStatusMessage = "Saved. Updated \(localExtra + 1) transactions on this card."
@@ -400,6 +562,7 @@ struct TransactionDetailView: View {
             row.multiplier = multiplier
             row.categoryLocked = true
             row.multiplierLocked = true
+            row.subscriptionCadenceOverride = subscriptionMode.storageValue
             row.overrideSource = "user"
             count += 1
         }

@@ -15,7 +15,6 @@ struct SettingsView: View {
     @State private var clientID: String = ""
     @State private var secret: String = ""
     @State private var environment: PlaidEnvironment = .sandbox
-    @State private var redirectURI: String = ""
     @State private var didSave = false
     @State private var showSecret = false
     @State private var showLinkSheet = false
@@ -65,12 +64,6 @@ struct SettingsView: View {
                         }
                     }
 
-                    TextField("Optional OAuth redirect (https…)", text: $redirectURI)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .font(.body.monospaced())
-
                     Button("Save credentials") {
                         saveCredentials()
                     }
@@ -82,7 +75,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Plaid developer account")
                 } footer: {
-                    Text("Keys: dashboard.plaid.com → Developers → Keys. Link uses Plaid Hosted Link (secure browser). Optional https redirect is only for bank app-to-app OAuth and must be allowlisted in the Dashboard. Completion returns via \(PlaidHostedLink.completionRedirectURI) (no Dashboard entry needed). Secrets stay on this device (Keychain).")
+                    Text("Keys: dashboard.plaid.com → Developers → Keys. Link uses Plaid Hosted Link (secure browser) and returns via \(PlaidHostedLink.completionRedirectURI). Secrets stay on this device (Keychain).")
                 }
 
                 // MARK: Linked banks
@@ -167,27 +160,6 @@ struct SettingsView: View {
                     }
                 }
 
-                // MARK: Export / backup (always visible for sharing data with debugging)
-                Section {
-                    Button {
-                        showDebugExportConfirm = true
-                    } label: {
-                        if isExportingDebug {
-                            HStack {
-                                ProgressView()
-                                Text("Preparing export…")
-                            }
-                        } else {
-                            Label("Export database for debug", systemImage: "externaldrive.badge.timemachine")
-                        }
-                    }
-                    .disabled(isExportingDebug)
-                } header: {
-                    Text("Data export")
-                } footer: {
-                    Text("Share a zip of your local database snapshot (transactions, accounts, payments) for troubleshooting. Does not include Plaid secrets or access tokens. Contains real merchant names and balances.")
-                }
-
                 // MARK: About
                 Section {
                     NavigationLink {
@@ -205,13 +177,20 @@ struct SettingsView: View {
                     Button {
                         showDebugExportConfirm = true
                     } label: {
-                        Label("Export database for debug", systemImage: "square.and.arrow.up")
+                        if isExportingDebug {
+                            HStack {
+                                ProgressView()
+                                Text("Preparing export…")
+                            }
+                        } else {
+                            Label("Export database for debug", systemImage: "square.and.arrow.up")
+                        }
                     }
                     .disabled(isExportingDebug)
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("Version \(AppBuildInfo.versionBuildLabel). Export is also listed above under Data export. Rebuild/install the latest app if you do not see it.")
+                    Text("Version \(AppBuildInfo.versionBuildLabel). Debug export is a local zip (no Plaid secrets).")
                 }
             }
             .navigationTitle("Settings")
@@ -294,7 +273,8 @@ struct SettingsView: View {
         clientID = PlaidCredentialsStore.clientID
         secret = PlaidCredentialsStore.secret
         environment = PlaidCredentialsStore.environment
-        redirectURI = PlaidCredentialsStore.redirectURI
+        // Drop legacy localhost OAuth redirect (Hosted Link does not need it)
+        PlaidCredentialsStore.clearLegacyLocalhostRedirectIfNeeded()
         linkedItems = PlaidItemStore.loadItems()
     }
 
@@ -302,7 +282,7 @@ struct SettingsView: View {
         PlaidCredentialsStore.clientID = clientID
         PlaidCredentialsStore.secret = secret
         PlaidCredentialsStore.environment = environment
-        PlaidCredentialsStore.redirectURI = redirectURI
+        PlaidCredentialsStore.clearLegacyLocalhostRedirectIfNeeded()
         didSave = true
         statusIsError = false
         statusMessage = "Credentials saved on this device."

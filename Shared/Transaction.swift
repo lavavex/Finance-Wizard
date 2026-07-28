@@ -36,10 +36,49 @@ final class Transaction {
     /// When true, Sync will not overwrite `paymentRail`.
     var paymentRailLocked: Bool?
 
+    /// Optional lock for **reward** earn category (e.g. Travel (Portal) vs Travel (Other)).
+    /// Independent of general spend `category`. Nil → derive from category + title.
+    var rewardCategoryOverride: String?
+
+    /// User override for subscription detection: `nil` = auto,
+    /// `"yearly"` / `"monthly"` / `"weekly"` = treat as that cadence,
+    /// `"none"` = not a subscription.
+    var subscriptionCadenceOverride: String?
+
     /// Effective lock flag (nil → unlocked)
     var isCategoryLocked: Bool { categoryLocked ?? false }
     /// Effective lock flag (nil → unlocked)
     var isMultiplierLocked: Bool { multiplierLocked ?? false }
+
+    /// Parsed subscription cadence override (user-declared).
+    var declaredSubscriptionCadence: SubscriptionCadence? {
+        guard let raw = subscriptionCadenceOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              !raw.isEmpty, raw != "none", raw != "auto" else {
+            return nil
+        }
+        return SubscriptionCadence(rawValue: raw)
+    }
+
+    var isDeclaredNotSubscription: Bool {
+        let raw = subscriptionCadenceOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return raw == "none"
+    }
+
+    /// Reward earn bucket used for Benefits rates (override wins when set).
+    var effectiveRewardCategory: RewardCategory {
+        if let raw = rewardCategoryOverride?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty,
+           let match = RewardCategory.allCases.first(where: {
+               $0.rawValue.caseInsensitiveCompare(raw) == .orderedSame
+           }) {
+            return match
+        }
+        return RewardCategory.forTransaction(generalCategory: category, title: title)
+    }
 
     init(
         transactionId: String,
@@ -54,7 +93,9 @@ final class Transaction {
         overrideSource: String? = nil,
         plaidPaymentChannel: String? = nil,
         paymentRail: String? = nil,
-        paymentRailLocked: Bool = false
+        paymentRailLocked: Bool = false,
+        rewardCategoryOverride: String? = nil,
+        subscriptionCadenceOverride: String? = nil
     ) {
         self.transactionId = transactionId
         self.title = title
@@ -69,5 +110,7 @@ final class Transaction {
         self.plaidPaymentChannel = plaidPaymentChannel
         self.paymentRail = paymentRail
         self.paymentRailLocked = paymentRailLocked
+        self.rewardCategoryOverride = rewardCategoryOverride
+        self.subscriptionCadenceOverride = subscriptionCadenceOverride
     }
 }
