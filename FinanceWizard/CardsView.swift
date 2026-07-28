@@ -24,16 +24,12 @@ struct CardsView: View {
     @State private var isSyncing = false
     @State private var syncBanner: String?
 
+    /// Prebuilt board — body only reads this, never re-walks all transactions per section.
+    @State private var board = AccountsBoard()
+    @State private var isBuildingBoard = true
+
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
-    }
-
-    private var periodTransactions: [Transaction] {
-        TransactionAnalytics.inPeriod(
-            transactions,
-            period: period,
-            referenceDate: referenceDate
-        )
     }
 
     private var creditAccounts: [BankAccount] {
@@ -41,159 +37,8 @@ struct CardsView: View {
         return accounts.filter(\.isCredit)
     }
 
-    private var depositoryAccounts: [BankAccount] {
-        _ = nicknameEpoch
-        return accounts.filter(\.isDepository)
-    }
-
-    private var periodPayments: [CreditCardPayment] {
-        CreditAnalytics.payments(in: payments, period: period, referenceDate: referenceDate)
-    }
-
-    private var periodTotalSpend: Double {
-        TransactionAnalytics.totalSpend(in: periodTransactions)
-    }
-
-    private var totalOwed: Double {
-        creditAccounts.reduce(0) { $0 + max(0, $1.currentBalance) }
-    }
-
-    private var totalLimit: Double {
-        creditAccounts.compactMap(\.creditLimit).reduce(0, +)
-    }
-
-    private var totalUtilization: Double? {
-        guard totalLimit > 0 else { return nil }
-        return min(max(totalOwed / totalLimit, 0), 1)
-    }
-
-    private var totalPaidInPeriod: Double {
-        CreditAnalytics.totalPaid(in: periodPayments)
-    }
-
-    private var totalMinimumDue: Double {
-        creditAccounts.compactMap(\.minimumPaymentAmount).reduce(0, +)
-    }
-
-    private var soonestDueDate: Date? {
-        creditAccounts.compactMap(\.nextPaymentDueDate).min()
-    }
-
-    private var anyOverdue: Bool {
-        creditAccounts.contains { $0.isOverdue == true }
-    }
-
-    /// Credit cards with a due date in the next 30 days (or overdue).
-    private var upcomingBills: [BankAccount] {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        guard let horizon = cal.date(byAdding: .day, value: 30, to: today) else { return [] }
-        return creditAccounts
-            .filter { account in
-                guard let due = account.nextPaymentDueDate else { return false }
-                let day = cal.startOfDay(for: due)
-                return day <= horizon || account.isOverdue == true
-            }
-            .sorted { a, b in
-                let da = a.nextPaymentDueDate ?? .distantFuture
-                let db = b.nextPaymentDueDate ?? .distantFuture
-                return da < db
-            }
-    }
-
-    /// Credit card rows only (by Plaid account_id).
-    private var creditRows: [UnifiedCardRow] {
-        _ = nicknameEpoch
-        var rows: [UnifiedCardRow] = []
-
-        for account in creditAccounts.sorted(by: { max(0, $0.currentBalance) > max(0, $1.currentBalance) }) {
-            let methods = paymentMethodsMatching(account: account)
-            let spendTxs = periodTransactions.filter {
-                methods.contains(TransactionAnalytics.cardName(for: $0))
-            }
-            let spent = TransactionAnalytics.totalSpend(in: spendTxs)
-            let primaryMethod = methods.sorted().first ?? account.plaidDisplayName
-
-            rows.append(
-                UnifiedCardRow(
-                    id: account.accountId,
-                    displayName: account.displayName,
-                    rawPaymentMethod: primaryMethod,
-                    matchingPaymentMethods: methods,
-                    spent: spent,
-                    transactionCount: spendTxs.count,
-                    creditAccount: account,
-                    bankAccount: account,
-                    paidInPeriod: paidFor(credit: account, paymentMethods: methods)
-                )
-            )
-        }
-        return rows
-    }
-
-    /// Checking / savings linked accounts.
-    private var depositoryRows: [UnifiedCardRow] {
-        _ = nicknameEpoch
-        var rows: [UnifiedCardRow] = []
-        let claimedByCredit = Set(creditRows.flatMap(\.matchingPaymentMethods))
-
-        for account in depositoryAccounts.sorted(by: {
-            ($0.availableBalance ?? $0.currentBalance) > ($1.availableBalance ?? $1.currentBalance)
-        }) {
-            let methods = paymentMethodsMatching(account: account)
-            let spendTxs = periodTransactions.filter {
-                let name = TransactionAnalytics.cardName(for: $0)
-                return methods.contains(name) && !claimedByCredit.contains(name)
-            }
-            let spent = TransactionAnalytics.totalSpend(in: spendTxs)
-            let primaryMethod = methods.sorted().first ?? account.plaidDisplayName
-
-            rows.append(
-                UnifiedCardRow(
-                    id: account.accountId,
-                    displayName: account.displayName,
-                    rawPaymentMethod: primaryMethod,
-                    matchingPaymentMethods: methods,
-                    spent: spent,
-                    transactionCount: spendTxs.count,
-                    creditAccount: nil,
-                    bankAccount: account,
-                    paidInPeriod: 0
-                )
-            )
-        }
-        return rows
-    }
-
-    /// Spend methods not matched to any linked account (Apple Card is never orphaned).
-    private var otherSpendRows: [UnifiedCardRow] {
-        _ = nicknameEpoch
-        let claimed = Set(creditRows.flatMap(\.matchingPaymentMethods))
-            .union(depositoryRows.flatMap(\.matchingPaymentMethods))
-
-        let orphanMethods = Set(periodTransactions.map { TransactionAnalytics.cardName(for: $0) })
-            .subtracting(claimed)
-            .filter { !AppleCardAccount.isAppleCard(paymentMethod: $0) }
-            .sorted()
-
-        return orphanMethods.compactMap { method in
-            let spendTxs = periodTransactions.filter {
-                TransactionAnalytics.cardName(for: $0) == method
-            }
-            let spent = TransactionAnalytics.totalSpend(in: spendTxs)
-            guard spent > 0 || !spendTxs.isEmpty else { return nil }
-            return UnifiedCardRow(
-                id: "method:\(method)",
-                displayName: CardLabelStore.label(paymentMethod: method, fallback: method),
-                rawPaymentMethod: method,
-                matchingPaymentMethods: [method],
-                spent: spent,
-                transactionCount: spendTxs.count,
-                creditAccount: nil,
-                bankAccount: nil,
-                paidInPeriod: 0
-            )
-        }
+    private var refreshToken: String {
+        "\(period.rawValue)|\(referenceDate.timeIntervalSince1970)|\(transactions.count)|\(accounts.count)|\(payments.count)|\(nicknameEpoch)"
     }
 
     var body: some View {
@@ -216,14 +61,18 @@ struct CardsView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             Spacer()
-                            MoneyText(periodTotalSpend)
-                                .font(.title3.bold())
+                            if isBuildingBoard && board.creditRows.isEmpty && board.depositoryRows.isEmpty {
+                                ProgressView()
+                            } else {
+                                MoneyText(board.periodTotalSpend)
+                                    .font(.title3.bold())
+                            }
                         }
                     }
 
                     TotalPaidDisclosure(
-                        total: totalPaidInPeriod,
-                        payments: periodPayments,
+                        total: board.totalPaidInPeriod,
+                        payments: board.periodPayments,
                         periodLabel: periodLabel,
                         institutionId: nil,
                         resolveInstitutionId: { institutionId(for: $0) }
@@ -236,7 +85,7 @@ struct CardsView: View {
                                     Text("Credit balance")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    MoneyText(totalOwed)
+                                    MoneyText(board.totalOwed)
                                         .font(.title3.weight(.semibold))
                                 }
                                 Spacer()
@@ -244,24 +93,24 @@ struct CardsView: View {
                                     Text("Limit")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    MoneyText(totalLimit > 0 ? totalLimit : 0)
+                                    MoneyText(board.totalLimit > 0 ? board.totalLimit : 0)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(.secondary)
                                 }
                             }
 
-                            if let util = totalUtilization {
+                            if let util = board.totalUtilization {
                                 UtilizationBar(value: util, label: "Overall utilization")
                             }
 
-                            if totalMinimumDue > 0 || soonestDueDate != nil {
+                            if board.totalMinimumDue > 0 || board.soonestDueDate != nil {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Min payments")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
-                                        if totalMinimumDue > 0 {
-                                            MoneyText(totalMinimumDue)
+                                        if board.totalMinimumDue > 0 {
+                                            MoneyText(board.totalMinimumDue)
                                                 .font(.subheadline.weight(.semibold))
                                         } else {
                                             Text("—")
@@ -271,13 +120,13 @@ struct CardsView: View {
                                     }
                                     Spacer()
                                     VStack(alignment: .trailing, spacing: 2) {
-                                        Text(anyOverdue ? "Overdue" : "Next due")
+                                        Text(board.anyOverdue ? "Overdue" : "Next due")
                                             .font(.caption)
-                                            .foregroundStyle(anyOverdue ? .red : .secondary)
-                                        if let due = soonestDueDate {
+                                            .foregroundStyle(board.anyOverdue ? .red : .secondary)
+                                        if let due = board.soonestDueDate {
                                             Text(due, style: .date)
                                                 .font(.subheadline.weight(.semibold))
-                                                .foregroundStyle(anyOverdue ? .red : .primary)
+                                                .foregroundStyle(board.anyOverdue ? .red : .primary)
                                         } else {
                                             Text("—")
                                                 .font(.subheadline)
@@ -302,9 +151,9 @@ struct CardsView: View {
                 }
 
                 // MARK: Upcoming bills (next 30 days)
-                if !upcomingBills.isEmpty {
+                if !board.upcomingBills.isEmpty {
                     Section {
-                        ForEach(upcomingBills, id: \.accountId) { account in
+                        ForEach(board.upcomingBills, id: \.accountId) { account in
                             UpcomingBillRow(account: account)
                         }
                     } header: {
@@ -314,7 +163,13 @@ struct CardsView: View {
 
                 // MARK: Credit cards
                 Section {
-                    if creditRows.isEmpty {
+                    if isBuildingBoard && board.creditRows.isEmpty {
+                        HStack {
+                            ProgressView()
+                            Text("Loading accounts…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if board.creditRows.isEmpty {
                         ContentUnavailableView(
                             "No credit cards",
                             systemImage: "creditcard",
@@ -322,7 +177,7 @@ struct CardsView: View {
                         )
                         .listRowBackground(Color.clear)
                     } else {
-                        ForEach(creditRows) { row in
+                        ForEach(board.creditRows) { row in
                             accountNavigationLink(row: row)
                         }
                     }
@@ -332,11 +187,11 @@ struct CardsView: View {
 
                 // MARK: Checking / savings
                 Section {
-                    if depositoryRows.isEmpty {
+                    if board.depositoryRows.isEmpty {
                         Text("No checking or savings accounts linked yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(depositoryRows) { row in
+                        ForEach(board.depositoryRows) { row in
                             accountNavigationLink(row: row)
                         }
                     }
@@ -344,9 +199,9 @@ struct CardsView: View {
                     Text("Checking & savings")
                 }
 
-                if !otherSpendRows.isEmpty {
+                if !board.otherSpendRows.isEmpty {
                     Section {
-                        ForEach(otherSpendRows) { row in
+                        ForEach(board.otherSpendRows) { row in
                             accountNavigationLink(row: row)
                         }
                     } header: {
@@ -380,10 +235,34 @@ struct CardsView: View {
                     )
                 }
             }
-            .task {
+            .task(id: refreshToken) {
                 AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
                 InstitutionLogoCache.prefetch(accounts: accounts)
+                rebuildBoard()
             }
+        }
+    }
+
+    @MainActor
+    private func rebuildBoard() {
+        isBuildingBoard = board.creditRows.isEmpty && board.depositoryRows.isEmpty
+        let period = self.period
+        let referenceDate = self.referenceDate
+        let accounts = self.accounts
+        let transactions = self.transactions
+        let payments = self.payments
+        _ = nicknameEpoch
+
+        Task { @MainActor in
+            await Task.yield()
+            board = AccountsBoard.build(
+                accounts: accounts,
+                transactions: transactions,
+                payments: payments,
+                period: period,
+                referenceDate: referenceDate
+            )
+            isBuildingBoard = false
         }
     }
 
@@ -426,65 +305,16 @@ struct CardsView: View {
                 sort: sort,
                 creditAccount: row.creditAccount,
                 bankAccount: row.bankAccount ?? row.creditAccount,
-                periodPayments: paymentsMatching(
+                periodPayments: AccountsBoard.paymentsMatching(
                     credit: row.creditAccount,
-                    paymentMethods: row.matchingPaymentMethods
+                    paymentMethods: row.matchingPaymentMethods,
+                    in: board.periodPayments
                 ),
                 onNicknameChanged: { nicknameEpoch += 1 }
             )
         } label: {
             UnifiedCardLabel(row: row)
         }
-    }
-
-    // MARK: - Matching
-
-    private func paymentMethodsMatching(account: BankAccount) -> Set<String> {
-        var methods = Set<String>()
-        let allMethods = Set(transactions.map { TransactionAnalytics.cardName(for: $0) })
-            .union(periodTransactions.map { TransactionAnalytics.cardName(for: $0) })
-
-        for method in allMethods {
-            if methodBelongs(method, to: account) {
-                methods.insert(method)
-            }
-        }
-        methods.insert(account.plaidDisplayName)
-        return methods
-    }
-
-    private func methodBelongs(_ method: String, to account: BankAccount) -> Bool {
-        account.matchesPaymentMethod(method)
-    }
-
-    private func paidFor(credit: BankAccount, paymentMethods: Set<String>) -> Double {
-        CreditAnalytics.totalPaid(
-            in: paymentsMatching(credit: credit, paymentMethods: paymentMethods)
-        )
-    }
-
-    private func paymentsMatching(
-        credit: BankAccount?,
-        paymentMethods: Set<String>
-    ) -> [CreditCardPayment] {
-        periodPayments.filter { payment in
-            if let credit, let id = payment.creditAccountId, id == credit.accountId {
-                return true
-            }
-            if let credit, let mask = credit.mask, !mask.isEmpty, payment.cardName.contains(mask) {
-                return true
-            }
-            if paymentMethods.contains(payment.cardName) { return true }
-            if let credit, namesMatch(payment.cardName, credit.plaidDisplayName) {
-                return true
-            }
-            return false
-        }
-    }
-
-    private func namesMatch(_ a: String, _ b: String) -> Bool {
-        a.trimmingCharacters(in: .whitespacesAndNewlines)
-            .caseInsensitiveCompare(b.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
     }
 
     private func institutionId(for payment: CreditCardPayment) -> String? {
@@ -499,6 +329,202 @@ struct CardsView: View {
             return maskMatch.institutionId
         }
         return accounts.first { $0.institutionName == payment.institutionName }?.institutionId
+    }
+}
+
+// MARK: - One-pass accounts board (tab switch / body must not re-scan)
+
+private struct AccountsBoard {
+    var periodTotalSpend: Double = 0
+    var totalOwed: Double = 0
+    var totalLimit: Double = 0
+    var totalUtilization: Double? = nil
+    var totalPaidInPeriod: Double = 0
+    var totalMinimumDue: Double = 0
+    var soonestDueDate: Date? = nil
+    var anyOverdue: Bool = false
+    var periodPayments: [CreditCardPayment] = []
+    var upcomingBills: [BankAccount] = []
+    var creditRows: [UnifiedCardRow] = []
+    var depositoryRows: [UnifiedCardRow] = []
+    var otherSpendRows: [UnifiedCardRow] = []
+
+    static func build(
+        accounts: [BankAccount],
+        transactions: [Transaction],
+        payments: [CreditCardPayment],
+        period: SnapshotPeriod,
+        referenceDate: Date
+    ) -> AccountsBoard {
+        var board = AccountsBoard()
+        let creditAccounts = accounts.filter(\.isCredit)
+        let depositoryAccounts = accounts.filter(\.isDepository)
+        let periodTxs = TransactionAnalytics.inPeriod(
+            transactions,
+            period: period,
+            referenceDate: referenceDate
+        )
+        let spendTxs = TransactionAnalytics.spendOnly(periodTxs)
+        board.periodTotalSpend = TransactionAnalytics.totalSpend(in: periodTxs)
+        board.periodPayments = CreditAnalytics.payments(
+            in: payments,
+            period: period,
+            referenceDate: referenceDate
+        )
+        board.totalPaidInPeriod = CreditAnalytics.totalPaid(in: board.periodPayments)
+
+        board.totalOwed = creditAccounts.reduce(0) { $0 + max(0, $1.currentBalance) }
+        board.totalLimit = creditAccounts.compactMap(\.creditLimit).reduce(0, +)
+        if board.totalLimit > 0 {
+            board.totalUtilization = min(max(board.totalOwed / board.totalLimit, 0), 1)
+        }
+        board.totalMinimumDue = creditAccounts.compactMap(\.minimumPaymentAmount).reduce(0, +)
+        board.soonestDueDate = creditAccounts.compactMap(\.nextPaymentDueDate).min()
+        board.anyOverdue = creditAccounts.contains { $0.isOverdue == true }
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let horizon = cal.date(byAdding: .day, value: 30, to: today)
+        board.upcomingBills = creditAccounts
+            .filter { account in
+                guard let due = account.nextPaymentDueDate else { return false }
+                let day = cal.startOfDay(for: due)
+                if account.isOverdue == true { return true }
+                guard let horizon else { return false }
+                return day <= horizon
+            }
+            .sorted {
+                ($0.nextPaymentDueDate ?? .distantFuture) < ($1.nextPaymentDueDate ?? .distantFuture)
+            }
+
+        // Index spend once: method → (spend, count)
+        var spendByMethod: [String: (spend: Double, count: Int)] = [:]
+        var allMethods = Set<String>()
+        for tx in transactions {
+            allMethods.insert(TransactionAnalytics.cardName(for: tx))
+        }
+        for tx in spendTxs {
+            let method = TransactionAnalytics.cardName(for: tx)
+            allMethods.insert(method)
+            var entry = spendByMethod[method] ?? (0, 0)
+            entry.spend += abs(tx.amount)
+            entry.count += 1
+            spendByMethod[method] = entry
+        }
+
+        var claimed = Set<String>()
+
+        // Credit rows
+        for account in creditAccounts.sorted(by: {
+            max(0, $0.currentBalance) > max(0, $1.currentBalance)
+        }) {
+            let methods = methods(for: account, pool: allMethods)
+            for m in methods { claimed.insert(m) }
+            let spent = methods.reduce(0.0) { $0 + (spendByMethod[$1]?.spend ?? 0) }
+            let count = methods.reduce(0) { $0 + (spendByMethod[$1]?.count ?? 0) }
+            let primary = methods.sorted().first ?? account.plaidDisplayName
+            let paid = CreditAnalytics.totalPaid(
+                in: paymentsMatching(
+                    credit: account,
+                    paymentMethods: methods,
+                    in: board.periodPayments
+                )
+            )
+            board.creditRows.append(
+                UnifiedCardRow(
+                    id: account.accountId,
+                    displayName: account.displayName,
+                    rawPaymentMethod: primary,
+                    matchingPaymentMethods: methods,
+                    spent: spent,
+                    transactionCount: count,
+                    creditAccount: account,
+                    bankAccount: account,
+                    paidInPeriod: paid
+                )
+            )
+        }
+
+        // Depository rows
+        for account in depositoryAccounts.sorted(by: {
+            ($0.availableBalance ?? $0.currentBalance) > ($1.availableBalance ?? $1.currentBalance)
+        }) {
+            let methods = methods(for: account, pool: allMethods)
+            let own = methods.subtracting(claimed)
+            for m in methods { claimed.insert(m) }
+            let spent = own.reduce(0.0) { $0 + (spendByMethod[$1]?.spend ?? 0) }
+            let count = own.reduce(0) { $0 + (spendByMethod[$1]?.count ?? 0) }
+            let primary = methods.sorted().first ?? account.plaidDisplayName
+            board.depositoryRows.append(
+                UnifiedCardRow(
+                    id: account.accountId,
+                    displayName: account.displayName,
+                    rawPaymentMethod: primary,
+                    matchingPaymentMethods: methods,
+                    spent: spent,
+                    transactionCount: count,
+                    creditAccount: nil,
+                    bankAccount: account,
+                    paidInPeriod: 0
+                )
+            )
+        }
+
+        // Orphan spend methods
+        let orphanMethods = spendByMethod.keys
+            .filter { !claimed.contains($0) }
+            .filter { !AppleCardAccount.isAppleCard(paymentMethod: $0) }
+            .sorted()
+        for method in orphanMethods {
+            let entry = spendByMethod[method] ?? (0, 0)
+            guard entry.spend > 0 || entry.count > 0 else { continue }
+            board.otherSpendRows.append(
+                UnifiedCardRow(
+                    id: "method:\(method)",
+                    displayName: CardLabelStore.label(paymentMethod: method, fallback: method),
+                    rawPaymentMethod: method,
+                    matchingPaymentMethods: [method],
+                    spent: entry.spend,
+                    transactionCount: entry.count,
+                    creditAccount: nil,
+                    bankAccount: nil,
+                    paidInPeriod: 0
+                )
+            )
+        }
+
+        return board
+    }
+
+    private static func methods(for account: BankAccount, pool: Set<String>) -> Set<String> {
+        var methods = Set<String>()
+        for method in pool where account.matchesPaymentMethod(method) {
+            methods.insert(method)
+        }
+        methods.insert(account.plaidDisplayName)
+        return methods
+    }
+
+    static func paymentsMatching(
+        credit: BankAccount?,
+        paymentMethods: Set<String>,
+        in periodPayments: [CreditCardPayment]
+    ) -> [CreditCardPayment] {
+        periodPayments.filter { payment in
+            if let credit, let id = payment.creditAccountId, id == credit.accountId {
+                return true
+            }
+            if let credit, let mask = credit.mask, !mask.isEmpty, payment.cardName.contains(mask) {
+                return true
+            }
+            if paymentMethods.contains(payment.cardName) { return true }
+            if let credit {
+                let a = payment.cardName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let b = credit.plaidDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if a.caseInsensitiveCompare(b) == .orderedSame { return true }
+            }
+            return false
+        }
     }
 }
 
