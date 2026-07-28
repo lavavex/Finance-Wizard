@@ -436,11 +436,17 @@ enum CardProductCatalog {
             annualFee: 0,
             categoryRates: [:], // partners are merchants, not “all Drugstores”
             merchantBoosts: [
-                // One partner chip each; needles cover title variants
+                // One partner chip each; needles only when they're the same merchant brand
                 MerchantBoostPartner(
                     id: "walgreens",
                     displayName: "Walgreens",
-                    matchNeedles: ["walgreens", "duane reade"],
+                    matchNeedles: ["walgreens"],
+                    rate: 3
+                ),
+                MerchantBoostPartner(
+                    id: "duane_reade",
+                    displayName: "Duane Reade",
+                    matchNeedles: ["duane reade", "duanereade"],
                     rate: 3
                 ),
                 MerchantBoostPartner(
@@ -473,6 +479,7 @@ enum CardProductCatalog {
                     matchNeedles: ["ace hardware", "ace hdwe"],
                     rate: 3
                 ),
+                // Apple.com and Apple Store are the same partner
                 MerchantBoostPartner(
                     id: "apple",
                     displayName: "Apple",
