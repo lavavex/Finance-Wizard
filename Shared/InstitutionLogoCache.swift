@@ -21,6 +21,9 @@ enum InstitutionLogoCache {
     private static let colorPrefix = "plaid.color."
     private static let namePrefix = "plaid.instName."
     private static let memoryLogos = NSCache<NSString, UIImage>()
+    /// Sampled tile hex / full-bleed flag — never re-rasterize the same logo every list row.
+    private static let sampleHexCache = NSCache<NSString, NSString>()
+    private static let opaqueCanvasCache = NSCache<NSString, NSNumber>()
     private static var inFlight = Set<String>()
     private static let lock = NSLock()
     private static var didSeedBundled = false
@@ -212,21 +215,43 @@ enum InstitutionLogoCache {
     /// True when corners are solid (Plaid / brand app-icon tiles with a baked background).
     /// Those should full-bleed; transparent-mark logos should pad on brand color.
     static func logoHasOpaqueCanvas(_ image: UIImage) -> Bool {
-        guard let sample = rasterSample(image, size: 24) else { return false }
-        let corners = [(0, 0), (23, 0), (0, 23), (23, 23), (12, 0), (12, 23), (0, 12), (23, 12)]
+        let key = sampleCacheKey(for: image)
+        if let cached = opaqueCanvasCache.object(forKey: key as NSString) {
+            return cached.boolValue
+        }
+        guard let sample = rasterSample(image, size: 16) else {
+            opaqueCanvasCache.setObject(false as NSNumber, forKey: key as NSString)
+            return false
+        }
+        let last = sample.w - 1
+        let mid = sample.w / 2
+        let corners = [(0, 0), (last, 0), (0, last), (last, last), (mid, 0), (mid, last), (0, mid), (last, mid)]
         var opaque = 0
         for (x, y) in corners {
             if sample.alpha(x, y) > 0.85 { opaque += 1 }
         }
-        return opaque >= 6
+        let result = opaque >= 6
+        opaqueCanvasCache.setObject(result as NSNumber, forKey: key as NSString)
+        return result
     }
 
-    /// Sample a logo PNG for a sensible tile background (#RRGGBB).
-    /// Prefers opaque edge/corner colors (letterboxed marks); else a saturated
-    /// average of non-white logo pixels (works for transparent-bg bank marks).
+    /// Sample a logo PNG for a sensible tile background (#RRGGBB). Cached per image.
     static func sampleBackgroundHex(from image: UIImage) -> String? {
-        guard let sample = rasterSample(image, size: 48) else { return nil }
-        return sample.backgroundHex()
+        let key = sampleCacheKey(for: image)
+        if let cached = sampleHexCache.object(forKey: key as NSString) {
+            return cached as String
+        }
+        guard let sample = rasterSample(image, size: 24) else { return nil }
+        guard let hex = sample.backgroundHex() else { return nil }
+        sampleHexCache.setObject(hex as NSString, forKey: key as NSString)
+        return hex
+    }
+
+    private static func sampleCacheKey(for image: UIImage) -> String {
+        if let cg = image.cgImage {
+            return "cg-\(ObjectIdentifier(cg).hashValue)-\(cg.width)x\(cg.height)"
+        }
+        return "sz-\(Int(image.size.width))x\(Int(image.size.height))-\(ObjectIdentifier(image).hashValue)"
     }
 
     // MARK: - Pixel sampling

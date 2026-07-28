@@ -80,6 +80,8 @@ enum AppleCardCSVImporter {
             }
         }
 
+        // After CSV import, force account ensure + rate apply once (not on every app open).
+        AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: [], force: true)
         AppleCardAccount.reapplyUnlockedMultipliers(in: modelContext)
         try modelContext.save()
         return report

@@ -98,25 +98,35 @@ enum AppleCardAccount {
 
         // Bundled Apple mark (cleaned from screenshot) — not from Plaid
         InstitutionLogoCache.seedBundledLogos()
-
-        reapplyUnlockedMultipliers(in: modelContext)
+        // Do NOT re-walk every transaction here — that freezes the UI on launch.
         try? modelContext.save()
         return account
     }
 
+    private static var didEnsureThisSession = false
+
     /// Ensure link when any Apple Card activity exists (CSV history without re-import).
+    /// Runs at most once per process unless forced (e.g. after CSV import).
     @MainActor
-    static func ensureIfNeeded(in modelContext: ModelContext, transactions: [Transaction]) {
-        let hasAppleSpend = transactions.contains { isAppleCard(paymentMethod: $0.paymentMethod) }
+    static func ensureIfNeeded(
+        in modelContext: ModelContext,
+        transactions: [Transaction],
+        force: Bool = false
+    ) {
+        if didEnsureThisSession, !force { return }
         let id = accountId
         var descriptor = FetchDescriptor<BankAccount>(
             predicate: #Predicate<BankAccount> { $0.accountId == id }
         )
         descriptor.fetchLimit = 1
         let exists = (try? modelContext.fetch(descriptor).first) != nil
+        let hasAppleSpend = !exists && transactions.contains {
+            isAppleCard(paymentMethod: $0.paymentMethod)
+        }
         if hasAppleSpend || exists {
             _ = ensureLinked(in: modelContext)
         }
+        didEnsureThisSession = true
     }
 
     /// Unlocked Apple Card rows → product rate (2% base or higher category).

@@ -62,9 +62,15 @@ enum ReviewQueueAnalytics {
         accounts: [BankAccount] = []
     ) -> [ReviewQueueItem] {
         let spend = TransactionAnalytics.spendOnly(transactions)
+        // Cap work: only recent spend for the queue (full history is too heavy for the UI).
+        let cal = Calendar.current
+        let cutoff = cal.date(byAdding: .day, value: -120, to: Date()) ?? .distantPast
+        let recent = spend.filter { $0.date >= cutoff }
+
+        var profileCache: [String: CardBenefitsProfile] = [:]
         var rows: [ReviewQueueItem] = []
 
-        for tx in spend {
+        for tx in recent {
             var reasons: [ReviewQueueReason] = []
 
             if looksWeakCategory(tx.category) {
@@ -76,7 +82,7 @@ enum ReviewQueueAnalytics {
             if looksAmbiguousRail(tx, accounts: accounts) {
                 reasons.append(.ambiguousRail)
             }
-            if looksUnlockedDefault(tx, accounts: accounts) {
+            if looksUnlockedDefault(tx, accounts: accounts, profileCache: &profileCache) {
                 reasons.append(.unlockedDefaultMultiplier)
             }
 
@@ -133,7 +139,11 @@ enum ReviewQueueAnalytics {
         return tx.effectivePaymentRail == .other
     }
 
-    private static func looksUnlockedDefault(_ tx: Transaction, accounts: [BankAccount]) -> Bool {
+    private static func looksUnlockedDefault(
+        _ tx: Transaction,
+        accounts: [BankAccount],
+        profileCache: inout [String: CardBenefitsProfile]
+    ) -> Bool {
         if tx.isMultiplierLocked { return false }
         if TransactionAnalytics.isExcludedFromSpendCategory(tx.category) { return false }
 
@@ -142,29 +152,25 @@ enum ReviewQueueAnalytics {
             return false
         }
 
-        let profile = CardBenefitsStore.profile(
-            accountId: account?.accountId,
-            paymentMethod: tx.paymentMethod,
-            accounts: accounts
-        )
-        // Flag when stored mult matches base rate while a boost might apply, or still at 1 on a points card
+        let cacheKey = account?.accountId ?? tx.paymentMethod
+        let profile: CardBenefitsProfile = {
+            if let cached = profileCache[cacheKey] { return cached }
+            let p = CardBenefitsStore.profile(
+                accountId: account?.accountId,
+                paymentMethod: tx.paymentMethod,
+                accounts: accounts
+            )
+            profileCache[cacheKey] = p
+            return p
+        }()
+
         let expected = profile.rate(
             forTransactionCategory: tx.category,
             title: tx.title,
             on: tx.date
         )
         let stored = tx.multiplier
-        // Unlocked and either at flat 1 while profile default/boost differs, or diverges from profile
         if abs(stored - expected) > 0.05 { return true }
-        if abs(stored - profile.defaultMultiplier) < 0.05,
-           profile.customCategoryRates().contains(where: { $0.rate > profile.defaultMultiplier + 0.05 }) {
-            // Still at base while card has boosts — worth a glance if category might map wrong
-            let reward = tx.effectiveRewardCategory
-            let boost = profile.rate(forCategory: reward.rawValue, on: tx.date)
-            if abs(boost - profile.defaultMultiplier) > 0.05, abs(stored - boost) > 0.05 {
-                return true
-            }
-        }
         if profile.rewardKind == .points, abs(stored - 1) < 0.001, abs(profile.defaultMultiplier - 1) > 0.05 {
             return true
         }
