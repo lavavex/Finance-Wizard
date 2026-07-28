@@ -156,48 +156,12 @@ enum CardProductCatalog {
             Mapped to portal 5x, other travel 2x, dining/gas/online grocery/streaming 3x, base 1x.
             """,
             benefits: [
-                CardBenefitItem(
-                    id: "csp_hotel_credit",
-                    title: "$50 hotel credit (×2)",
-                    detail: "Chase Travel hotels; semi-annual",
-                    kind: .statementCredit,
-                    annualLimit: 100,
-                    matchNeedles: ["hotel credit", "chase travel credit", "sapphire hotel"]
-                ),
-                CardBenefitItem(
-                    id: "csp_dashpass",
-                    title: "DoorDash DashPass",
-                    detail: "Complimentary after activation",
-                    kind: .subscription
-                ),
-                CardBenefitItem(
-                    id: "csp_doordash",
-                    title: "DoorDash promo credit",
-                    detail: "Non-restaurant promos — track yourself if not posted cleanly",
-                    kind: .manualCredit,
-                    annualLimit: 120,
-                    matchNeedles: ["doordash credit", "doordash promo", "caviar credit"]
-                ),
-                CardBenefitItem(
-                    id: "csp_global_entry",
-                    title: "Global Entry / TSA PreCheck",
-                    detail: "Application fee statement credit",
-                    kind: .statementCredit,
-                    annualLimit: 120,
-                    matchNeedles: ["global entry", "tsa pre", "nexus", "precheck"]
-                ),
-                CardBenefitItem(
-                    id: "csp_rental_cdw",
-                    title: "Primary rental car CDW",
-                    detail: "Up to $60,000; decline the counter CDW",
-                    kind: .info
-                ),
-                CardBenefitItem(
-                    id: "csp_no_ftf",
-                    title: "No foreign transaction fee",
-                    detail: "",
-                    kind: .info
-                )
+                .init(title: "$50 hotel credit (×2)", detail: "Chase Travel hotels; semi-annual"),
+                .init(title: "DoorDash DashPass", detail: "Complimentary after activation"),
+                .init(title: "DoorDash promo credit", detail: "Non-restaurant promos; enrollment"),
+                .init(title: "Global Entry / TSA PreCheck", detail: "Application fee statement credit"),
+                .init(title: "Primary rental car CDW", detail: "Up to $60,000; decline the counter CDW"),
+                .init(title: "No foreign transaction fee", detail: "")
             ],
             matchNeedles: ["sapphire preferred"],
             maxRewardsPath: "/credit-cards/chase-sapphire-preferred"
@@ -219,134 +183,24 @@ enum CardProductCatalog {
             Source: maxrewards.com/credit-cards/chase-sapphire-reserve
             MaxRewards: Chase Travel / The Edit 10%; flights & hotels booked direct 5%; dining 3.8%; other 1.3% (at 1.25¢/pt → ~8x / 4x / 3x / 1x).
             Travel default set to 8x for portal-heavy use; set to 4x if you mostly book airlines/hotels direct.
-            Credits: statement-credit perks auto-match bank posts; free subs / soft credits you track yourself.
             """,
             benefits: [
-                // Statement credits (auto)
-                CardBenefitItem(
-                    id: "csr_travel_credit",
-                    title: "$300 Travel credit",
-                    detail: "Annual travel purchases / statement credit",
-                    kind: .statementCredit,
-                    annualLimit: 300,
-                    matchNeedles: [
-                        "travel credit", "chase travel credit", "sapphire travel",
-                        "annual travel credit"
-                    ]
-                ),
-                CardBenefitItem(
-                    id: "csr_edit_hotel",
-                    title: "$500 The Edit hotel credit",
-                    detail: "Select hotels; enrollment may be required",
-                    kind: .statementCredit,
-                    annualLimit: 500,
-                    matchNeedles: ["the edit", "edit hotel", "edit credit"]
-                ),
-                CardBenefitItem(
-                    id: "csr_southwest",
-                    title: "Southwest credit",
-                    detail: "Reserve Southwest Airlines credit when offered",
-                    kind: .statementCredit,
-                    annualLimit: 500,
-                    matchNeedles: ["southwest credit", "southwest airlines credit", "swa credit"]
-                ),
-                CardBenefitItem(
-                    id: "csr_stubhub",
-                    title: "$300 StubHub credit",
-                    detail: "Annual; terms apply",
-                    kind: .statementCredit,
-                    annualLimit: 300,
-                    matchNeedles: ["stubhub", "stub hub"]
-                ),
-                CardBenefitItem(
-                    id: "csr_dining_credit",
-                    title: "$300 dining credit",
-                    detail: "Annual dining statement credit",
-                    kind: .statementCredit,
-                    annualLimit: 300,
-                    matchNeedles: ["dining credit", "sapphire dining", "reserve dining"]
-                ),
-                CardBenefitItem(
-                    id: "csr_shops",
-                    title: "Shops at Chase credit",
-                    detail: "Select retail via Shops at Chase",
-                    kind: .statementCredit,
-                    annualLimit: 250,
-                    matchNeedles: ["shops at chase", "chase shopping credit"]
-                ),
-                CardBenefitItem(
-                    id: "csr_lyft",
-                    title: "Lyft credit",
-                    detail: "Monthly/annual Lyft credit when posted",
-                    kind: .statementCredit,
-                    annualLimit: 120,
-                    matchNeedles: ["lyft credit", "lyft"]
-                ),
-                CardBenefitItem(
-                    id: "csr_global_entry",
-                    title: "Global Entry / TSA PreCheck",
-                    detail: "Application fee statement credit",
-                    kind: .statementCredit,
-                    annualLimit: 120,
-                    matchNeedles: ["global entry", "tsa pre", "nexus", "precheck"]
-                ),
-                CardBenefitItem(
-                    id: "csr_peloton",
-                    title: "Peloton credit",
-                    detail: "Equipment credit when offered",
-                    kind: .statementCredit,
-                    annualLimit: 120,
-                    matchNeedles: ["peloton credit", "peloton"]
-                ),
-                // Manual / soft credits (often no clean bank credit line)
-                CardBenefitItem(
-                    id: "csr_apple_tv_music",
-                    title: "Apple TV+ / Apple Music",
-                    detail: "Subscription benefit — mark months used if no credit line posts",
-                    kind: .manualCredit,
-                    annualLimit: 156,
-                    matchNeedles: ["apple tv", "apple music", "apple.com/bill", "itunes.com/bill"]
-                ),
-                CardBenefitItem(
-                    id: "csr_doordash_credit",
-                    title: "DoorDash credit",
-                    detail: "Promo / credit — track if not posted as a clean credit",
-                    kind: .manualCredit,
-                    annualLimit: 300,
-                    matchNeedles: ["doordash credit", "doordash promo", "caviar credit"]
-                ),
-                // Free subscriptions
-                CardBenefitItem(
-                    id: "csr_dashpass",
-                    title: "DoorDash DashPass",
-                    detail: "Complimentary membership after activation",
-                    kind: .subscription
-                ),
-                // Info perks
-                CardBenefitItem(
-                    id: "csr_rental_cdw",
-                    title: "Primary rental car CDW",
-                    detail: "Up to $75,000 U.S. & abroad",
-                    kind: .info
-                ),
-                CardBenefitItem(
-                    id: "csr_trip_delay",
-                    title: "Trip delay reimbursement",
-                    detail: "Up to $500/traveler after 6+ hours",
-                    kind: .info
-                ),
-                CardBenefitItem(
-                    id: "csr_lounge",
-                    title: "Sapphire Lounges / Reserve Suites",
-                    detail: "Where available",
-                    kind: .info
-                ),
-                CardBenefitItem(
-                    id: "csr_no_ftf",
-                    title: "No foreign transaction fee",
-                    detail: "",
-                    kind: .info
-                )
+                .init(title: "$300 Travel credit", detail: "Annual travel purchases"),
+                .init(title: "$500 The Edit hotel credit", detail: "Select hotels; enrollment may be required"),
+                .init(title: "Southwest credit", detail: "When offered on Reserve"),
+                .init(title: "$300 StubHub credit", detail: "Annual; terms apply"),
+                .init(title: "$300 dining credit", detail: "Annual; terms apply"),
+                .init(title: "DoorDash credit", detail: "Promo / credit when offered"),
+                .init(title: "DoorDash DashPass", detail: "Complimentary after activation"),
+                .init(title: "Shops at Chase credit", detail: "Select retail"),
+                .init(title: "Apple TV+ / Apple Music", detail: "Subscription benefit; enrollment"),
+                .init(title: "Lyft credit", detail: "When offered"),
+                .init(title: "Peloton credit", detail: "Equipment credit when offered"),
+                .init(title: "Global Entry / TSA PreCheck", detail: "Application fee statement credit"),
+                .init(title: "Primary rental car CDW", detail: "Up to $75,000 U.S. & abroad"),
+                .init(title: "Trip delay reimbursement", detail: "Up to $500/traveler after 6+ hours"),
+                .init(title: "Sapphire Lounges / Reserve Suites", detail: "Where available"),
+                .init(title: "No foreign transaction fee", detail: "")
             ],
             matchNeedles: ["sapphire reserve"],
             maxRewardsPath: "/credit-cards/chase-sapphire-reserve"
@@ -711,11 +565,7 @@ enum CardProductCatalog {
     }
 
     /// Build a benefits profile from a product preset.
-    static func makeProfile(
-        id: String,
-        product: CardProductPreset,
-        preservingTrackingFrom prior: CardBenefitsProfile? = nil
-    ) -> CardBenefitsProfile {
+    static func makeProfile(id: String, product: CardProductPreset) -> CardBenefitsProfile {
         var profile = CardBenefitsProfile.empty(id: id)
         profile.rewardKind = product.rewardKind
         profile.defaultMultiplier = product.defaultRate
@@ -734,26 +584,10 @@ enum CardProductCatalog {
         }
         profile.merchantMultipliers = nil
         profile.notes = product.notes
-        profile.benefits = mergeBenefits(catalog: product.benefits, prior: prior?.benefits ?? [])
+        profile.benefits = product.benefits
         profile.productKey = product.id
         profile.productDisplayName = product.displayName
         profile.compactRatesMatchingDefault()
         return profile
-    }
-
-    /// Keep manualUsed / isActive when re-applying catalog benefits with stable ids.
-    private static func mergeBenefits(
-        catalog: [CardBenefitItem],
-        prior: [CardBenefitItem]
-    ) -> [CardBenefitItem] {
-        let byId = Dictionary(uniqueKeysWithValues: prior.map { ($0.id, $0) })
-        return catalog.map { item in
-            guard let old = byId[item.id] else { return item }
-            var merged = item
-            merged.manualUsed = old.manualUsed
-            merged.isActive = old.isActive
-            merged.lastTrackedAt = old.lastTrackedAt
-            return merged
-        }
     }
 }

@@ -369,8 +369,6 @@ struct CardBenefitsDetailView: View {
     @State private var newCustomRate = ""
     @State private var newBenefitTitle = ""
     @State private var newBenefitDetail = ""
-    @State private var newBenefitKind: CardBenefitKind = .manualCredit
-    @State private var newBenefitLimitText = ""
     @State private var didSave = false
     /// When false (default): boosts + Everything Else only. When true: every reward category.
     @State private var showAllCategories = false
@@ -408,15 +406,6 @@ struct CardBenefitsDetailView: View {
         ).filter { summary.paymentMethods.contains(TransactionAnalytics.cardName(for: $0)) }
     }
 
-    /// Full calendar-year activity on this card (for annual credit tracking).
-    private var yearCardTxs: [Transaction] {
-        let interval = benefitYearInterval
-        return transactions.filter { tx in
-            interval.contains(tx.date)
-                && summary.paymentMethods.contains(TransactionAnalytics.cardName(for: tx))
-        }
-    }
-
     private var live: (spend: Double, units: Double, value: Double, categories: [BenefitsAnalytics.CategoryBreakdown]) {
         BenefitsAnalytics.breakdown(txs: periodTxs, profile: profile)
     }
@@ -427,24 +416,6 @@ struct CardBenefitsDetailView: View {
         }
         // Compact: real boosts + single Everything Else for the default rate
         return profile.summaryCategoryRates()
-    }
-
-    private var creditBenefits: [CardBenefitItem] {
-        profile.benefits.filter {
-            $0.benefitKind == .statementCredit || $0.benefitKind == .manualCredit
-        }
-    }
-
-    private var subBenefits: [CardBenefitItem] {
-        profile.benefits.filter { $0.benefitKind == .subscription }
-    }
-
-    private var infoBenefits: [CardBenefitItem] {
-        profile.benefits.filter { $0.benefitKind == .info }
-    }
-
-    private var benefitYearInterval: DateInterval {
-        CardBenefitTracking.benefitYearInterval()
     }
 
     var body: some View {
@@ -681,106 +652,37 @@ struct CardBenefitsDetailView: View {
                 Text("Categories & partners")
             }
 
-            // MARK: Credits (auto + manual)
-            if !creditBenefits.isEmpty {
-                Section {
-                    ForEach(creditBenefits) { item in
-                        BenefitTrackingRow(
-                            item: item,
-                            paymentMethods: summary.paymentMethods,
-                            transactions: yearCardTxs,
-                            yearInterval: benefitYearInterval,
-                            onChange: { updated in
-                                if let idx = profile.benefits.firstIndex(where: { $0.id == updated.id }) {
-                                    profile.benefits[idx] = updated
-                                }
-                            }
-                        )
-                        .swipeActions {
-                            Button(role: .destructive) {
-                                profile.benefits.removeAll { $0.id == item.id }
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Credits · \(Calendar.current.component(.year, from: Date()))")
-                } footer: {
-                    Text("Statement credits update from your transactions. Soft credits (Apple TV, DoorDash promos) you log yourself.")
-                }
-            }
-
-            // MARK: Free subscriptions
-            if !subBenefits.isEmpty {
-                Section {
-                    ForEach(subBenefits) { item in
-                        Toggle(isOn: bindingActive(for: item.id)) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label(item.title, systemImage: item.systemImage ?? "play.rectangle.fill")
-                                    .font(.body.weight(.medium))
-                                if !item.detail.isEmpty {
-                                    Text(item.detail)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .swipeActions {
-                            Button(role: .destructive) {
-                                profile.benefits.removeAll { $0.id == item.id }
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Free subscriptions")
-                } footer: {
-                    Text("Turn on when you’re using the membership (DashPass, etc.).")
-                }
-            }
-
-            // MARK: Other perks
+            // MARK: Perks
             Section {
-                if infoBenefits.isEmpty && creditBenefits.isEmpty && subBenefits.isEmpty {
+                if profile.benefits.isEmpty {
                     Text("No perks yet — pick a card or add one below.")
                         .foregroundStyle(.secondary)
-                }
-                ForEach(infoBenefits) { item in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(item.title, systemImage: item.systemImage ?? "star.fill")
-                            .font(.body.weight(.medium))
-                        if !item.detail.isEmpty {
-                            Text(item.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                } else {
+                    ForEach(profile.benefits) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(item.title, systemImage: item.systemImage ?? "star.fill")
+                                .font(.body.weight(.medium))
+                            if !item.detail.isEmpty {
+                                Text(item.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                    }
-                    .swipeActions {
-                        Button(role: .destructive) {
-                            profile.benefits.removeAll { $0.id == item.id }
-                        } label: {
-                            Label("Remove", systemImage: "trash")
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                profile.benefits.removeAll { $0.id == item.id }
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
                         }
-                    }
-                }
-
-                Picker("Type", selection: $newBenefitKind) {
-                    ForEach(CardBenefitKind.allCases) { k in
-                        Text(k.displayName).tag(k)
                     }
                 }
                 TextField("Title", text: $newBenefitTitle)
                 TextField("Details (optional)", text: $newBenefitDetail)
-                if newBenefitKind == .statementCredit || newBenefitKind == .manualCredit {
-                    TextField("Annual limit $", text: $newBenefitLimitText)
-                        .keyboardType(.decimalPad)
-                }
-                Button("Add benefit") { addBenefit() }
+                Button("Add perk") { addBenefit() }
                     .disabled(newBenefitTitle.trimmingCharacters(in: .whitespaces).isEmpty)
             } header: {
-                Text("Other perks")
+                Text("Perks & benefits")
             }
 
             Section {
@@ -834,11 +736,7 @@ struct CardBenefitsDetailView: View {
 
     private func applyProduct(_ product: CardProductPreset) {
         let id = profile.id
-        var next = CardProductCatalog.makeProfile(
-            id: id,
-            product: product,
-            preservingTrackingFrom: profile
-        )
+        var next = CardProductCatalog.makeProfile(id: id, product: product)
         // Keep user notes if they already typed something unique
         if !profile.notes.isEmpty, profile.productKey != nil {
             next.notes = profile.notes
@@ -1011,38 +909,14 @@ struct CardBenefitsDetailView: View {
     private func addBenefit() {
         let title = newBenefitTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
-        let limit: Double? = {
-            let t = newBenefitLimitText.trimmingCharacters(in: .whitespacesAndNewlines)
-                .replacingOccurrences(of: ",", with: ".")
-            guard let v = Double(t), v > 0 else { return nil }
-            return v
-        }()
         profile.benefits.append(
             CardBenefitItem(
                 title: title,
-                detail: newBenefitDetail.trimmingCharacters(in: .whitespacesAndNewlines),
-                kind: newBenefitKind,
-                annualLimit: limit
+                detail: newBenefitDetail.trimmingCharacters(in: .whitespacesAndNewlines)
             )
         )
         newBenefitTitle = ""
         newBenefitDetail = ""
-        newBenefitLimitText = ""
-        newBenefitKind = .manualCredit
-    }
-
-    private func bindingActive(for id: String) -> Binding<Bool> {
-        Binding(
-            get: {
-                profile.benefits.first(where: { $0.id == id })?.isActive ?? false
-            },
-            set: { on in
-                if let idx = profile.benefits.firstIndex(where: { $0.id == id }) {
-                    profile.benefits[idx].isActive = on
-                    profile.benefits[idx].lastTrackedAt = Date()
-                }
-            }
-        )
     }
 
     private func save() {
@@ -1116,97 +990,6 @@ private struct CategoryRateEditorRow: View {
         .onChange(of: rateText) { _, _ in
             onCommit()
         }
-    }
-}
-
-// MARK: - Credit tracking row
-
-private struct BenefitTrackingRow: View {
-    let item: CardBenefitItem
-    let paymentMethods: Set<String>
-    let transactions: [Transaction]
-    let yearInterval: DateInterval
-    var onChange: (CardBenefitItem) -> Void
-
-    @State private var draftUsed: String = ""
-
-    private var progress: (used: Double, limit: Double?, fraction: Double?) {
-        CardBenefitTracking.progress(
-            benefit: item,
-            transactions: transactions,
-            paymentMethods: paymentMethods,
-            in: yearInterval
-        )
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(item.title, systemImage: item.systemImage ?? item.benefitKind.systemImageDefault)
-                    .font(.body.weight(.medium))
-                Spacer()
-                Text(item.benefitKind == .statementCredit ? "Auto" : "Manual")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        (item.benefitKind == .statementCredit ? Color.green : Color.orange)
-                            .opacity(0.15)
-                    )
-                    .foregroundStyle(item.benefitKind == .statementCredit ? .green : .orange)
-                    .clipShape(Capsule())
-            }
-            if !item.detail.isEmpty {
-                Text(item.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            let p = progress
-            if let limit = p.limit, limit > 0 {
-                ProgressView(value: p.fraction ?? 0)
-                HStack {
-                    Text("\(p.used.formatted(.currency(code: "USD"))) used")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("of \(limit.formatted(.currency(code: "USD")))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else if p.used > 0 {
-                Text("\(p.used.formatted(.currency(code: "USD"))) found this year")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if item.benefitKind == .manualCredit {
-                HStack {
-                    Text("Log used")
-                        .font(.subheadline)
-                    Spacer()
-                    TextField("0", text: $draftUsed)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(maxWidth: 90)
-                        .onChange(of: draftUsed) { _, text in
-                            let n = text.replacingOccurrences(of: ",", with: ".")
-                            var updated = item
-                            updated.manualUsed = Double(n)
-                            updated.lastTrackedAt = Date()
-                            onChange(updated)
-                        }
-                    Text("USD")
-                        .foregroundStyle(.secondary)
-                }
-                .onAppear {
-                    if let used = item.manualUsed {
-                        draftUsed = used.formatted(.number.precision(.fractionLength(0...2)))
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 2)
     }
 }
 

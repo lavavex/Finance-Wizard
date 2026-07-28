@@ -34,198 +34,22 @@ enum RewardKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// How a card perk is earned / tracked in the UI.
-enum CardBenefitKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    /// Bank posts a statement credit we can match in transactions (e.g. $300 travel credit).
-    case statementCredit
-    /// Soft credit or allowance you track yourself (Apple TV/Music, DoorDash promo that isn’t a clean credit).
-    case manualCredit
-    /// Free sub / membership (DashPass, Apple TV+) — toggle active / used.
-    case subscription
-    /// Insurance, lounge, FTF, etc. — informational.
-    case info
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .statementCredit: return "Statement credit"
-        case .manualCredit: return "Track yourself"
-        case .subscription: return "Free subscription"
-        case .info: return "Perk"
-        }
-    }
-
-    var systemImageDefault: String {
-        switch self {
-        case .statementCredit: return "dollarsign.circle.fill"
-        case .manualCredit: return "checklist"
-        case .subscription: return "play.rectangle.fill"
-        case .info: return "star.fill"
-        }
-    }
-}
-
 struct CardBenefitItem: Codable, Equatable, Identifiable, Hashable {
     var id: String
     var title: String
     var detail: String
     var systemImage: String?
-    /// Tracking mode (defaults to info for legacy rows).
-    var kind: CardBenefitKind?
-    /// Annual (or period) allowance in dollars when kind is a credit.
-    var annualLimit: Double?
-    /// Title needles for auto-matching statement credits / related spend.
-    var matchNeedles: [String]?
-    /// User-entered amount used (manual credits).
-    var manualUsed: Double?
-    /// Free subscription / perk is active this year.
-    var isActive: Bool?
-    /// Last time the user confirmed usage.
-    var lastTrackedAt: Date?
-
-    var benefitKind: CardBenefitKind { kind ?? .info }
-
-    var needles: [String] {
-        (matchNeedles ?? []).map { $0.lowercased() }.filter { !$0.isEmpty }
-    }
 
     init(
         id: String = UUID().uuidString,
         title: String,
         detail: String = "",
-        systemImage: String? = nil,
-        kind: CardBenefitKind = .info,
-        annualLimit: Double? = nil,
-        matchNeedles: [String] = [],
-        manualUsed: Double? = nil,
-        isActive: Bool? = nil,
-        lastTrackedAt: Date? = nil
+        systemImage: String? = "star.fill"
     ) {
         self.id = id
         self.title = title
         self.detail = detail
-        self.systemImage = systemImage ?? kind.systemImageDefault
-        self.kind = kind
-        self.annualLimit = annualLimit
-        self.matchNeedles = matchNeedles.isEmpty ? nil : matchNeedles
-        self.manualUsed = manualUsed
-        self.isActive = isActive
-        self.lastTrackedAt = lastTrackedAt
-    }
-
-    /// Legacy decoder: old saves only had title/detail/systemImage.
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
-        title = try c.decode(String.self, forKey: .title)
-        detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? ""
-        systemImage = try c.decodeIfPresent(String.self, forKey: .systemImage)
-        kind = try c.decodeIfPresent(CardBenefitKind.self, forKey: .kind)
-        annualLimit = try c.decodeIfPresent(Double.self, forKey: .annualLimit)
-        matchNeedles = try c.decodeIfPresent([String].self, forKey: .matchNeedles)
-        manualUsed = try c.decodeIfPresent(Double.self, forKey: .manualUsed)
-        isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive)
-        lastTrackedAt = try c.decodeIfPresent(Date.self, forKey: .lastTrackedAt)
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id, title, detail, systemImage, kind, annualLimit, matchNeedles
-        case manualUsed, isActive, lastTrackedAt
-    }
-}
-
-// MARK: - Benefit usage tracking
-
-enum CardBenefitTracking {
-    /// Calendar-year window for annual credits (simple + predictable).
-    static func benefitYearInterval(
-        containing date: Date = Date(),
-        calendar: Calendar = .current
-    ) -> DateInterval {
-        let year = calendar.component(.year, from: date)
-        let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1)) ?? date
-        let end = calendar.date(from: DateComponents(year: year + 1, month: 1, day: 1)) ?? date
-        return DateInterval(start: start, end: end)
-    }
-
-    /// Auto-detected statement credit dollars for this benefit (positive money back on the card).
-    static func autoCredited(
-        benefit: CardBenefitItem,
-        transactions: [Transaction],
-        paymentMethods: Set<String>,
-        in interval: DateInterval
-    ) -> Double {
-        guard benefit.benefitKind == .statementCredit || benefit.benefitKind == .manualCredit else {
-            return 0
-        }
-        let needles = benefit.needles
-        guard !needles.isEmpty else { return 0 }
-
-        var total = 0.0
-        for tx in transactions {
-            guard interval.contains(tx.date) else { continue }
-            let method = TransactionAnalytics.cardName(for: tx)
-            guard paymentMethods.contains(method) else { continue }
-            let title = tx.title.lowercased()
-            guard needles.contains(where: { title.contains($0) }) else { continue }
-            // Statement credits / refunds often post as positive amounts on the card.
-            // Also treat small negative “credit” labels if the bank uses debit-style posting.
-            if tx.amount > 0.01 {
-                total += tx.amount
-            } else if title.contains("credit") || title.contains("rebate") || title.contains("reimburs") {
-                total += abs(tx.amount)
-            }
-        }
-        return total
-    }
-
-    /// Effective used amount: auto for statement credits; manual (+ optional auto) for manual credits.
-    static func usedAmount(
-        benefit: CardBenefitItem,
-        transactions: [Transaction],
-        paymentMethods: Set<String>,
-        in interval: DateInterval
-    ) -> Double {
-        switch benefit.benefitKind {
-        case .statementCredit:
-            return autoCredited(
-                benefit: benefit,
-                transactions: transactions,
-                paymentMethods: paymentMethods,
-                in: interval
-            )
-        case .manualCredit:
-            let auto = autoCredited(
-                benefit: benefit,
-                transactions: transactions,
-                paymentMethods: paymentMethods,
-                in: interval
-            )
-            return max(benefit.manualUsed ?? 0, auto)
-        case .subscription, .info:
-            return 0
-        }
-    }
-
-    static func progress(
-        benefit: CardBenefitItem,
-        transactions: [Transaction],
-        paymentMethods: Set<String>,
-        in interval: DateInterval
-    ) -> (used: Double, limit: Double?, fraction: Double?) {
-        let used = usedAmount(
-            benefit: benefit,
-            transactions: transactions,
-            paymentMethods: paymentMethods,
-            in: interval
-        )
-        let limit = benefit.annualLimit
-        let fraction: Double? = {
-            guard let limit, limit > 0 else { return nil }
-            return min(max(used / limit, 0), 1)
-        }()
-        return (used, limit, fraction)
+        self.systemImage = systemImage
     }
 }
 
@@ -1116,7 +940,7 @@ private extension CardBenefitsProfile {
 enum CardBenefitsStore {
     private static let key = "card.benefits.profiles.v1"
     private static let migrationVersionKey = "card.benefits.migration.v"
-    private static let currentMigrationVersion = 5
+    private static let currentMigrationVersion = 6
     /// In-memory profiles after migration — avoid re-migrating + disk I/O on every tile.
     private static var memoryProfiles: [String: CardBenefitsProfile]?
     private static let memoryLock = NSLock()
@@ -1481,15 +1305,9 @@ enum CardBenefitsStore {
             if p.merchantBoosts?.isEmpty == true { p.merchantBoosts = nil }
             p.merchantMultipliers = nil
             p.productDisplayName = product.displayName
-            // Refresh perks when empty or still legacy free-text only (no kind)
-            let needsBenefitRefresh = p.benefits.isEmpty
-                || p.benefits.allSatisfy({ $0.kind == nil })
-            if needsBenefitRefresh {
-                p.benefits = CardProductCatalog.makeProfile(
-                    id: p.id,
-                    product: product,
-                    preservingTrackingFrom: p
-                ).benefits
+            // Refresh canned perks when empty
+            if p.benefits.isEmpty {
+                p.benefits = product.benefits
             }
             if p.notes.isEmpty
                 || p.notes.contains("Personal Care")
