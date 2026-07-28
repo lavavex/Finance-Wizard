@@ -8,6 +8,12 @@
 	<!-- Export compliance: app does not use custom/non-exempt encryption -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- Static system splash (before SwiftUI loads) — brand blue from asset catalog -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<!-- Plaid is HTTPS; local networking kept permissive for optional offline import tools -->
@@ -18,3 +24,4 @@
 	</dict>
 </dict>
 </plist>
+
