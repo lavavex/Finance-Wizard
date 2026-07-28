@@ -37,6 +37,8 @@ struct SubscriptionsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
+            }
+
             Section {
                 if candidates.isEmpty {
                     ContentUnavailableView(
