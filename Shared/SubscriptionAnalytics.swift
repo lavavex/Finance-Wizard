@@ -44,11 +44,58 @@ struct SubscriptionCandidate: Identifiable, Sendable {
     var isUserDeclared: Bool
 }
 
+/// Lightweight Sendable row for subscription detection off the main actor.
+struct SubscriptionTxSnapshot: Sendable, Hashable {
+    let transactionId: String
+    let title: String
+    let amount: Double
+    let date: Date
+    let category: String
+    let paymentMethod: String
+    let subscriptionCadenceOverride: String?
+
+    init(transaction: Transaction) {
+        transactionId = transaction.transactionId
+        title = transaction.title
+        amount = transaction.amount
+        date = transaction.date
+        category = transaction.category
+        paymentMethod = transaction.paymentMethod
+        subscriptionCadenceOverride = transaction.subscriptionCadenceOverride
+    }
+
+    var declaredSubscriptionCadence: SubscriptionCadence? {
+        guard let raw = subscriptionCadenceOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              !raw.isEmpty, raw != "none", raw != "auto" else {
+            return nil
+        }
+        return SubscriptionCadence(rawValue: raw)
+    }
+
+    var isDeclaredNotSubscription: Bool {
+        let raw = subscriptionCadenceOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return raw == "none"
+    }
+
+    var cardName: String {
+        paymentMethod.isEmpty ? "Unknown" : paymentMethod
+    }
+}
+
 enum SubscriptionAnalytics {
     /// Months without a charge before we treat a monthly/weekly sub as cancelled.
     static let monthlyCancelAfterMonths = 3
     /// Months without a charge before a yearly sub is treated as cancelled (~1 year + grace).
     static let yearlyCancelAfterMonths = 15
+
+    /// Snapshot SwiftData models on the main actor, then call `detect(snapshots:)`.
+    static func snapshots(from transactions: [Transaction]) -> [SubscriptionTxSnapshot] {
+        transactions.map(SubscriptionTxSnapshot.init)
+    }
 
     /// Active subscriptions only (cancelled / stale monthly excluded).
     static func detect(
@@ -56,7 +103,20 @@ enum SubscriptionAnalytics {
         now: Date = Date(),
         lookbackDays: Int = 400
     ) -> [SubscriptionCandidate] {
-        detectAll(in: transactions, now: now, lookbackDays: lookbackDays)
+        detect(
+            snapshots: snapshots(from: transactions),
+            now: now,
+            lookbackDays: lookbackDays
+        )
+    }
+
+    /// Preferred for background work — pure value types, no SwiftData.
+    static func detect(
+        snapshots: [SubscriptionTxSnapshot],
+        now: Date = Date(),
+        lookbackDays: Int = 400
+    ) -> [SubscriptionCandidate] {
+        detectAll(snapshots: snapshots, now: now, lookbackDays: lookbackDays)
             .filter { isActive($0, now: now) }
     }
 
@@ -66,10 +126,23 @@ enum SubscriptionAnalytics {
         now: Date = Date(),
         lookbackDays: Int = 400
     ) -> [SubscriptionCandidate] {
+        detectAll(
+            snapshots: snapshots(from: transactions),
+            now: now,
+            lookbackDays: lookbackDays
+        )
+    }
+
+    static func detectAll(
+        snapshots: [SubscriptionTxSnapshot],
+        now: Date = Date(),
+        lookbackDays: Int = 400
+    ) -> [SubscriptionCandidate] {
         let cal = Calendar.current
         guard let start = cal.date(byAdding: .day, value: -lookbackDays, to: now) else { return [] }
 
-        let spendAll = TransactionAnalytics.spendOnly(transactions)
+        let spendAll = snapshots
+            .filter { !TransactionAnalytics.isExcludedFromSpendCategory($0.category) }
             .filter { abs($0.amount) >= 0.99 }
 
         // Auto-detect pool: recent window, skip habits / retail / explicit "not a sub"
@@ -89,7 +162,7 @@ enum SubscriptionAnalytics {
         }
 
         // 2) Heuristic auto-detect
-        var byVendor: [String: [Transaction]] = [:]
+        var byVendor: [String: [SubscriptionTxSnapshot]] = [:]
         for tx in autoPool {
             let key = normalizeVendor(tx.title)
             guard key.count >= 3 else { continue }
@@ -169,14 +242,14 @@ enum SubscriptionAnalytics {
     // MARK: - User declarations
 
     private static func collectDeclaredCandidates(
-        from spend: [Transaction],
+        from spend: [SubscriptionTxSnapshot],
         now: Date
     ) -> [SubscriptionCandidate] {
         // Group by vendor + declared cadence + amount cluster
         let declared = spend.filter { $0.declaredSubscriptionCadence != nil }
         guard !declared.isEmpty else { return [] }
 
-        var byKey: [String: [Transaction]] = [:]
+        var byKey: [String: [SubscriptionTxSnapshot]] = [:]
         for tx in declared {
             guard let cadence = tx.declaredSubscriptionCadence else { continue }
             let vendor = normalizeVendor(tx.title)
@@ -219,7 +292,7 @@ enum SubscriptionAnalytics {
 
     private static func makeCandidate(
         key: String,
-        cluster: [Transaction],
+        cluster: [SubscriptionTxSnapshot],
         typical: Double,
         cadence: SubscriptionCadence,
         strongName: Bool,
@@ -234,7 +307,7 @@ enum SubscriptionAnalytics {
             }
         }()
         let dates = cluster.map(\.date).sorted()
-        let methods = Array(Set(cluster.map { TransactionAnalytics.cardName(for: $0) })).sorted()
+        let methods = Array(Set(cluster.map(\.cardName))).sorted()
         let display = cluster.max(by: { $0.date < $1.date })?.title ?? key
         let note: String = {
             if isUserDeclared { return "Marked by you as \(cadence.displayName.lowercased())" }
@@ -320,14 +393,14 @@ enum SubscriptionAnalytics {
 
     // MARK: - Amount clustering
 
-    private static func exactAmountClusters(_ rows: [Transaction]) -> [[Transaction]] {
+    private static func exactAmountClusters(_ rows: [SubscriptionTxSnapshot]) -> [[SubscriptionTxSnapshot]] {
         var remaining = rows.sorted { abs($0.amount) < abs($1.amount) }
-        var clusters: [[Transaction]] = []
+        var clusters: [[SubscriptionTxSnapshot]] = []
 
         while let seed = remaining.first {
             let seedAmt = abs(seed.amount)
-            var cluster: [Transaction] = []
-            var rest: [Transaction] = []
+            var cluster: [SubscriptionTxSnapshot] = []
+            var rest: [SubscriptionTxSnapshot] = []
             let tol = max(0.25, seedAmt * 0.01)
             for tx in remaining {
                 let a = abs(tx.amount)

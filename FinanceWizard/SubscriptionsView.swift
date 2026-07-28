@@ -12,13 +12,9 @@ struct SubscriptionsView: View {
     @Query private var transactions: [Transaction]
     @Query private var bankAccounts: [BankAccount]
 
-    private var candidates: [SubscriptionCandidate] {
-        SubscriptionAnalytics.detect(in: transactions)
-    }
-
-    private var monthlyBurn: Double {
-        SubscriptionAnalytics.totalMonthlyBurn(candidates)
-    }
+    @State private var candidates: [SubscriptionCandidate] = []
+    @State private var monthlyBurn: Double = 0
+    @State private var isScanning = true
 
     var body: some View {
         List {
@@ -28,11 +24,15 @@ struct SubscriptionsView: View {
                         Text("Est. monthly burn")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        MoneyText(monthlyBurn)
-                            .font(.title2.weight(.bold))
+                        if isScanning && candidates.isEmpty {
+                            ProgressView()
+                        } else {
+                            MoneyText(monthlyBurn)
+                                .font(.title2.weight(.bold))
+                        }
                     }
                     Spacer()
-                    Text("\(candidates.count) recurring")
+                    Text(isScanning && candidates.isEmpty ? "Scanning…" : "\(candidates.count) recurring")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -93,6 +93,21 @@ struct SubscriptionsView: View {
         }
         .navigationTitle("Subscriptions")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: transactions.count) {
+            await rescan()
+        }
+    }
+
+    @MainActor
+    private func rescan() async {
+        isScanning = true
+        let snaps = SubscriptionAnalytics.snapshots(from: transactions)
+        let found = await Task.detached(priority: .userInitiated) {
+            SubscriptionAnalytics.detect(snapshots: snaps)
+        }.value
+        candidates = found
+        monthlyBurn = SubscriptionAnalytics.totalMonthlyBurn(found)
+        isScanning = false
     }
 }
 

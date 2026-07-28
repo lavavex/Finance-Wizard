@@ -11,3 +11,5 @@ build/
 *.mov
 .env
 **/AuthKey_*.p8
+# Local Instruments captures
+.perf-traces/

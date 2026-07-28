@@ -20,13 +20,27 @@ extension Notification.Name {
 enum InstitutionLogoCache {
     private static let colorPrefix = "plaid.color."
     private static let namePrefix = "plaid.instName."
-    private static let memoryLogos = NSCache<NSString, UIImage>()
+    private static let memoryLogos: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 256
+        return c
+    }()
+    /// Keys that already miss on disk — skip repeated FileManager / inflate work while scrolling.
+    private static let missingLogoKeys: NSCache<NSString, NSNumber> = {
+        let c = NSCache<NSString, NSNumber>()
+        c.countLimit = 512
+        return c
+    }()
     /// Sampled tile hex / full-bleed flag — never re-rasterize the same logo every list row.
     private static let sampleHexCache = NSCache<NSString, NSString>()
     private static let opaqueCanvasCache = NSCache<NSString, NSNumber>()
+    private static let aliasListCache = NSCache<NSString, NSArray>()
     private static var inFlight = Set<String>()
     private static let lock = NSLock()
     private static var didSeedBundled = false
+    /// Resolved once — `logoDirectory()` used to create dirs + stat group container on every tile.
+    private static var cachedLogoDirectory: URL?
+    private static var didResolveLogoDirectory = false
 
     // MARK: - Bundled logos (screenshot-cleaned assets)
 
@@ -415,6 +429,46 @@ enum InstitutionLogoCache {
 
     // MARK: - Read
 
+    /// Memory only — safe on the main thread during scroll (never hits disk / inflate).
+    static func memoryLogo(
+        institutionID: String? = nil,
+        names: [String?] = []
+    ) -> UIImage? {
+        if let institutionID, !institutionID.isEmpty,
+           let img = memoryLogos.object(forKey: institutionID as NSString) {
+            return img
+        }
+        for name in names {
+            guard let name, !name.isEmpty else { continue }
+            let key = "name:" + name.lowercased()
+            if let img = memoryLogos.object(forKey: key as NSString) {
+                return img
+            }
+        }
+        return nil
+    }
+
+    /// Disk + decode off the caller’s thread when possible. Prefer `memoryLogo` first on main.
+    static func loadLogo(
+        institutionID: String?,
+        names: [String?]
+    ) async -> UIImage? {
+        if let hit = memoryLogo(institutionID: institutionID, names: names) {
+            return hit
+        }
+        return await Task.detached(priority: .userInitiated) {
+            if let img = logoImage(institutionID: institutionID) {
+                return img
+            }
+            for name in names {
+                if let img = logoImage(institutionName: name) {
+                    return img
+                }
+            }
+            return nil
+        }.value
+    }
+
     static func logoImage(institutionID: String?) -> UIImage? {
         guard let institutionID, !institutionID.isEmpty else { return nil }
         // Lazy seed so first Apple Card tile works even before app start hook runs.
@@ -424,8 +478,9 @@ enum InstitutionLogoCache {
         if let cached = memoryLogos.object(forKey: institutionID as NSString) {
             return cached
         }
+        if isMissing(institutionID) { return nil }
         if let data = readLogoData(key: institutionID), let img = UIImage(data: data) {
-            memoryLogos.setObject(img, forKey: institutionID as NSString)
+            remember(img, keys: [institutionID])
             return img
         }
         // Legacy UserDefaults base64
@@ -433,42 +488,76 @@ enum InstitutionLogoCache {
            let data = decodeImageData(b64),
            let img = UIImage(data: data) {
             writeLogoData(data, key: institutionID)
-            memoryLogos.setObject(img, forKey: institutionID as NSString)
+            remember(img, keys: [institutionID])
             return img
         }
+        markMissing(institutionID)
         return nil
     }
 
     static func logoImage(institutionName: String?) -> UIImage? {
         guard let institutionName, !institutionName.isEmpty else { return nil }
         let lower = institutionName.lowercased()
+        let nameKey = "name:" + lower
         if lower.contains("apple") {
             seedBundledLogos()
         }
+        if let cached = memoryLogos.object(forKey: nameKey as NSString) {
+            return cached
+        }
+        if isMissing(nameKey) { return nil }
 
-        if let data = readLogoData(key: "name:" + lower), let img = UIImage(data: data) {
+        if let data = readLogoData(key: nameKey), let img = UIImage(data: data) {
+            remember(img, keys: [nameKey])
             return img
         }
         if let id = UserDefaults.standard.string(forKey: "plaid.aliasId." + lower),
            let img = logoImage(institutionID: id) {
+            remember(img, keys: [nameKey])
             return img
         }
         for alias in nameAliases(for: institutionName) {
-            if let data = readLogoData(key: "name:" + alias), let img = UIImage(data: data) {
+            let aliasKey = "name:" + alias
+            if let cached = memoryLogos.object(forKey: aliasKey as NSString) {
+                remember(cached, keys: [nameKey])
+                return cached
+            }
+            if !isMissing(aliasKey),
+               let data = readLogoData(key: aliasKey),
+               let img = UIImage(data: data) {
+                remember(img, keys: [aliasKey, nameKey])
                 return img
             }
             if let id = UserDefaults.standard.string(forKey: "plaid.aliasId." + alias),
                let img = logoImage(institutionID: id) {
+                remember(img, keys: [aliasKey, nameKey])
                 return img
             }
         }
         if let b64 = UserDefaults.standard.string(forKey: "plaid.logo.name:" + lower),
            let data = decodeImageData(b64),
            let img = UIImage(data: data) {
-            writeLogoData(data, key: "name:" + lower)
+            writeLogoData(data, key: nameKey)
+            remember(img, keys: [nameKey])
             return img
         }
+        markMissing(nameKey)
         return nil
+    }
+
+    private static func remember(_ image: UIImage, keys: [String]) {
+        for key in keys where !key.isEmpty {
+            memoryLogos.setObject(image, forKey: key as NSString)
+            missingLogoKeys.removeObject(forKey: key as NSString)
+        }
+    }
+
+    private static func isMissing(_ key: String) -> Bool {
+        missingLogoKeys.object(forKey: key as NSString) != nil
+    }
+
+    private static func markMissing(_ key: String) {
+        missingLogoKeys.setObject(true as NSNumber, forKey: key as NSString)
     }
 
     static func primaryColor(institutionID: String?) -> Color? {
@@ -597,6 +686,22 @@ enum InstitutionLogoCache {
             seen.insert(id)
             ensureLogo(institutionID: id, name: account.institutionName)
         }
+        // Decode disk logos off the main thread so the first scroll is already warm.
+        warmMemory(accounts: accounts)
+    }
+
+    /// Load known account logos into `memoryLogos` without blocking the UI.
+    static func warmMemory(accounts: [BankAccount]) {
+        let ids = accounts.compactMap(\.institutionId).filter { !$0.isEmpty }
+        let names = accounts.map(\.institutionName).filter { !$0.isEmpty }
+        Task.detached(priority: .utility) {
+            for id in Set(ids) {
+                _ = logoImage(institutionID: id)
+            }
+            for name in Set(names) {
+                _ = logoImage(institutionName: name)
+            }
+        }
     }
 
     // MARK: - Decode helpers
@@ -655,42 +760,51 @@ enum InstitutionLogoCache {
     // MARK: - Disk
 
     private static func logoDirectory() -> URL? {
+        if didResolveLogoDirectory { return cachedLogoDirectory }
+        lock.lock()
+        defer { lock.unlock() }
+        if didResolveLogoDirectory { return cachedLogoDirectory }
+
         let fm = FileManager.default
-        // Prefer app caches (always writable); also mirror to App Group when available
-        let appCaches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("InstitutionLogos", isDirectory: true)
-        if let appCaches {
-            try? fm.createDirectory(at: appCaches, withIntermediateDirectories: true)
-        }
+        // Prefer App Group (widget) when available; fall back to app caches.
+        var resolved: URL?
         if let group = fm.containerURL(forSecurityApplicationGroupIdentifier: SharedStore.appGroupID) {
             let groupDir = group.appendingPathComponent("Library/Caches/InstitutionLogos", isDirectory: true)
             try? fm.createDirectory(at: groupDir, withIntermediateDirectories: true)
-            return groupDir
+            resolved = groupDir
+        } else if let appCaches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("InstitutionLogos", isDirectory: true) {
+            try? fm.createDirectory(at: appCaches, withIntermediateDirectories: true)
+            resolved = appCaches
         }
-        return appCaches
+        cachedLogoDirectory = resolved
+        didResolveLogoDirectory = true
+        return resolved
     }
 
     private static func logoFileURL(key: String) -> URL? {
-        let safe = key
+        let safe = sanitizedFileKey(key)
+        return logoDirectory()?.appendingPathComponent(safe + ".img")
+    }
+
+    private static func sanitizedFileKey(_ key: String) -> String {
+        key
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
-        return logoDirectory()?.appendingPathComponent(safe + ".img")
     }
 
     /// Also check legacy .png filenames from earlier builds.
     private static func readLogoData(key: String) -> Data? {
         let fm = FileManager.default
-        if let url = logoFileURL(key: key), fm.fileExists(atPath: url.path),
+        let safe = sanitizedFileKey(key)
+        if let url = logoFileURL(key: key),
            let data = try? Data(contentsOf: url), !data.isEmpty {
             return data
         }
         // Legacy .png path
-        let safe = key
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
         if let dir = logoDirectory() {
             let png = dir.appendingPathComponent(safe + ".png")
-            if fm.fileExists(atPath: png.path), let data = try? Data(contentsOf: png), !data.isEmpty {
+            if let data = try? Data(contentsOf: png), !data.isEmpty {
                 return data
             }
         }
@@ -699,7 +813,7 @@ enum InstitutionLogoCache {
             let dir = caches.appendingPathComponent("InstitutionLogos", isDirectory: true)
             for ext in ["img", "png"] {
                 let url = dir.appendingPathComponent(safe + "." + ext)
-                if fm.fileExists(atPath: url.path), let data = try? Data(contentsOf: url), !data.isEmpty {
+                if let data = try? Data(contentsOf: url), !data.isEmpty {
                     return data
                 }
             }
@@ -708,9 +822,8 @@ enum InstitutionLogoCache {
     }
 
     private static func writeLogoData(_ data: Data, key: String) {
-        let safe = key
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
+        let safe = sanitizedFileKey(key)
+        missingLogoKeys.removeObject(forKey: key as NSString)
         // Write App Group (widget) + app caches (reliability)
         if let url = logoFileURL(key: key) {
             try? data.write(to: url, options: .atomic)
@@ -725,6 +838,9 @@ enum InstitutionLogoCache {
 
     private static func nameAliases(for name: String) -> [String] {
         let lower = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let cached = aliasListCache.object(forKey: lower as NSString) as? [String] {
+            return cached
+        }
         var set: Set<String> = [lower]
         if lower.contains("chase") {
             set.insert("chase")
@@ -753,7 +869,9 @@ enum InstitutionLogoCache {
         if let first = lower.split(separator: " ").first, first.count >= 3 {
             set.insert(String(first))
         }
-        return Array(set)
+        let list = Array(set)
+        aliasListCache.setObject(list as NSArray, forKey: lower as NSString)
+        return list
     }
 }
 
