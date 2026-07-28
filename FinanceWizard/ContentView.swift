@@ -659,19 +659,18 @@ struct AllTransactionsView: View {
     }
 
     /// Review queue + subscription totals are expensive; refresh off the critical path.
+    /// Stay on the main actor (SwiftData models are not Sendable) but yield via Task
+    /// so list scrolling isn’t blocked by a synchronous body recompute.
     @MainActor
     private func refreshToolStats() {
-        let txs = transactions
-        let accounts = bankAccounts
-        Task.detached(priority: .utility) {
-            let review = ReviewQueueAnalytics.count(in: txs, accounts: accounts)
-            let subs = SubscriptionAnalytics.totalMonthlyBurn(
-                SubscriptionAnalytics.detect(in: txs)
+        Task(priority: .utility) { @MainActor in
+            reviewCount = ReviewQueueAnalytics.count(
+                in: transactions,
+                accounts: bankAccounts
             )
-            await MainActor.run {
-                reviewCount = review
-                subscriptionMonthly = subs
-            }
+            subscriptionMonthly = SubscriptionAnalytics.totalMonthlyBurn(
+                SubscriptionAnalytics.detect(in: transactions)
+            )
         }
     }
 
