@@ -12,10 +12,9 @@ title: Settings
 | **client_id** | From [Plaid Dashboard → Keys](https://dashboard.plaid.com/developers/keys) |
 | **secret** | Environment-specific secret (stored in **Keychain**) |
 | **Environment** | Sandbox / Development / Production |
-| **Optional OAuth redirect** | https Universal Link for Production app-to-app (optional; leave blank in Sandbox) |
-| **Save credentials** | Writes client_id + env + redirect to `UserDefaults`, secret to Keychain |
+| **Save credentials** | Writes client_id + env to `UserDefaults`, secret to Keychain |
 
-Link completion uses the custom scheme `financewizard://hosted-link-complete` (Hosted Link). That URI is **not** registered in the Plaid Dashboard.
+Link completion uses the custom scheme `financewizard://hosted-link-complete` (Hosted Link). No `https://localhost/plaid-oauth` field — that was a leftover sample redirect and is cleared automatically if still stored.
 
 ## Linked banks
 
@@ -54,12 +53,25 @@ Implementation: `FinanceWizard/DebugDataExport.swift`.
 
 | Field | Source |
 |-------|--------|
-| **Version** | `CFBundleShortVersionString` ← Xcode **MARKETING_VERSION** |
+| **Version** | `CFBundleShortVersionString` ← Xcode **MARKETING_VERSION** (e.g. `0.1`) |
 | **Build** | `CFBundleVersion` ← Xcode **CURRENT_PROJECT_VERSION** |
 | Bundle ID | `Bundle.main.bundleIdentifier` |
 | Minimum iOS | Info.plist minimum OS |
 
-These match what Xcode Cloud embeds when it archives (same target version/build numbers).
+### Keeping local and Xcode Cloud build numbers aligned
+
+| Where | What happens |
+|-------|----------------|
+| **Xcode Cloud** | `ci_pre_xcodebuild.sh` sets `CURRENT_PROJECT_VERSION` to **`CI_BUILD_NUMBER`** before `xcodebuild` (app + widget). About / TestFlight show that integer. |
+| **Local** | `project.pbxproj` holds the committed build number. Set it to match Cloud with: |
+
+```bash
+./scripts/set-build-number.sh <CI_BUILD_NUMBER>
+```
+
+Example: if the last Cloud/TestFlight build was **18**, run `./scripts/set-build-number.sh 18` (already applied in-repo when we sync). After a new Cloud build **N**, re-run with **N** (or commit the bump) so local Xcode runs show the same build as Cloud.
+
+In App Store Connect → Xcode Cloud → Settings → **Build Number**, you can set the next Cloud counter if you ever need to jump ahead of App Store / local.
 
 ## Implementation
 

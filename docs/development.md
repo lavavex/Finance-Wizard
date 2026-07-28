@@ -21,6 +21,29 @@ open FinanceWizard.xcodeproj
 
 In Xcode: scheme **FinanceWizard** (Finance Wizard app) → Run (⌘R).
 
+## Version & build numbers (local ↔ Xcode Cloud)
+
+| Setting | Meaning |
+|---------|---------|
+| **MARKETING_VERSION** | User-facing version (e.g. `0.1`) → About **Version** |
+| **CURRENT_PROJECT_VERSION** | Integer build → About **Build** / TestFlight |
+
+**Xcode Cloud** runs `ci_scripts/ci_pre_xcodebuild.sh`, which sets:
+
+```text
+CURRENT_PROJECT_VERSION = $CI_BUILD_NUMBER
+```
+
+so every Cloud archive’s build matches the Cloud build counter (same number you see in App Store Connect / TestFlight).
+
+**Local** uses whatever is in `project.pbxproj`. After a Cloud build lands, align your Mac:
+
+```bash
+./scripts/set-build-number.sh <CI_BUILD_NUMBER>
+```
+
+Then Clean + Run so **Settings → About** matches the Cloud install. Do not hand-edit a lower number than the last Cloud build (App Store Connect rejects non‑increasing builds).
+
 ## Xcode project format (Xcode Cloud)
 
 Newer local Xcodes (26/27) may rewrite `project.pbxproj` to **objectVersion 110+**. Older Xcode Cloud images then fail with:

@@ -15,11 +15,14 @@ struct CardsView: View {
     @Query private var transactions: [Transaction]
     @Query(sort: \BankAccount.name) private var accounts: [BankAccount]
     @Query(sort: \CreditCardPayment.date, order: .reverse) private var payments: [CreditCardPayment]
+    @Environment(\.modelContext) private var modelContext
 
     @State private var period: SnapshotPeriod = .month
     @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
     @State private var sort: TransactionSort = .dateNewest
     @State private var nicknameEpoch = 0
+    @State private var isSyncing = false
+    @State private var syncBanner: String?
 
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
@@ -78,6 +81,24 @@ struct CardsView: View {
 
     private var anyOverdue: Bool {
         creditAccounts.contains { $0.isOverdue == true }
+    }
+
+    /// Credit cards with a due date in the next 30 days (or overdue).
+    private var upcomingBills: [BankAccount] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let horizon = cal.date(byAdding: .day, value: 30, to: today) else { return [] }
+        return creditAccounts
+            .filter { account in
+                guard let due = account.nextPaymentDueDate else { return false }
+                let day = cal.startOfDay(for: due)
+                return day <= horizon || account.isOverdue == true
+            }
+            .sorted { a, b in
+                let da = a.nextPaymentDueDate ?? .distantFuture
+                let db = b.nextPaymentDueDate ?? .distantFuture
+                return da < db
+            }
     }
 
     /// Credit card rows only (by Plaid account_id).
@@ -144,7 +165,7 @@ struct CardsView: View {
         return rows
     }
 
-    /// Spend methods not matched to any linked account.
+    /// Spend methods not matched to any linked account (Apple Card is never orphaned).
     private var otherSpendRows: [UnifiedCardRow] {
         _ = nicknameEpoch
         let claimed = Set(creditRows.flatMap(\.matchingPaymentMethods))
@@ -152,6 +173,7 @@ struct CardsView: View {
 
         let orphanMethods = Set(periodTransactions.map { TransactionAnalytics.cardName(for: $0) })
             .subtracting(claimed)
+            .filter { !AppleCardAccount.isAppleCard(paymentMethod: $0) }
             .sorted()
 
         return orphanMethods.compactMap { method in
@@ -270,14 +292,39 @@ struct CardsView: View {
                 } header: {
                     Text("Overview")
                 } footer: {
-                    Text("Bill payments are under Total paid (not spend). Logos and credit terms come from Plaid.")
+                    Text("Bill payments are under Total paid (not spend). Logos and credit terms come from Plaid. Pull down to Sync.")
+                }
+
+                if let syncBanner {
+                    Section {
+                        Text(syncBanner)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // MARK: Upcoming bills (next 30 days)
+                if !upcomingBills.isEmpty {
+                    Section {
+                        ForEach(upcomingBills, id: \.accountId) { account in
+                            UpcomingBillRow(account: account)
+                        }
+                    } header: {
+                        Text("Upcoming bills")
+                    } footer: {
+                        Text("Min payment and due date from Plaid Liabilities when the bank provides them.")
+                    }
                 }
 
                 // MARK: Credit cards
                 Section {
                     if creditRows.isEmpty {
-                        Text("No credit cards linked. Link a bank or pick another period.")
-                            .foregroundStyle(.secondary)
+                        ContentUnavailableView(
+                            "No credit cards",
+                            systemImage: "creditcard",
+                            description: Text("Link a bank from Transactions → Sync → Link bank account, then pull to sync.")
+                        )
+                        .listRowBackground(Color.clear)
                     } else {
                         ForEach(creditRows) { row in
                             accountNavigationLink(row: row)
@@ -316,6 +363,9 @@ struct CardsView: View {
                 }
             }
             .navigationTitle("Accounts")
+            .refreshable {
+                await syncFromPlaid()
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
@@ -337,6 +387,37 @@ struct CardsView: View {
                         showTitle: true
                     )
                 }
+            }
+            .task {
+                AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
+                InstitutionLogoCache.prefetch(accounts: accounts)
+            }
+        }
+    }
+
+    private func syncFromPlaid() async {
+        guard !isSyncing else { return }
+        await MainActor.run {
+            isSyncing = true
+            syncBanner = "Syncing with Plaid…"
+        }
+        do {
+            let report = try await PlaidSyncEngine.syncAll(
+                modelContext: modelContext,
+                resetCursors: false,
+                includePending: false
+            )
+            await MainActor.run {
+                syncBanner = report.summary
+                isSyncing = false
+                nicknameEpoch += 1
+            }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run { syncBanner = nil }
+        } catch {
+            await MainActor.run {
+                syncBanner = error.localizedDescription
+                isSyncing = false
             }
         }
     }
@@ -381,10 +462,7 @@ struct CardsView: View {
     }
 
     private func methodBelongs(_ method: String, to account: BankAccount) -> Bool {
-        if namesMatch(method, account.plaidDisplayName) { return true }
-        if namesMatch(method, account.name) { return true }
-        if let mask = account.mask, !mask.isEmpty, method.contains(mask) { return true }
-        return false
+        account.matchesPaymentMethod(method)
     }
 
     private func paidFor(credit: BankAccount, paymentMethods: Set<String>) -> Double {
@@ -429,6 +507,74 @@ struct CardsView: View {
             return maskMatch.institutionId
         }
         return accounts.first { $0.institutionName == payment.institutionName }?.institutionId
+    }
+}
+
+// MARK: - Upcoming bill strip
+
+private struct UpcomingBillRow: View {
+    let account: BankAccount
+
+    private var urgencyColor: Color {
+        if account.isOverdue == true { return .red }
+        if let days = account.daysUntilDue {
+            if days <= 3 { return .red }
+            if days <= 7 { return .orange }
+            if let util = account.utilization, util >= 0.7 { return .orange }
+        }
+        return .primary
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            BankIconView(
+                paymentMethod: account.plaidDisplayName,
+                size: 36,
+                accountId: account.accountId,
+                displayName: account.displayName,
+                institutionId: account.institutionId,
+                institutionName: account.institutionName
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(account.displayName)
+                    .font(.body.weight(.semibold))
+                    .lineLimit(1)
+                if let util = account.utilization {
+                    Text("\(Int((util * 100).rounded()))% utilization")
+                        .font(.caption2)
+                        .foregroundStyle(util >= 0.7 ? .orange : .secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 2) {
+                if let min = account.minimumPaymentAmount {
+                    Text(min, format: .currency(code: "USD"))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(urgencyColor)
+                } else {
+                    Text(max(0, account.currentBalance), format: .currency(code: "USD"))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(urgencyColor)
+                }
+                if let due = account.nextPaymentDueDate {
+                    if account.isOverdue == true {
+                        Text("Overdue")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.red)
+                    } else if let days = account.daysUntilDue {
+                        Text(days == 0 ? "Due today" : "Due in \(days)d")
+                            .font(.caption2)
+                            .foregroundStyle(urgencyColor == .primary ? .secondary : urgencyColor)
+                    } else {
+                        Text(due, style: .date)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1074,10 +1220,14 @@ struct TransactionRowView: View {
                     Text("Bill pay")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(CategoryStyle.creditPayment)
-                } else {
+                } else if transaction.multiplier > 0 {
                     Text("\(transaction.multiplier.formatted())x")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else {
+                    Text("No rewards")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
         }

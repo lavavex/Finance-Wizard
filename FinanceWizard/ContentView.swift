@@ -60,7 +60,7 @@ struct IncomeExportFile: Decodable {
     var rows: [ImportedIncome] { income ?? [] }
 }
 
-// MARK: - Root: three tabs
+// MARK: - Root tabs
 
 struct ContentView: View {
     var body: some View {
@@ -77,7 +77,13 @@ struct ContentView: View {
                     Label("Accounts", systemImage: "building.columns")
                 }
 
-            // Tab 3: Plaid credentials + linked banks
+            // Tab 3: credit card rewards & benefits
+            BenefitsView()
+                .tabItem {
+                    Label("Benefits", systemImage: "gift")
+                }
+
+            // Tab 4: Plaid credentials + linked banks
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
@@ -116,21 +122,33 @@ struct AllTransactionsView: View {
     @State private var sort: TransactionSort = .dateNewest
     // Cards hidden from the list (does not change Total Spend header)
     @State private var hiddenCards: Set<String> = []
+    @State private var searchText: String = ""
 
-    // Rows for the list: period + hide cards + sort
+    // Rows for the list: period + hide cards + sort + search
     private var visibleTransactions: [Transaction] {
-        TransactionAnalytics.filter(
+        let base = TransactionAnalytics.filter(
             transactions,
             period: period,
             referenceDate: referenceDate,
             excludedCards: hiddenCards,
             sort: sort
         )
+        return TransactionSearch.filter(base, query: searchText, accounts: bankAccounts)
     }
 
     // Period-only set (for totals — hide cards does not apply)
     private var periodTransactions: [Transaction] {
         TransactionAnalytics.inPeriod(transactions, period: period, referenceDate: referenceDate)
+    }
+
+    private var reviewCount: Int {
+        ReviewQueueAnalytics.count(in: transactions, accounts: bankAccounts)
+    }
+
+    private var subscriptionMonthly: Double {
+        SubscriptionAnalytics.totalMonthlyBurn(
+            SubscriptionAnalytics.detect(in: transactions)
+        )
     }
 
     // Income for the same period filter (never mixed into spend)
@@ -139,12 +157,13 @@ struct AllTransactionsView: View {
     }
 
     private var visibleIncome: [Income] {
-        IncomeAnalytics.filter(
+        let base = IncomeAnalytics.filter(
             incomeRows,
             period: period,
             referenceDate: referenceDate,
             sort: sort
         )
+        return IncomeSearch.filter(base, query: searchText)
     }
 
     private var periodLabel: String {
@@ -266,6 +285,41 @@ struct AllTransactionsView: View {
                     }
                 }
 
+                Section {
+                    NavigationLink {
+                        ReviewQueueView()
+                    } label: {
+                        HStack {
+                            Label("Needs review", systemImage: "checklist")
+                            Spacer()
+                            if reviewCount > 0 {
+                                Text("\(reviewCount)")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                            } else {
+                                Text("Clear")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    NavigationLink {
+                        SubscriptionsView()
+                    } label: {
+                        HStack {
+                            Label("Subscriptions", systemImage: "repeat.circle")
+                            Spacer()
+                            if subscriptionMonthly > 0 {
+                                Text("~\(subscriptionMonthly.formatted(.currency(code: "USD")))/mo")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Tools")
+                }
+
                 Section("Income") {
                     if visibleIncome.isEmpty {
                         Text(incomeEmptyMessage)
@@ -319,6 +373,17 @@ struct AllTransactionsView: View {
                 }
             }
             .navigationTitle("Finances")
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: .automatic),
+                prompt: "Title, category, amount, last 4"
+            )
+            .refreshable {
+                await syncFromPlaid(resetCursors: false)
+            }
+            .task {
+                AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if isSyncing {

@@ -25,6 +25,10 @@ struct FinanceWizardApp: App {
             // If this crashes: App Group missing, wrong id, or store is corrupted
             fatalError("Failed to open ModelContainer: \(error)")
         }
+        // Plaid logo fetch on cache miss (tiles refresh when images arrive)
+        InstitutionLogoFetcher.start()
+        // Bundled brand marks (Apple Card screenshot logo, etc.)
+        InstitutionLogoCache.seedBundledLogos()
     }
 
     // Root scene: one window showing ContentView, with SwiftData injected

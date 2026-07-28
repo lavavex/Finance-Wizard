@@ -27,12 +27,14 @@
 /* Begin PBXCopyFilesBuildPhase section */
 		2067E82F3016766000D9E2D2 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
 			dstPath = "";
-			dstSubfolder = PlugIns;
+			dstSubfolderSpec = 13;
 			files = (
 				2067E82E3016766000D9E2D2 /* WidgetExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -89,15 +91,19 @@
 /* Begin PBXFrameworksBuildPhase section */
 		2067E8153016766000D9E2D2 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 				2067E81D3016766000D9E2D2 /* SwiftUI.framework in Frameworks */,
 				2067E81B3016766000D9E2D2 /* WidgetKit.framework in Frameworks */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		20DF1AD230165D170007AB19 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
@@ -145,6 +151,8 @@
 				2067E8163016766000D9E2D2 /* Resources */,
 			);
 			buildRules = (
+			);
+			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
 				2067E81E3016766000D9E2D2 /* Widget */,
@@ -219,28 +227,36 @@
 /* Begin PBXResourcesBuildPhase section */
 		2067E8163016766000D9E2D2 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 				202F631230167F19008FC91B /* .gitignore in Resources */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		20DF1AD330165D170007AB19 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 				202F631130167F19008FC91B /* .gitignore in Resources */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		2067E8143016766000D9E2D2 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		20DF1AD130165D170007AB19 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
@@ -253,14 +269,14 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		2067E8303016766000D9E2D2 /* Debug configuration for PBXNativeTarget "WidgetExtension" */ = {
+		2067E8303016766000D9E2D2 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = WidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = ZVELT9SYXN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Widget/Info.plist;
@@ -287,14 +303,14 @@
 			};
 			name = Debug;
 		};
-		2067E8313016766000D9E2D2 /* Release configuration for PBXNativeTarget "WidgetExtension" */ = {
+		2067E8313016766000D9E2D2 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = WidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = ZVELT9SYXN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Widget/Info.plist;
@@ -322,7 +338,7 @@
 			};
 			name = Release;
 		};
-		20DF1ADE30165D180007AB19 /* Debug configuration for PBXProject "FinanceWizard" */ = {
+		20DF1ADE30165D180007AB19 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -384,7 +400,7 @@
 			};
 			name = Debug;
 		};
-		20DF1ADF30165D180007AB19 /* Release configuration for PBXProject "FinanceWizard" */ = {
+		20DF1ADF30165D180007AB19 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -438,14 +454,14 @@
 			};
 			name = Release;
 		};
-		20DF1AE130165D180007AB19 /* Debug configuration for PBXNativeTarget "FinanceWizard" */ = {
+		20DF1AE130165D180007AB19 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = Mika;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FinanceWizard/FinanceWizard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = ZVELT9SYXN;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -489,14 +505,14 @@
 			};
 			name = Debug;
 		};
-		20DF1AE230165D180007AB19 /* Release configuration for PBXNativeTarget "FinanceWizard" */ = {
+		20DF1AE230165D180007AB19 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = Mika;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FinanceWizard/FinanceWizard.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = ZVELT9SYXN;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -546,25 +562,28 @@
 		2067E8323016766000D9E2D2 /* Build configuration list for PBXNativeTarget "WidgetExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				2067E8303016766000D9E2D2 /* Debug configuration for PBXNativeTarget "WidgetExtension" */,
-				2067E8313016766000D9E2D2 /* Release configuration for PBXNativeTarget "WidgetExtension" */,
+				2067E8303016766000D9E2D2 /* Debug */,
+				2067E8313016766000D9E2D2 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		20DF1AD030165D170007AB19 /* Build configuration list for PBXProject "FinanceWizard" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				20DF1ADE30165D180007AB19 /* Debug configuration for PBXProject "FinanceWizard" */,
-				20DF1ADF30165D180007AB19 /* Release configuration for PBXProject "FinanceWizard" */,
+				20DF1ADE30165D180007AB19 /* Debug */,
+				20DF1ADF30165D180007AB19 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		20DF1AE030165D180007AB19 /* Build configuration list for PBXNativeTarget "FinanceWizard" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				20DF1AE130165D180007AB19 /* Debug configuration for PBXNativeTarget "FinanceWizard" */,
-				20DF1AE230165D180007AB19 /* Release configuration for PBXNativeTarget "FinanceWizard" */,
+				20DF1AE130165D180007AB19 /* Debug */,
+				20DF1AE230165D180007AB19 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */

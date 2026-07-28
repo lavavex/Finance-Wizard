@@ -211,11 +211,6 @@ enum PlaidSyncEngine {
                             primaryColorHex: branding.primaryColorHex
                         )
                     }
-                    if branding.logoBase64 == nil || branding.logoBase64?.isEmpty == true {
-                        report.warnings.append(
-                            "\(item.institutionName): Plaid returned no logo for \(institutionId)."
-                        )
-                    }
                 } catch {
                     report.warnings.append(
                         "\(item.institutionName) logo: \(error.localizedDescription)"
@@ -395,9 +390,27 @@ enum PlaidSyncEngine {
         let channel = tx.payment_channel
         let inferredRail = PaymentRail.infer(plaidChannel: channel, title: title)
         let bankAccount = fetchBankAccount(accountId: accountId, modelContext: modelContext)
+        let allAccounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         let railMultiplier = bankAccount?.rewardMultiplier(for: inferredRail)
-        // Preference: vendor learn rule → account debit/ACH default → 1.0
-        let mappedMultiplier = rule?.multiplier ?? railMultiplier ?? 1.0
+        let rewardsEligible = CardBenefitsStore.isRewardsEligible(
+            account: bankAccount,
+            paymentMethod: paymentMethod
+        )
+        let benefitsRate = CardBenefitsStore.resolvedMultiplier(
+            accountId: accountId,
+            paymentMethod: paymentMethod,
+            generalCategory: mappedCategory,
+            title: title,
+            accounts: allAccounts
+        )
+        // Preference: vendor learn → depository debit/ACH (X Money) → Benefits rates on cards only.
+        // Plain Chase checking is not rewards-eligible → multiplier 0 (no points).
+        let mappedMultiplier: Double = {
+            if let ruleMult = rule?.multiplier { return ruleMult }
+            if !rewardsEligible { return 0 }
+            if let railMultiplier { return railMultiplier }
+            return benefitsRate
+        }()
         let amount = -abs(tx.amount)
 
         if let existing = try? modelContext.fetch(descriptor).first {
@@ -413,12 +426,26 @@ enum PlaidSyncEngine {
                 existing.category = mappedCategory
             }
             if !existing.isMultiplierLocked {
-                // Re-resolve with locked rail if user set one
+                let cat = existing.isCategoryLocked ? existing.category : mappedCategory
                 let rail = existing.effectivePaymentRail
-                let mult = rule?.multiplier
-                    ?? bankAccount?.rewardMultiplier(for: rail)
-                    ?? 1.0
-                existing.multiplier = mult
+                if let ruleMult = rule?.multiplier {
+                    existing.multiplier = ruleMult
+                } else if !rewardsEligible {
+                    existing.multiplier = 0
+                } else if let railMult = bankAccount?.rewardMultiplier(for: rail) {
+                    // X Money: debit 3%, ACH 0%
+                    existing.multiplier = railMult
+                } else {
+                    existing.multiplier = CardBenefitsStore.resolvedMultiplier(
+                        accountId: accountId,
+                        paymentMethod: paymentMethod,
+                        generalCategory: cat,
+                        title: title,
+                        accounts: allAccounts,
+                        on: date,
+                        rewardCategoryOverride: existing.rewardCategoryOverride
+                    )
+                }
             }
         } else {
             modelContext.insert(
@@ -714,27 +741,33 @@ enum PlaidSyncEngine {
                     existing.institutionId = institutionId
                 }
                 existing.lastSyncedAt = Date()
+                CardBenefitsStore.applyDepositoryRailRewards(to: existing)
             } else {
-                modelContext.insert(
-                    BankAccount(
-                        accountId: accountId,
-                        itemId: item.id,
-                        name: name,
-                        officialName: detail.official_name,
-                        mask: detail.mask,
-                        type: type,
-                        subtype: detail.subtype,
-                        institutionName: item.institutionName,
-                        currentBalance: current,
-                        availableBalance: available,
-                        creditLimit: limit,
-                        institutionId: institutionId,
-                        lastSyncedAt: Date()
-                    )
+                let account = BankAccount(
+                    accountId: accountId,
+                    itemId: item.id,
+                    name: name,
+                    officialName: detail.official_name,
+                    mask: detail.mask,
+                    type: type,
+                    subtype: detail.subtype,
+                    institutionName: item.institutionName,
+                    currentBalance: current,
+                    availableBalance: available,
+                    creditLimit: limit,
+                    institutionId: institutionId,
+                    lastSyncedAt: Date()
                 )
+                CardBenefitsStore.applyDepositoryRailRewards(to: account)
+                modelContext.insert(account)
             }
             count += 1
         }
+
+        // Seed Benefits rates for newly recognized products (won't overwrite saved profiles)
+        let allAccounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        _ = CardBenefitsStore.autoApplyKnownProducts(accounts: allAccounts)
+
         return count
     }
 
