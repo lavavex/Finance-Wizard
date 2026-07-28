@@ -3,9 +3,8 @@
 //  Finance Wizard
 //
 //  List tiles and detail headers use the institution logo from Plaid
-//  (InstitutionLogoCache). When a logo is present, the rounded square
-//  fill uses Plaid primary_color (or a color sampled from the logo).
-//  When Plaid has no logo, shows a brand-color monogram.
+//  (InstitutionLogoCache). Opaque app-icon logos full-bleed so their baked
+//  background fills the tile; transparent marks pad on a matched brand color.
 //
 
 import SwiftUI
@@ -23,6 +22,7 @@ struct BankIconView: View {
     @State private var logo: UIImage?
     @State private var brandColor: Color = Color(red: 0.22, green: 0.24, blue: 0.28)
     @State private var monogram: String = "?"
+    @State private var fullBleed = false
     @State private var tick: Int = 0
 
     private var cornerRadius: CGFloat { size * 0.2237 }
@@ -31,19 +31,18 @@ struct BankIconView: View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
         shape
-            // Solid fill when we have a real logo so the square matches brand color cleanly.
-            // Soft gradient only for monogram placeholders.
             .fill(logo != nil ? AnyShapeStyle(brandColor) : AnyShapeStyle(brandColor.gradient))
             .overlay {
                 if let logo {
-                    if usesFullBleedLogo {
+                    if fullBleed {
+                        // App-icon style (X Money black, Amex blue tile) — fill the square
                         Image(uiImage: logo)
                             .resizable()
                             .scaledToFill()
                             .frame(width: size, height: size)
                             .clipShape(shape)
                     } else {
-                        // Plaid marks are usually transparent — sit on the matched brand square.
+                        // Transparent Plaid mark — pad on matched brand color
                         Image(uiImage: logo)
                             .resizable()
                             .scaledToFit()
@@ -74,15 +73,14 @@ struct BankIconView: View {
                     tick &+= 1
                 }
             }
-            .id(tick) // force redraw when logo / color arrives
+            .id(tick)
     }
 
     private var monogramFontSize: CGFloat {
         monogram.count > 1 ? size * 0.32 : size * 0.42
     }
 
-    /// Apple Card asset is already a rounded square — fill the tile edge-to-edge.
-    private var usesFullBleedLogo: Bool {
+    private var prefersAppleFullBleed: Bool {
         let hay = [institutionId, institutionName, paymentMethod, displayName]
             .compactMap { $0?.lowercased() }
             .joined(separator: " ")
@@ -90,32 +88,31 @@ struct BankIconView: View {
     }
 
     private func refresh(requestFetch: Bool) {
-        logo = InstitutionLogoCache.logoImage(institutionID: institutionId)
+        let resolved = InstitutionLogoCache.logoImage(institutionID: institutionId)
             ?? InstitutionLogoCache.logoImage(institutionName: institutionName)
             ?? InstitutionLogoCache.logoImage(institutionName: paymentMethod)
             ?? InstitutionLogoCache.logoImage(institutionName: displayName)
+        logo = resolved
 
-        brandColor = InstitutionLogoCache.primaryColor(institutionID: institutionId)
-            ?? InstitutionLogoCache.primaryColor(institutionName: institutionName)
-            ?? InstitutionLogoCache.primaryColor(institutionName: paymentMethod)
-            ?? InstitutionLogoCache.primaryColor(institutionName: displayName)
-            ?? Color(red: 0.22, green: 0.24, blue: 0.28)
-
-        // If we have a logo but still the generic gray, try sampling once for this session.
-        if logo != nil, isGenericGray(brandColor), let logo {
-            if let hex = InstitutionLogoCache.sampleBackgroundHex(from: logo),
+        // Opaque logo canvas → sample edges so tile matches icon (not a mismatched primary_color).
+        if let resolved {
+            let opaque = InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || prefersAppleFullBleed
+            fullBleed = opaque
+            if let hex = InstitutionLogoCache.sampleBackgroundHex(from: resolved),
                let sampled = Color(hex: hex) {
                 brandColor = sampled
-                // Persist so other tiles / next launch match
-                if let institutionId, !institutionId.isEmpty {
-                    InstitutionLogoCache.store(
-                        institutionID: institutionId,
-                        name: institutionName ?? displayName ?? paymentMethod,
-                        logoBase64: nil,
-                        primaryColorHex: hex
-                    )
-                }
+                // Persist only when different (avoid notification refresh loops)
+                InstitutionLogoCache.persistBrandColorIfNeeded(
+                    institutionID: institutionId,
+                    name: institutionName ?? displayName ?? paymentMethod,
+                    hex: hex
+                )
+            } else {
+                brandColor = cachedBrandColor()
             }
+        } else {
+            fullBleed = false
+            brandColor = cachedBrandColor()
         }
 
         monogram = InstitutionLogoCache.monogram(
@@ -131,12 +128,12 @@ struct BankIconView: View {
         }
     }
 
-    private func isGenericGray(_ color: Color) -> Bool {
-        // Default placeholder RGB ≈ 0.22, 0.24, 0.28
-        let ui = UIColor(color)
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return false }
-        return abs(r - 0.22) < 0.04 && abs(g - 0.24) < 0.04 && abs(b - 0.28) < 0.04
+    private func cachedBrandColor() -> Color {
+        InstitutionLogoCache.primaryColor(institutionID: institutionId)
+            ?? InstitutionLogoCache.primaryColor(institutionName: institutionName)
+            ?? InstitutionLogoCache.primaryColor(institutionName: paymentMethod)
+            ?? InstitutionLogoCache.primaryColor(institutionName: displayName)
+            ?? Color(red: 0.22, green: 0.24, blue: 0.28)
     }
 }
 
@@ -151,13 +148,8 @@ struct InstitutionLogoHeader: View {
     @State private var logo: UIImage?
     @State private var brandColor: Color = Color(red: 0.22, green: 0.24, blue: 0.28)
     @State private var monogram: String = "?"
+    @State private var fullBleed = false
     @State private var tick: Int = 0
-
-    private var fullBleed: Bool {
-        (institutionId == "local:apple-card")
-            || (institutionName?.localizedCaseInsensitiveContains("apple") == true)
-            || displayName.localizedCaseInsensitiveContains("apple")
-    }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -220,29 +212,34 @@ struct InstitutionLogoHeader: View {
     }
 
     private func refresh(requestFetch: Bool) {
-        logo = InstitutionLogoCache.logoImage(institutionID: institutionId)
+        let resolved = InstitutionLogoCache.logoImage(institutionID: institutionId)
             ?? InstitutionLogoCache.logoImage(institutionName: institutionName)
-        brandColor = InstitutionLogoCache.primaryColor(institutionID: institutionId)
-            ?? InstitutionLogoCache.primaryColor(institutionName: institutionName)
-            ?? Color(red: 0.22, green: 0.24, blue: 0.28)
+        logo = resolved
 
-        if logo != nil, let logo {
-            let ui = UIColor(brandColor)
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            if ui.getRed(&r, green: &g, blue: &b, alpha: &a),
-               abs(r - 0.22) < 0.04, abs(g - 0.24) < 0.04, abs(b - 0.28) < 0.04,
-               let hex = InstitutionLogoCache.sampleBackgroundHex(from: logo),
+        if let resolved {
+            let opaque = InstitutionLogoCache.logoHasOpaqueCanvas(resolved)
+                || (institutionId == "local:apple-card")
+                || (institutionName?.localizedCaseInsensitiveContains("apple") == true)
+                || displayName.localizedCaseInsensitiveContains("apple")
+            fullBleed = opaque
+            if let hex = InstitutionLogoCache.sampleBackgroundHex(from: resolved),
                let sampled = Color(hex: hex) {
                 brandColor = sampled
-                if let institutionId, !institutionId.isEmpty {
-                    InstitutionLogoCache.store(
-                        institutionID: institutionId,
-                        name: institutionName ?? displayName,
-                        logoBase64: nil,
-                        primaryColorHex: hex
-                    )
-                }
+                InstitutionLogoCache.persistBrandColorIfNeeded(
+                    institutionID: institutionId,
+                    name: institutionName ?? displayName,
+                    hex: hex
+                )
+            } else {
+                brandColor = InstitutionLogoCache.primaryColor(institutionID: institutionId)
+                    ?? InstitutionLogoCache.primaryColor(institutionName: institutionName)
+                    ?? Color(red: 0.22, green: 0.24, blue: 0.28)
             }
+        } else {
+            fullBleed = false
+            brandColor = InstitutionLogoCache.primaryColor(institutionID: institutionId)
+                ?? InstitutionLogoCache.primaryColor(institutionName: institutionName)
+                ?? Color(red: 0.22, green: 0.24, blue: 0.28)
         }
 
         monogram = InstitutionLogoCache.monogram(

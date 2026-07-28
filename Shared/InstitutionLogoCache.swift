@@ -188,16 +188,20 @@ enum InstitutionLogoCache {
     }
 
     /// Resolve the square fill behind a bank mark.
+    /// Opaque app-icon logos: **always** sample the logo canvas first so the tile
+    /// matches (X Money black, Amex blue) instead of a mismatched Plaid primary.
     private static func resolveBrandHex(
         primaryColorHex: String?,
         name: String?,
         institutionID: String,
         image: UIImage?
     ) -> String? {
+        if let image, logoHasOpaqueCanvas(image), let sampled = sampleBackgroundHex(from: image) {
+            return sampled
+        }
         if let hex = primaryColorHex?.trimmingCharacters(in: .whitespacesAndNewlines), !hex.isEmpty {
             return normalizedHex(hex)
         }
-        // Logo without Plaid color — match tile to the image itself.
         if let image, let sampled = sampleBackgroundHex(from: image) {
             return sampled
         }
@@ -205,107 +209,183 @@ enum InstitutionLogoCache {
         return brandFallbackHex(forInstitutionID: institutionID)
     }
 
+    /// True when corners are solid (Plaid / brand app-icon tiles with a baked background).
+    /// Those should full-bleed; transparent-mark logos should pad on brand color.
+    static func logoHasOpaqueCanvas(_ image: UIImage) -> Bool {
+        guard let sample = rasterSample(image, size: 24) else { return false }
+        let corners = [(0, 0), (23, 0), (0, 23), (23, 23), (12, 0), (12, 23), (0, 12), (23, 12)]
+        var opaque = 0
+        for (x, y) in corners {
+            if sample.alpha(x, y) > 0.85 { opaque += 1 }
+        }
+        return opaque >= 6
+    }
+
     /// Sample a logo PNG for a sensible tile background (#RRGGBB).
     /// Prefers opaque edge/corner colors (letterboxed marks); else a saturated
     /// average of non-white logo pixels (works for transparent-bg bank marks).
     static func sampleBackgroundHex(from image: UIImage) -> String? {
-        let target = 48
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = false
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: target, height: target), format: format)
-        let scaled = renderer.image { _ in
-            image.draw(in: CGRect(x: 0, y: 0, width: target, height: target))
+        guard let sample = rasterSample(image, size: 48) else { return nil }
+        return sample.backgroundHex()
+    }
+
+    // MARK: - Pixel sampling
+
+    private struct RasterSample {
+        let w: Int
+        let h: Int
+        let raw: [UInt8]
+
+        func alpha(_ x: Int, _ y: Int) -> CGFloat {
+            let o = (y * w + x) * 4
+            return CGFloat(raw[o + 3]) / 255
         }
-        guard let cg = scaled.cgImage else { return nil }
 
-        let w = cg.width
-        let h = cg.height
-        guard w > 0, h > 0 else { return nil }
-
-        let bytesPerPixel = 4
-        let bytesPerRow = bytesPerPixel * w
-        var raw = [UInt8](repeating: 0, count: h * bytesPerRow)
-        guard let ctx = CGContext(
-            data: &raw,
-            width: w,
-            height: h,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
-
-        func pixel(_ x: Int, _ y: Int) -> (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat) {
+        func rgba(_ x: Int, _ y: Int) -> (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat) {
             let o = (y * w + x) * 4
             let a = CGFloat(raw[o + 3]) / 255
-            // Un-premultiply for averaging
             let r = a > 0.01 ? CGFloat(raw[o]) / 255 / a : 0
             let g = a > 0.01 ? CGFloat(raw[o + 1]) / 255 / a : 0
             let b = a > 0.01 ? CGFloat(raw[o + 2]) / 255 / a : 0
             return (min(1, r), min(1, g), min(1, b), a)
         }
 
-        // 1) Opaque edge / corner samples → logo has a solid canvas
-        let edgePoints: [(Int, Int)] = [
-            (0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1),
-            (w / 2, 0), (w / 2, h - 1), (0, h / 2), (w - 1, h / 2),
-            (2, 2), (w - 3, 2), (2, h - 3), (w - 3, h - 3)
-        ]
-        var edgeR: CGFloat = 0, edgeG: CGFloat = 0, edgeB: CGFloat = 0
-        var edgeCount: CGFloat = 0
-        for (x, y) in edgePoints {
-            let p = pixel(max(0, min(w - 1, x)), max(0, min(h - 1, y)))
-            if p.a > 0.85 {
-                edgeR += p.r; edgeG += p.g; edgeB += p.b
-                edgeCount += 1
-            }
-        }
-        if edgeCount >= 3 {
-            return hexString(r: edgeR / edgeCount, g: edgeG / edgeCount, b: edgeB / edgeCount)
-        }
-
-        // 2) Transparent canvas — average saturated non-white opaque pixels (the mark itself)
-        var sumR: CGFloat = 0, sumG: CGFloat = 0, sumB: CGFloat = 0
-        var weight: CGFloat = 0
-        let step = max(1, min(w, h) / 16)
-        var y = 0
-        while y < h {
-            var x = 0
-            while x < w {
-                let p = pixel(x, y)
-                if p.a > 0.5 {
-                    let maxC = max(p.r, p.g, p.b)
-                    let minC = min(p.r, p.g, p.b)
-                    let sat = maxC > 0.01 ? (maxC - minC) / maxC : 0
-                    // Skip near-white / near-black marks for background pick
-                    let lum = 0.2126 * p.r + 0.7152 * p.g + 0.0722 * p.b
-                    if lum < 0.92, lum > 0.08 {
-                        let wgt = 0.35 + sat * 1.5
-                        sumR += p.r * wgt
-                        sumG += p.g * wgt
-                        sumB += p.b * wgt
-                        weight += wgt
-                    }
+        func backgroundHex() -> String? {
+            let w = self.w
+            let h = self.h
+            // 1) Opaque edge / corner samples → logo has a solid canvas
+            let edgePoints: [(Int, Int)] = [
+                (0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1),
+                (w / 2, 0), (w / 2, h - 1), (0, h / 2), (w - 1, h / 2),
+                (2, 2), (w - 3, 2), (2, h - 3), (w - 3, h - 3),
+                (4, 4), (w - 5, 4), (4, h - 5), (w - 5, h - 5)
+            ]
+            var edgeR: CGFloat = 0, edgeG: CGFloat = 0, edgeB: CGFloat = 0
+            var edgeCount: CGFloat = 0
+            for (x, y) in edgePoints {
+                let p = rgba(max(0, min(w - 1, x)), max(0, min(h - 1, y)))
+                if p.a > 0.85 {
+                    edgeR += p.r; edgeG += p.g; edgeB += p.b
+                    edgeCount += 1
                 }
-                x += step
             }
-            y += step
-        }
-        if weight > 0.01 {
-            return hexString(r: sumR / weight, g: sumG / weight, b: sumB / weight)
-        }
+            if edgeCount >= 3 {
+                return InstitutionLogoCache.hexString(
+                    r: edgeR / edgeCount, g: edgeG / edgeCount, b: edgeB / edgeCount
+                )
+            }
 
-        // 3) All-white mark on clear — soft neutral dark so white logos read
-        return "#2C2C2E"
+            // 2) Transparent canvas — average saturated non-white opaque pixels
+            var sumR: CGFloat = 0, sumG: CGFloat = 0, sumB: CGFloat = 0
+            var weight: CGFloat = 0
+            let step = max(1, min(w, h) / 16)
+            var y = 0
+            while y < h {
+                var x = 0
+                while x < w {
+                    let p = rgba(x, y)
+                    if p.a > 0.5 {
+                        let maxC = max(p.r, p.g, p.b)
+                        let minC = min(p.r, p.g, p.b)
+                        let sat = maxC > 0.01 ? (maxC - minC) / maxC : 0
+                        let lum = 0.2126 * p.r + 0.7152 * p.g + 0.0722 * p.b
+                        if lum < 0.92, lum > 0.08 {
+                            let wgt = 0.35 + sat * 1.5
+                            sumR += p.r * wgt
+                            sumG += p.g * wgt
+                            sumB += p.b * wgt
+                            weight += wgt
+                        }
+                    }
+                    x += step
+                }
+                y += step
+            }
+            if weight > 0.01 {
+                return InstitutionLogoCache.hexString(
+                    r: sumR / weight, g: sumG / weight, b: sumB / weight
+                )
+            }
+            return "#2C2C2E"
+        }
     }
 
-    private static func hexString(r: CGFloat, g: CGFloat, b: CGFloat) -> String {
+    private static func rasterSample(_ image: UIImage, size: Int) -> RasterSample? {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size), format: format)
+        let scaled = renderer.image { _ in
+            image.draw(in: CGRect(x: 0, y: 0, width: size, height: size))
+        }
+        guard let cg = scaled.cgImage else { return nil }
+        let w = cg.width
+        let h = cg.height
+        guard w > 0, h > 0 else { return nil }
+        var raw = [UInt8](repeating: 0, count: h * w * 4)
+        guard let ctx = CGContext(
+            data: &raw,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return RasterSample(w: w, h: h, raw: raw)
+    }
+
+    fileprivate static func hexString(r: CGFloat, g: CGFloat, b: CGFloat) -> String {
         let ri = Int((r * 255).rounded())
         let gi = Int((g * 255).rounded())
         let bi = Int((b * 255).rounded())
         return String(format: "#%02X%02X%02X", max(0, min(255, ri)), max(0, min(255, gi)), max(0, min(255, bi)))
+    }
+
+    /// Write brand color only when it changes (avoids refresh loops from BankIcon).
+    static func persistBrandColorIfNeeded(
+        institutionID: String?,
+        name: String?,
+        hex: String
+    ) {
+        let id = (institutionID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let nhex = normalizedHex(hex)
+        let defaults = UserDefaults.standard
+        var changed = false
+        if !id.isEmpty {
+            let existing = defaults.string(forKey: colorPrefix + id)
+            if existing?.caseInsensitiveCompare(nhex) != .orderedSame {
+                defaults.set(nhex, forKey: colorPrefix + id)
+                changed = true
+            }
+        }
+        if let name, !name.isEmpty {
+            let key = colorPrefix + "name:" + name.lowercased()
+            if defaults.string(forKey: key)?.caseInsensitiveCompare(nhex) != .orderedSame {
+                defaults.set(nhex, forKey: key)
+                changed = true
+            }
+            for alias in nameAliases(for: name) {
+                let akey = colorPrefix + "name:" + alias
+                if defaults.string(forKey: akey)?.caseInsensitiveCompare(nhex) != .orderedSame {
+                    defaults.set(nhex, forKey: akey)
+                    changed = true
+                }
+                if !id.isEmpty {
+                    defaults.set(id, forKey: "plaid.aliasId." + alias)
+                }
+            }
+        }
+        if changed, !id.isEmpty {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .institutionLogoDidUpdate,
+                    object: nil,
+                    userInfo: ["institutionID": id, "name": name as Any]
+                )
+            }
+        }
     }
 
     // MARK: - Read

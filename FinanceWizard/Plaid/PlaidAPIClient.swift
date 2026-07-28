@@ -102,15 +102,17 @@ enum PlaidAPIClient {
             }
         }
 
-        // Only send redirect_uri when it is a real http(s) URI allowlisted in the Dashboard.
-        // Custom schemes belong in completion_redirect_uri, not redirect_uri.
+        // When hosted_link.is_mobile_app is true, Plaid requires BOTH redirect_uri and
+        // hosted_link.completion_redirect_uri. Prefer an https OAuth URI if configured;
+        // otherwise use the same custom-scheme completion URI for both.
+        let completionURI = PlaidHostedLink.completionRedirectURI
         let redirect = PlaidCredentialsStore.redirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
-        let oauthRedirect: String? = {
-            guard !redirect.isEmpty else { return nil }
-            if redirect.hasPrefix("http://") || redirect.hasPrefix("https://") {
+        let oauthRedirect: String = {
+            if !redirect.isEmpty,
+               redirect.hasPrefix("http://") || redirect.hasPrefix("https://") {
                 return redirect
             }
-            return nil
+            return completionURI
         }()
 
         let body = Body(
@@ -126,7 +128,7 @@ enum PlaidAPIClient {
             redirect_uri: oauthRedirect,
             hosted_link: .init(
                 is_mobile_app: true,
-                completion_redirect_uri: PlaidHostedLink.completionRedirectURI,
+                completion_redirect_uri: completionURI,
                 url_lifetime_seconds: 1800
             )
         )
