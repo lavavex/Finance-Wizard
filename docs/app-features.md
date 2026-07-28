@@ -5,6 +5,8 @@ title: App features
 
 # App features
 
+> **UI copy policy:** In-app text is for the person using Finance Wizard. Implementation notes (Plaid endpoints, dual category systems, Sync locks, Hosted Link URIs) live in this docs site and in code comments — not in section footers.
+
 ## Tab: Transactions
 
 Main list of expenses with filters shared conceptually with the widget.

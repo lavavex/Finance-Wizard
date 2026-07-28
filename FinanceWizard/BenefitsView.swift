@@ -116,8 +116,6 @@ struct BenefitsView: View {
                     .padding(.vertical, 4)
                 } header: {
                     Text("Overview")
-                } footer: {
-                    Text("Estimates use each card’s product rates. Fee payback annualizes this period’s rewards minus annual fees. Unmatched Ultimate Rewards cards need a product pick once.")
                 }
 
                 if let productToast {
@@ -146,7 +144,7 @@ struct BenefitsView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(row.displayName)
                                             .font(.body.weight(.semibold))
-                                        Text("Choose product to name this card and load earn rates")
+                                        Text("Choose which card this is")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -166,7 +164,7 @@ struct BenefitsView: View {
                         ContentUnavailableView {
                             Label("No card spend", systemImage: "gift")
                         } description: {
-                            Text("Link credit cards from Transactions → Sync → Link bank account, or import Apple Card CSV. Then open a card here and choose a product.")
+                            Text("Link a bank in Settings and Sync, or import an Apple Card CSV.")
                         } actions: {
                             Button("Apply known product rates") {
                                 applyCatalogDefaults()
@@ -202,7 +200,7 @@ struct BenefitsView: View {
                         Label("Apply known product rates", systemImage: "sparkles")
                     }
                 } footer: {
-                    Text("Fills rates for Prime Visa, Blue Cash Everyday, Apple Card, X Money, and any other product we can match. Does not overwrite cards you’ve already saved.")
+                    Text("Fills rates for cards we recognize. Won’t change cards you’ve already set up.")
                 }
             }
             .navigationTitle("Benefits")
@@ -295,7 +293,7 @@ private struct BenefitsCardRow: View {
             }
 
             if summary.profile.productKey == nil {
-                Text("Pick a card product to load rates")
+                Text("Choose a card type")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.orange)
             }
@@ -473,10 +471,6 @@ struct CardBenefitsDetailView: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Text("This period")
-            } footer: {
-                if profile.annualFee != nil {
-                    Text("Fee payback annualizes this period’s rewards (week × 52, month × 12) and subtracts the annual fee.")
-                }
             }
 
             // MARK: Category breakdown (from actual spend)
@@ -506,16 +500,14 @@ struct CardBenefitsDetailView: View {
                         }
                     }
                 } header: {
-                    Text("By reward category · \(periodLabel)")
-                } footer: {
-                    Text("Spend is mapped from general transaction categories into reward categories (e.g. CVS → Drugstores, not Personal Care).")
+                    Text("By category · \(periodLabel)")
                 }
             }
 
             // MARK: Product preset
             Section {
                 if profile.productKey == nil {
-                    Text("No product yet — pick one to rename the card to “[product] [last 4]” and load earn rates.")
+                    Text("Pick your card so we can load the right earn rates.")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -538,20 +530,18 @@ struct CardBenefitsDetailView: View {
                     }
                 } label: {
                     Label(
-                        profile.productKey == nil ? "Choose card product…" : "Change product…",
+                        profile.productKey == nil ? "Choose card…" : "Change card…",
                         systemImage: "creditcard.and.123"
                     )
                 }
 
                 if needsProductPick {
-                    Text("This account looks like Chase Ultimate Rewards but isn’t matched yet. Pick Freedom Unlimited, Flex, Sapphire Preferred, or Reserve.")
+                    Text("This looks like a Chase Ultimate Rewards card — pick Freedom Unlimited, Flex, Sapphire Preferred, or Reserve.")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             } header: {
-                Text("Card product")
-            } footer: {
-                Text("Loads public earn rates (Chase, Amex, Apple Card, X Money). Renames the card to product + last four. Caps and portal-only bonuses are approximate — use temporary boosts below for rotating categories.")
+                Text("Card")
             }
 
             // MARK: Temporary / rotating boosts
@@ -615,10 +605,6 @@ struct CardBenefitsDetailView: View {
                 }
             } header: {
                 Text("Earn rates")
-            } footer: {
-                Text(profile.rewardKind == .points
-                     ? "Default is Everything Else (all non-boost spend). Example: 1.5x base, Dining 3x — not 1.5x on every category row."
-                     : "Default cash back is Everything Else (percent, e.g. 2 = 2%). Boosts only list categories that differ from that base.")
             }
 
             // MARK: Reward categories editor (not general Transaction categories)
@@ -663,9 +649,7 @@ struct CardBenefitsDetailView: View {
                     }
                 }
             } header: {
-                Text("Reward categories")
-            } footer: {
-                Text("Default cash back lives under Everything Else. Partner earn is by merchant name (e.g. Walgreens 3%, Amazon.com 5%) — not a whole category. Category boosts (Dining, Gas) are only for true category-wide rates. Turn on “Show all” to edit every reward category.")
+                Text("Categories & partners")
             }
 
             // MARK: Perks
@@ -699,8 +683,6 @@ struct CardBenefitsDetailView: View {
                     .disabled(newBenefitTitle.trimmingCharacters(in: .whitespaces).isEmpty)
             } header: {
                 Text("Perks & benefits")
-            } footer: {
-                Text("Non-earn perks: lounge access, credits, insurance, etc.")
             }
 
             Section {
@@ -720,7 +702,7 @@ struct CardBenefitsDetailView: View {
                 }
                 .fontWeight(.semibold)
                 if didSave {
-                    Label("Saved — re-Sync to refresh unlocked purchase rates", systemImage: "checkmark.circle.fill")
+                    Label("Saved", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .font(.caption)
                 }
@@ -828,10 +810,10 @@ struct CardBenefitsDetailView: View {
 
     private func categoryEditorHint(for row: CategoryEarnRate) -> String? {
         if row.category == RewardCategory.everythingElse.rawValue {
-            return "Base rate for spend that isn’t a merchant partner or category boost (e.g. Apple Card 2%)."
+            return "Base rate for everything without a boost."
         }
         if RewardCategory.canonicalName(for: row.category) == nil {
-            return "Merchant partner — matches purchase titles containing “\(row.category.lowercased())”."
+            return "Partner rate for this merchant."
         }
         return RewardCategory.allCases.first { $0.rawValue == row.category }?.editorHint
     }
@@ -1007,7 +989,7 @@ private struct TemporaryBoostsEditorSection: View {
     var body: some View {
         Section {
             if boosts.isEmpty {
-                Text("No rotating boosts. Add Freedom Flex–style quarterly categories or promo windows.")
+                Text("No temporary boosts yet.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -1039,13 +1021,11 @@ private struct TemporaryBoostsEditorSection: View {
             if tempHasEndDate {
                 DatePicker("Active through", selection: $tempThrough, displayedComponents: .date)
             }
-            TextField("Note (e.g. Q2 Freedom Flex)", text: $tempNote)
+            TextField("Note (optional)", text: $tempNote)
             Button("Add temporary boost", action: onAdd)
                 .disabled(tempRateText.trimmingCharacters(in: .whitespaces).isEmpty)
         } header: {
             Text("Temporary boosts")
-        } footer: {
-            Text("When active, these rates beat the static category table for that day (used in estimates and Sync). Good for rotating 5% categories.")
         }
     }
 }

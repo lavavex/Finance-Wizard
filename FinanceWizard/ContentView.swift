@@ -929,7 +929,7 @@ struct IncomeDetailView: View {
                     }
                 }
                 if let pfc = income.pfc, !pfc.isEmpty {
-                    LabeledContent("Plaid category") {
+                    LabeledContent("Bank category") {
                         Text(pfc)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -943,11 +943,6 @@ struct IncomeDetailView: View {
                 }
             }
 
-            Section {
-                Text("Income is separate from expenses and is not included in Total Spend or category charts. Pulled from Plaid when amount is money-in.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
         .navigationTitle("Income")
         .navigationBarTitleDisplayMode(.inline)

@@ -73,9 +73,9 @@ struct SettingsView: View {
                             .foregroundStyle(.green)
                     }
                 } header: {
-                    Text("Plaid developer account")
+                    Text("Plaid account")
                 } footer: {
-                    Text("Keys: dashboard.plaid.com → Developers → Keys. Link uses Plaid Hosted Link (secure browser) and returns via \(PlaidHostedLink.completionRedirectURI). Secrets stay on this device (Keychain).")
+                    Text("Get keys from the Plaid Dashboard. They’re stored only on this device.")
                 }
 
                 // MARK: Linked banks
@@ -124,7 +124,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Linked banks")
                 } footer: {
-                    Text("Link uses Plaid Hosted Link with your own API keys (transactions + credit details when supported). After linking, Sync on Transactions. Re-link older banks once if credit APR/due dates are missing.")
+                    Text("After linking, use Sync on Transactions. Re-link a bank if credit details are missing.")
                 }
 
                 // MARK: Sync info
@@ -141,15 +141,8 @@ struct SettingsView: View {
                         Text("\(linkedItems.count)")
                             .foregroundStyle(.secondary)
                     }
-                    LabeledContent("API host") {
-                        Text(PlaidCredentialsStore.environment.baseURL.host() ?? "—")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 } header: {
                     Text("Status")
-                } footer: {
-                    Text("Sync on the Transactions tab calls Plaid /transactions/sync for each linked bank and stores results in SwiftData (App Group) for the widgets.")
                 }
 
                 if let statusMessage {
@@ -189,8 +182,6 @@ struct SettingsView: View {
                     .disabled(isExportingDebug)
                 } header: {
                     Text("About")
-                } footer: {
-                    Text("Version \(AppBuildInfo.versionBuildLabel). Debug export is a local zip (no Plaid secrets).")
                 }
             }
             .navigationTitle("Settings")
@@ -226,7 +217,7 @@ struct SettingsView: View {
                     itemPendingDelete = nil
                 }
             } message: {
-                Text("Removes the access token from this device. Optionally also remove the Item from Plaid.")
+                Text("Unlinks this bank from Finance Wizard. You can also remove it from your Plaid account.")
             }
             .confirmationDialog(
                 "Export debug data?",
@@ -238,7 +229,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Includes transaction titles, amounts, and account masks. Excludes Plaid secrets and access tokens.")
+                Text("Shares a local copy of your data for troubleshooting. Secrets and bank login tokens are not included.")
             }
             .sheet(isPresented: $showDebugShare, onDismiss: {
                 debugExportURL = nil
@@ -364,8 +355,6 @@ struct AboutBuildView: View {
                 }
             } header: {
                 Text("Release")
-            } footer: {
-                Text("These come from the installed app’s Info.plist. Xcode Cloud sets them from the target’s Version (MARKETING_VERSION) and Build (CURRENT_PROJECT_VERSION) when it archives.")
             }
 
             Section("Identifiers") {

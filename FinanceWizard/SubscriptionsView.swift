@@ -37,16 +37,12 @@ struct SubscriptionsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
-            } footer: {
-                Text("Fixed amounts on a regular schedule. Monthly/weekly with no charge in 3+ months are treated as cancelled. Mark a purchase as Yearly on its transaction detail for annual bills. Shopping and dining are ignored.")
-            }
-
             Section {
                 if candidates.isEmpty {
                     ContentUnavailableView(
                         "No active subscriptions",
                         systemImage: "repeat.circle",
-                        description: Text("Looking for memberships and fixed bills. Stale monthly charges (3+ months) are hidden. Open a yearly bill and mark it as a Yearly subscription.")
+                        description: Text("Recurring charges show up here. Mark a yearly bill on the transaction if it’s missing.")
                     )
                     .listRowBackground(Color.clear)
                 } else {
@@ -137,11 +133,7 @@ private struct SubscriptionDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.green)
                 }
-            } footer: {
-                Text(candidate.cadence == .yearly
-                     ? "Yearly subs stay active for 15 months after the last charge. Monthly/weekly drop after 3 months without a charge."
-                     : "Monthly and weekly subscriptions drop from this list if they haven’t charged in 3+ months (treated as cancelled).")
-            }
+
 
             Section("Recent charges") {
                 ForEach(related.prefix(20)) { tx in

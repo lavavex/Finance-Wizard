@@ -26,14 +26,8 @@ struct ReviewQueueView: View {
     var body: some View {
         List {
             Section {
-                Text("Unlocked rates, ambiguous debit/ACH, bill-pay lookalikes, and weak categories. Open a row to fix; use quick actions for common bulk fixes.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
                 Picker("Show", selection: $filter) {
-                    Text("All reasons").tag(Optional<ReviewQueueReason>.none)
+                    Text("All").tag(Optional<ReviewQueueReason>.none)
                     ForEach(ReviewQueueReason.allCases) { reason in
                         Text(reason.title).tag(Optional(reason))
                     }
@@ -51,9 +45,9 @@ struct ReviewQueueView: View {
             Section {
                 if items.isEmpty {
                     ContentUnavailableView(
-                        "Queue clear",
+                        "All clear",
                         systemImage: "checkmark.seal",
-                        description: Text("Nothing flagged right now. Sync more history or widen the filters.")
+                        description: Text("Nothing needs review right now.")
                     )
                     .listRowBackground(Color.clear)
                 } else {
@@ -93,8 +87,6 @@ struct ReviewQueueView: View {
                 }
             } header: {
                 Text("\(items.count) to review")
-            } footer: {
-                Text("Swipe: Bill pay / Lock rate · Debit / ACH. “Lock rate” freezes the current multiplier so Sync won’t change it.")
             }
         }
         .navigationTitle("Needs review")
