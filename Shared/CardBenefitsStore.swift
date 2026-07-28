@@ -939,19 +939,22 @@ private extension CardBenefitsProfile {
 
 enum CardBenefitsStore {
     private static let key = "card.benefits.profiles.v1"
+    private static let migrationVersionKey = "card.benefits.migration.v"
+    private static let currentMigrationVersion = 4
+    /// In-memory profiles after migration — avoid re-migrating + disk I/O on every tile.
+    private static var memoryProfiles: [String: CardBenefitsProfile]?
+    private static let memoryLock = NSLock()
 
     static func profile(accountId: String?, paymentMethod: String?) -> CardBenefitsProfile {
+        ensureMigratedOnce()
+        let map = cachedProfiles()
         if let accountId, !accountId.isEmpty {
             let k = CardBenefitsProfile.accountKey(accountId)
-            if let p = load()[k] {
-                return loadMigrated(p)
-            }
+            if let p = map[k] { return p }
         }
         if let paymentMethod, !paymentMethod.isEmpty {
             let k = CardBenefitsProfile.methodKey(paymentMethod)
-            if let p = load()[k] {
-                return loadMigrated(p)
-            }
+            if let p = map[k] { return p }
         }
         let id: String = {
             if let accountId, !accountId.isEmpty {
@@ -965,13 +968,43 @@ enum CardBenefitsStore {
         return CardBenefitsProfile.empty(id: id)
     }
 
-    /// Persist migration so UI stops showing legacy keys (e.g. Personal Care for drugstores).
-    private static func loadMigrated(_ profile: CardBenefitsProfile) -> CardBenefitsProfile {
-        let migrated = migrateIfNeeded(profile)
-        if migrated != profile {
-            save(migrated)
+    private static func cachedProfiles() -> [String: CardBenefitsProfile] {
+        memoryLock.lock()
+        defer { memoryLock.unlock() }
+        if let memoryProfiles { return memoryProfiles }
+        let loaded = load()
+        memoryProfiles = loaded
+        return loaded
+    }
+
+    private static func invalidateMemoryCache() {
+        memoryLock.lock()
+        memoryProfiles = nil
+        memoryLock.unlock()
+    }
+
+    /// Run heavy migrateIfNeeded once per app version, not on every profile read.
+    private static func ensureMigratedOnce() {
+        let defaults = UserDefaults.standard
+        let v = defaults.integer(forKey: migrationVersionKey)
+        guard v < currentMigrationVersion else { return }
+
+        var map = load()
+        var changed = false
+        for (key, profile) in map {
+            let migrated = migrateIfNeeded(profile)
+            if migrated != profile {
+                map[key] = migrated
+                changed = true
+            }
         }
-        return migrated
+        if changed {
+            persist(map)
+        }
+        memoryLock.lock()
+        memoryProfiles = map
+        memoryLock.unlock()
+        defaults.set(currentMigrationVersion, forKey: migrationVersionKey)
     }
 
     /// Display name when a product is chosen: `"[Card name] [last 4]"`.
@@ -1150,15 +1183,19 @@ enum CardBenefitsStore {
     }
 
     static func save(_ profile: CardBenefitsProfile) {
-        var map = load()
+        var map = cachedProfiles()
         var cleaned = profile
         cleaned.compactRatesMatchingDefault()
         map[cleaned.id] = cleaned
         persist(map)
+        memoryLock.lock()
+        memoryProfiles = map
+        memoryLock.unlock()
     }
 
     static func allProfiles() -> [CardBenefitsProfile] {
-        load().values.map { migrateIfNeeded($0) }
+        ensureMigratedOnce()
+        return Array(cachedProfiles().values)
     }
 
     // MARK: - Migration

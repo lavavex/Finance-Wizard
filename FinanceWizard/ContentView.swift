@@ -123,6 +123,9 @@ struct AllTransactionsView: View {
     // Cards hidden from the list (does not change Total Spend header)
     @State private var hiddenCards: Set<String> = []
     @State private var searchText: String = ""
+    /// Heavy scans (review queue / subscriptions) — not computed every body pass.
+    @State private var reviewCount: Int = 0
+    @State private var subscriptionMonthly: Double = 0
 
     // Rows for the list: period + hide cards + sort + search
     private var visibleTransactions: [Transaction] {
@@ -139,16 +142,6 @@ struct AllTransactionsView: View {
     // Period-only set (for totals — hide cards does not apply)
     private var periodTransactions: [Transaction] {
         TransactionAnalytics.inPeriod(transactions, period: period, referenceDate: referenceDate)
-    }
-
-    private var reviewCount: Int {
-        ReviewQueueAnalytics.count(in: transactions, accounts: bankAccounts)
-    }
-
-    private var subscriptionMonthly: Double {
-        SubscriptionAnalytics.totalMonthlyBurn(
-            SubscriptionAnalytics.detect(in: transactions)
-        )
     }
 
     // Income for the same period filter (never mixed into spend)
@@ -383,6 +376,10 @@ struct AllTransactionsView: View {
             }
             .task {
                 AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
+                refreshToolStats()
+            }
+            .onChange(of: transactions.count) { _, _ in
+                refreshToolStats()
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -646,6 +643,7 @@ struct AllTransactionsView: View {
                     detail: report.summary
                 )
                 isSyncing = false
+                refreshToolStats()
             }
         } catch {
             await MainActor.run {
@@ -656,6 +654,23 @@ struct AllTransactionsView: View {
                 )
                 isSyncing = false
                 importError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Review queue + subscription totals are expensive; refresh off the critical path.
+    @MainActor
+    private func refreshToolStats() {
+        let txs = transactions
+        let accounts = bankAccounts
+        Task.detached(priority: .utility) {
+            let review = ReviewQueueAnalytics.count(in: txs, accounts: accounts)
+            let subs = SubscriptionAnalytics.totalMonthlyBurn(
+                SubscriptionAnalytics.detect(in: txs)
+            )
+            await MainActor.run {
+                reviewCount = review
+                subscriptionMonthly = subs
             }
         }
     }
