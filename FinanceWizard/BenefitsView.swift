@@ -646,7 +646,7 @@ struct CardBenefitsDetailView: View {
                 }
 
                 HStack {
-                    TextField("Custom reward category", text: $newCustomCategory)
+                    TextField("Merchant or category", text: $newCustomCategory)
                     TextField(profile.rewardKind == .points ? "3" : "3", text: $newCustomRate)
                         .keyboardType(.decimalPad)
                         .frame(width: 56)
@@ -665,7 +665,7 @@ struct CardBenefitsDetailView: View {
             } header: {
                 Text("Reward categories")
             } footer: {
-                Text("Default cash back / points live under Everything Else — not repeated on Dining, Shopping, etc. Only boosts that differ from the default are listed unless you turn on “Show all”. Drugstores ≠ Personal Care.")
+                Text("Default cash back lives under Everything Else. Partner earn is by merchant name (e.g. Walgreens 3%, Amazon.com 5%) — not a whole category. Category boosts (Dining, Gas) are only for true category-wide rates. Turn on “Show all” to edit every reward category.")
             }
 
             // MARK: Perks
@@ -828,9 +828,29 @@ struct CardBenefitsDetailView: View {
 
     private func categoryEditorHint(for row: CategoryEarnRate) -> String? {
         if row.category == RewardCategory.everythingElse.rawValue {
-            return "Base rate for spend that isn’t in a boost category (e.g. Apple Card 2%, X Money 3%)."
+            return "Base rate for spend that isn’t a merchant partner or category boost (e.g. Apple Card 2%)."
+        }
+        if RewardCategory.canonicalName(for: row.category) == nil {
+            return "Merchant partner — matches purchase titles containing “\(row.category.lowercased())”."
         }
         return RewardCategory.allCases.first { $0.rawValue == row.category }?.editorHint
+    }
+
+    private func addCustomCategory() {
+        let name = newCustomCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rateText = newCustomRate.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+        guard !name.isEmpty, let rate = Double(rateText), rate >= 0 else { return }
+        // Known reward categories → category map; anything else → merchant needle
+        profile.setRate(rate, forCategory: name)
+        rateDrafts[name] = formatRateDraft(rate)
+        // Merchant chips use display capitalization
+        if RewardCategory.canonicalName(for: name) == nil {
+            let label = CardBenefitsProfile.displayNameForMerchantNeedle(name.lowercased())
+            rateDrafts[label] = formatRateDraft(rate)
+        }
+        newCustomCategory = ""
+        newCustomRate = ""
     }
 
     private func formatRateDraft(_ value: Double) -> String {
@@ -874,18 +894,12 @@ struct CardBenefitsDetailView: View {
         }
         guard let value = Double(text), value >= 0 else { return }
         profile.setRate(value, forCategory: category)
-        rateDrafts[category] = formatRateDraft(profile.rate(forCategory: category))
-    }
-
-    private func addCustomCategory() {
-        let name = newCustomCategory.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rateText = newCustomRate.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: ",", with: ".")
-        guard !name.isEmpty, let rate = Double(rateText), rate >= 0 else { return }
-        profile.setRate(rate, forCategory: name)
-        rateDrafts[name] = formatRateDraft(rate)
-        newCustomCategory = ""
-        newCustomRate = ""
+        // Merchants aren't reward categories — keep the draft as entered.
+        if RewardCategory.canonicalName(for: category) != nil {
+            rateDrafts[category] = formatRateDraft(profile.rate(forCategory: category))
+        } else {
+            rateDrafts[category] = formatRateDraft(value)
+        }
     }
 
     private func addBenefit() {
