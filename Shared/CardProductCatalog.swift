@@ -372,15 +372,15 @@ enum CardProductCatalog {
             pointValueCents: 1,
             annualFee: 0,
             categoryRates: [
-                // Only rates *above* the 2% base need to be listed.
-                "Drugstores": 3, // Apple Pay partners (e.g. Walgreens) when applicable
-                "Amazon / Whole Foods": 3 // optional partner-style boost when titled as such
+                // Only rates *above* the 2% base. Amazon is NOT an Apple Card 3% partner
+                // (that’s Chase Prime Visa). Optional partner boost: drugstores ≈ Walgreens/etc.
+                "Drugstores": 3
             ],
             notes: """
-            Finance Wizard default: 2% cash back on all Apple Card purchases.
-            Higher reward categories (e.g. 3% partners) override the 2% base when they apply.
-            Official Apple Card also has 1% titanium / 3% select partners with Apple Pay —
-            lock individual transactions if you need the rare 1% swipe rate.
+            Finance Wizard default: 2% cash back on all Apple Card purchases (Everything Else).
+            Amazon / Whole Foods is 2% here — not 3% (Prime Visa is the Amazon 5%/3% card).
+            Optional Drugstores 3% stands in for select Apple Pay partners (e.g. Walgreens).
+            Official also has 1% titanium swipe; lock a txn if you need that exception.
             """,
             benefits: [
                 .init(title: "No annual fee", detail: "$0"),
