@@ -24,8 +24,13 @@ struct BankIconView: View {
     @State private var fullBleed = false
     @State private var tick: Int = 0
     @State private var didSample = false
+    @State private var loadGeneration = 0
 
     private var cornerRadius: CGFloat { size * 0.2237 }
+
+    private var nameCandidates: [String?] {
+        [institutionName, paymentMethod, displayName]
+    }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -64,18 +69,25 @@ struct BankIconView: View {
             .onAppear { refresh(requestFetch: true) }
             .onChange(of: institutionId) { _, _ in
                 didSample = false
+                logo = nil
                 refresh(requestFetch: true)
             }
             .onChange(of: institutionName) { _, _ in
                 didSample = false
+                logo = nil
                 refresh(requestFetch: true)
             }
             .onReceive(NotificationCenter.default.publisher(for: .institutionLogoDidUpdate)) { note in
                 let updatedID = note.userInfo?["institutionID"] as? String
                 if updatedID == nil || updatedID == institutionId || institutionId == nil {
-                    didSample = false
-                    refresh(requestFetch: false)
-                    tick &+= 1
+                    // Logos land in memory cache; re-bind without disk I/O on main.
+                    if let img = InstitutionLogoCache.memoryLogo(
+                        institutionID: institutionId,
+                        names: nameCandidates
+                    ) {
+                        applyLogo(img)
+                        tick &+= 1
+                    }
                 }
             }
             .id(tick)
@@ -93,58 +105,69 @@ struct BankIconView: View {
     }
 
     private func refresh(requestFetch: Bool) {
-        let resolved = InstitutionLogoCache.logoImage(institutionID: institutionId)
-            ?? InstitutionLogoCache.logoImage(institutionName: institutionName)
-            ?? InstitutionLogoCache.logoImage(institutionName: paymentMethod)
-            ?? InstitutionLogoCache.logoImage(institutionName: displayName)
-        logo = resolved
-
-        // Always prefer already-stored brand color (no pixel work).
-        var color = cachedBrandColor()
-        var bleed = prefersAppleFullBleed
-
-        if let resolved {
-            // Cheap: only sample when we have no stored color yet (or first paint after logo update).
-            let needsSample = !didSample && isPlaceholderGray(color)
-            if needsSample {
-                bleed = InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || prefersAppleFullBleed
-                if let hex = InstitutionLogoCache.sampleBackgroundHex(from: resolved),
-                   let sampled = Color(hex: hex) {
-                    color = sampled
-                    InstitutionLogoCache.persistBrandColorIfNeeded(
-                        institutionID: institutionId,
-                        name: institutionName ?? displayName ?? paymentMethod,
-                        hex: hex
-                    )
-                }
-                didSample = true
-            } else if !didSample {
-                // Have a stored color; still detect full-bleed once (cached after first call).
-                bleed = InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || prefersAppleFullBleed
-                didSample = true
-            } else {
-                // Subsequent refreshes: keep fullBleed state, or re-check cheap cached path
-                bleed = fullBleed || InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || prefersAppleFullBleed
-            }
-        } else {
-            didSample = false
-            bleed = false
-        }
-
-        brandColor = color
-        fullBleed = bleed
-
         monogram = InstitutionLogoCache.monogram(
             institutionID: institutionId,
             name: institutionName ?? displayName ?? paymentMethod
         )
+        brandColor = cachedBrandColor()
 
-        if logo == nil, requestFetch {
-            InstitutionLogoCache.ensureLogo(
-                institutionID: institutionId,
-                name: institutionName ?? displayName ?? paymentMethod
-            )
+        // Main-thread path: memory only (no disk / PNG decode while scrolling).
+        if let cached = InstitutionLogoCache.memoryLogo(
+            institutionID: institutionId,
+            names: nameCandidates
+        ) {
+            applyLogo(cached)
+            return
         }
+
+        guard requestFetch else { return }
+
+        loadGeneration &+= 1
+        let gen = loadGeneration
+        let id = institutionId
+        let names = nameCandidates
+
+        Task { @MainActor in
+            let img = await InstitutionLogoCache.loadLogo(institutionID: id, names: names)
+            guard gen == loadGeneration else { return }
+            if let img {
+                applyLogo(img)
+            } else {
+                logo = nil
+                didSample = false
+                fullBleed = false
+                InstitutionLogoCache.ensureLogo(
+                    institutionID: id,
+                    name: institutionName ?? displayName ?? paymentMethod
+                )
+            }
+        }
+    }
+
+    private func applyLogo(_ resolved: UIImage) {
+        logo = resolved
+        var color = cachedBrandColor()
+        var bleed = prefersAppleFullBleed
+
+        if !didSample {
+            bleed = InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || prefersAppleFullBleed
+            if isPlaceholderGray(color),
+               let hex = InstitutionLogoCache.sampleBackgroundHex(from: resolved),
+               let sampled = Color(hex: hex) {
+                color = sampled
+                InstitutionLogoCache.persistBrandColorIfNeeded(
+                    institutionID: institutionId,
+                    name: institutionName ?? displayName ?? paymentMethod,
+                    hex: hex
+                )
+            }
+            didSample = true
+        } else {
+            bleed = fullBleed || prefersAppleFullBleed
+        }
+
+        brandColor = color
+        fullBleed = bleed
     }
 
     private func cachedBrandColor() -> Color {
@@ -177,6 +200,7 @@ struct InstitutionLogoHeader: View {
     @State private var fullBleed = false
     @State private var tick: Int = 0
     @State private var didSample = false
+    @State private var loadGeneration = 0
 
     var body: some View {
         HStack(spacing: 16) {
@@ -232,59 +256,82 @@ struct InstitutionLogoHeader: View {
         .accessibilityElement(children: .combine)
         .onAppear { refresh(requestFetch: true) }
         .onReceive(NotificationCenter.default.publisher(for: .institutionLogoDidUpdate)) { _ in
-            didSample = false
-            refresh(requestFetch: false)
-            tick &+= 1
+            if let img = InstitutionLogoCache.memoryLogo(
+                institutionID: institutionId,
+                names: [institutionName, displayName]
+            ) {
+                applyLogo(img)
+                tick &+= 1
+            }
         }
         .id(tick)
     }
 
     private func refresh(requestFetch: Bool) {
-        let resolved = InstitutionLogoCache.logoImage(institutionID: institutionId)
-            ?? InstitutionLogoCache.logoImage(institutionName: institutionName)
-        logo = resolved
-
-        var color = InstitutionLogoCache.primaryColor(institutionID: institutionId)
-            ?? InstitutionLogoCache.primaryColor(institutionName: institutionName)
-            ?? Color(red: 0.22, green: 0.24, blue: 0.28)
-        var bleed = (institutionId == "local:apple-card")
-            || (institutionName?.localizedCaseInsensitiveContains("apple") == true)
-            || displayName.localizedCaseInsensitiveContains("apple")
-
-        if let resolved {
-            let ui = UIColor(color)
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            let isGray = ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-                && abs(r - 0.22) < 0.05 && abs(g - 0.24) < 0.05 && abs(b - 0.28) < 0.05
-            if !didSample {
-                bleed = InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || bleed
-                if isGray,
-                   let hex = InstitutionLogoCache.sampleBackgroundHex(from: resolved),
-                   let sampled = Color(hex: hex) {
-                    color = sampled
-                    InstitutionLogoCache.persistBrandColorIfNeeded(
-                        institutionID: institutionId,
-                        name: institutionName ?? displayName,
-                        hex: hex
-                    )
-                }
-                didSample = true
-            } else {
-                bleed = fullBleed || InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || bleed
-            }
-        } else {
-            didSample = false
-            bleed = false
-        }
-
-        brandColor = color
-        fullBleed = bleed
         monogram = InstitutionLogoCache.monogram(
             institutionID: institutionId,
             name: institutionName ?? displayName
         )
-        if logo == nil, requestFetch {
-            InstitutionLogoCache.ensureLogo(institutionID: institutionId, name: institutionName)
+        brandColor = InstitutionLogoCache.primaryColor(institutionID: institutionId)
+            ?? InstitutionLogoCache.primaryColor(institutionName: institutionName)
+            ?? Color(red: 0.22, green: 0.24, blue: 0.28)
+
+        if let cached = InstitutionLogoCache.memoryLogo(
+            institutionID: institutionId,
+            names: [institutionName, displayName]
+        ) {
+            applyLogo(cached)
+            return
         }
+
+        guard requestFetch else { return }
+
+        loadGeneration &+= 1
+        let gen = loadGeneration
+        let id = institutionId
+        let names: [String?] = [institutionName, displayName]
+
+        Task { @MainActor in
+            let img = await InstitutionLogoCache.loadLogo(institutionID: id, names: names)
+            guard gen == loadGeneration else { return }
+            if let img {
+                applyLogo(img)
+            } else {
+                InstitutionLogoCache.ensureLogo(institutionID: id, name: institutionName)
+            }
+        }
+    }
+
+    private func applyLogo(_ resolved: UIImage) {
+        logo = resolved
+        var color = brandColor
+        let appleBleed = (institutionId == "local:apple-card")
+            || (institutionName?.localizedCaseInsensitiveContains("apple") == true)
+            || displayName.localizedCaseInsensitiveContains("apple")
+        var bleed = appleBleed
+
+        if !didSample {
+            bleed = InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || appleBleed
+            let ui = UIColor(color)
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            let isGray = ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+                && abs(r - 0.22) < 0.05 && abs(g - 0.24) < 0.05 && abs(b - 0.28) < 0.05
+            if isGray,
+               let hex = InstitutionLogoCache.sampleBackgroundHex(from: resolved),
+               let sampled = Color(hex: hex) {
+                color = sampled
+                InstitutionLogoCache.persistBrandColorIfNeeded(
+                    institutionID: institutionId,
+                    name: institutionName ?? displayName,
+                    hex: hex
+                )
+            }
+            didSample = true
+        } else {
+            bleed = fullBleed || appleBleed
+        }
+
+        brandColor = color
+        fullBleed = bleed
     }
 }

@@ -379,10 +379,15 @@ struct AllTransactionsView: View {
             }
             .task {
                 AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
+                InstitutionLogoCache.warmMemory(accounts: bankAccounts)
+                InstitutionLogoCache.prefetch(accounts: bankAccounts)
                 refreshToolStats()
             }
             .onChange(of: transactions.count) { _, _ in
                 refreshToolStats()
+            }
+            .onChange(of: bankAccounts.count) { _, _ in
+                InstitutionLogoCache.warmMemory(accounts: bankAccounts)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -661,18 +666,30 @@ struct AllTransactionsView: View {
         }
     }
 
-    /// Review queue + subscription totals are expensive; refresh off the critical path.
-    /// Stay on the main actor (SwiftData models are not Sendable) but yield via Task
-    /// so list scrolling isn’t blocked by a synchronous body recompute.
+    /// Review queue + subscription totals are expensive; never run them in `body`.
+    /// Snapshot on the main actor, compute off-main, then publish results.
     @MainActor
     private func refreshToolStats() {
-        Task(priority: .utility) { @MainActor in
-            reviewCount = ReviewQueueAnalytics.count(
-                in: transactions,
-                accounts: bankAccounts
+        let txSnapshot = SubscriptionAnalytics.snapshots(from: transactions)
+        let txModels = transactions
+        let accounts = bankAccounts
+
+        Task.detached(priority: .utility) {
+            let burn = SubscriptionAnalytics.totalMonthlyBurn(
+                SubscriptionAnalytics.detect(snapshots: txSnapshot)
             )
-            subscriptionMonthly = SubscriptionAnalytics.totalMonthlyBurn(
-                SubscriptionAnalytics.detect(in: transactions)
+            await MainActor.run {
+                subscriptionMonthly = burn
+            }
+        }
+
+        // Review queue still needs live models (reasons attach to Transaction rows).
+        // Yield first so the current scroll frame can finish.
+        Task(priority: .utility) { @MainActor in
+            await Task.yield()
+            reviewCount = ReviewQueueAnalytics.count(
+                in: txModels,
+                accounts: accounts
             )
         }
     }
