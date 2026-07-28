@@ -133,7 +133,7 @@ private struct SubscriptionDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.green)
                 }
-
+            }
 
             Section("Recent charges") {
                 ForEach(related.prefix(20)) { tx in
