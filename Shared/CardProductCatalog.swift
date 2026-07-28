@@ -23,9 +23,8 @@ struct CardProductPreset: Identifiable, Hashable, Sendable {
     var annualFee: Double?
     /// Reward **category** → rate (Dining, Gas, …). Use only when the boost is really category-wide.
     var categoryRates: [String: Double]
-    /// Merchant **title needles** (lowercase) → rate. Use when the boost is only at specific merchants
-    /// (e.g. `"walgreens": 3`, `"amazon.com": 5`) — not a whole category.
-    var merchantRates: [String: Double]
+    /// Partner merchants: one display name, many title match needles (not a whole category).
+    var merchantBoosts: [MerchantBoostPartner]
     var notes: String
     var benefits: [CardBenefitItem]
     /// Match against Plaid officialName / name / institution (lowercase needles).
@@ -42,7 +41,7 @@ struct CardProductPreset: Identifiable, Hashable, Sendable {
         pointValueCents: Double,
         annualFee: Double?,
         categoryRates: [String: Double],
-        merchantRates: [String: Double] = [:],
+        merchantBoosts: [MerchantBoostPartner] = [],
         notes: String,
         benefits: [CardBenefitItem],
         matchNeedles: [String],
@@ -56,7 +55,7 @@ struct CardProductPreset: Identifiable, Hashable, Sendable {
         self.pointValueCents = pointValueCents
         self.annualFee = annualFee
         self.categoryRates = categoryRates
-        self.merchantRates = merchantRates
+        self.merchantBoosts = merchantBoosts
         self.notes = notes
         self.benefits = benefits
         self.matchNeedles = matchNeedles
@@ -232,20 +231,29 @@ enum CardProductCatalog {
                 "Gas": 2,
                 "Transit": 2
             ],
-            merchantRates: [
-                // 5% is merchant-specific — not “all Shopping”
-                "amazon.com": 5,
-                "amzn.com": 5,
-                "amazon fresh": 5,
-                "whole foods": 5,
-                "wholefoods": 5
+            merchantBoosts: [
+                MerchantBoostPartner(
+                    id: "amazon",
+                    displayName: "Amazon",
+                    matchNeedles: [
+                        "amazon.com", "amzn.com", "amzn", "amazon fresh",
+                        "amazon prime", "amazon marketplace", "amazon"
+                    ],
+                    rate: 5
+                ),
+                MerchantBoostPartner(
+                    id: "whole_foods",
+                    displayName: "Whole Foods",
+                    matchNeedles: ["whole foods", "wholefoods", "whole foods market"],
+                    rate: 5
+                )
             ],
             notes: """
             Source: maxrewards.com/credit-cards/prime-visa
             • 5% Amazon.com, Amazon Fresh, Whole Foods, Chase Travel (eligible Prime)
             • 2% gas stations, restaurants, local transit & commuting (incl. rideshare)
             • 1% all other · $0 AF · no foreign transaction fee
-            Amazon boost is merchant-matched (title contains amazon / whole foods), not category Shopping.
+            Amazon is one partner with multiple title matches (amazon.com, amzn.com, …).
             """,
             benefits: [
                 .init(title: "No annual fee", detail: "$0"),
@@ -274,14 +282,23 @@ enum CardProductCatalog {
                 "Dining": 2,
                 "Gas": 2
             ],
-            merchantRates: [
-                "amazon.com": 3,
-                "amzn.com": 3,
-                "amazon fresh": 3,
-                "whole foods": 3,
-                "wholefoods": 3
+            merchantBoosts: [
+                MerchantBoostPartner(
+                    id: "amazon",
+                    displayName: "Amazon",
+                    matchNeedles: [
+                        "amazon.com", "amzn.com", "amzn", "amazon fresh", "amazon"
+                    ],
+                    rate: 3
+                ),
+                MerchantBoostPartner(
+                    id: "whole_foods",
+                    displayName: "Whole Foods",
+                    matchNeedles: ["whole foods", "wholefoods"],
+                    rate: 3
+                )
             ],
-            notes: "Without Prime: 3% Amazon/Whole Foods/Chase Travel (Amazon is merchant-matched); 2% gas, restaurants; 1% other.",
+            notes: "Without Prime: 3% Amazon/Whole Foods/Chase Travel (Amazon is one partner, many title matches); 2% gas, restaurants; 1% other.",
             benefits: [
                 .init(title: "No annual fee", detail: "$0")
             ],
@@ -418,24 +435,55 @@ enum CardProductCatalog {
             pointValueCents: 1,
             annualFee: 0,
             categoryRates: [:], // partners are merchants, not “all Drugstores”
-            merchantRates: [
-                // Select Apple Pay partners (3%) — merchant title match, not whole categories.
-                "walgreens": 3,
-                "duane reade": 3,
-                "nike": 3,
-                "uber": 3, // Uber / Uber Eats
-                "panera": 3,
-                "exxon": 3,
-                "mobil": 3,
-                "ace hardware": 3,
-                "apple.com": 3,
-                "apple store": 3
+            merchantBoosts: [
+                // One partner chip each; needles cover title variants
+                MerchantBoostPartner(
+                    id: "walgreens",
+                    displayName: "Walgreens",
+                    matchNeedles: ["walgreens", "duane reade"],
+                    rate: 3
+                ),
+                MerchantBoostPartner(
+                    id: "nike",
+                    displayName: "Nike",
+                    matchNeedles: ["nike"],
+                    rate: 3
+                ),
+                MerchantBoostPartner(
+                    id: "uber",
+                    displayName: "Uber",
+                    matchNeedles: ["uber", "uber eats", "ubereats"],
+                    rate: 3
+                ),
+                MerchantBoostPartner(
+                    id: "panera",
+                    displayName: "Panera",
+                    matchNeedles: ["panera"],
+                    rate: 3
+                ),
+                MerchantBoostPartner(
+                    id: "exxon_mobil",
+                    displayName: "ExxonMobil",
+                    matchNeedles: ["exxon", "mobil", "exxonmobil"],
+                    rate: 3
+                ),
+                MerchantBoostPartner(
+                    id: "ace_hardware",
+                    displayName: "Ace Hardware",
+                    matchNeedles: ["ace hardware", "ace hdwe"],
+                    rate: 3
+                ),
+                MerchantBoostPartner(
+                    id: "apple",
+                    displayName: "Apple",
+                    matchNeedles: ["apple.com", "apple store", "apple.com/bill"],
+                    rate: 3
+                )
             ],
             notes: """
             Finance Wizard default: 2% Daily Cash (Everything Else).
-            3% only at listed partner merchants (title match) — not “Drugstores” or “Shopping”.
+            3% only at partner merchants (each partner has multiple title matches).
             Amazon is 2% on Apple Card (use Prime Visa for Amazon earn).
-            1% titanium swipe: lock individual transactions if needed.
             """,
             benefits: [
                 .init(title: "No annual fee", detail: "$0"),
@@ -532,14 +580,13 @@ enum CardProductCatalog {
         profile.categoryMultipliers = product.categoryRates.filter {
             abs($0.value - product.defaultRate) > 0.000_1
         }
-        profile.merchantMultipliers = product.merchantRates
-            .filter { abs($0.value - product.defaultRate) > 0.000_1 }
-            .reduce(into: [:]) { dict, pair in
-                dict[pair.key.lowercased()] = pair.value
-            }
-        if profile.merchantMultipliers?.isEmpty == true {
-            profile.merchantMultipliers = nil
+        profile.merchantBoosts = product.merchantBoosts.filter {
+            abs($0.rate - product.defaultRate) > 0.000_1
         }
+        if profile.merchantBoosts?.isEmpty == true {
+            profile.merchantBoosts = nil
+        }
+        profile.merchantMultipliers = nil
         profile.notes = product.notes
         profile.benefits = product.benefits
         profile.productKey = product.id
