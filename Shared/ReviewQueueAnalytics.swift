@@ -18,10 +18,10 @@ enum ReviewQueueReason: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .unlockedDefaultMultiplier: return "Unlocked rate"
-        case .ambiguousRail: return "Ambiguous rail"
+        case .unlockedDefaultMultiplier: return "Check rate"
+        case .ambiguousRail: return "Debit or transfer?"
         case .billPayCandidate: return "Bill pay?"
-        case .weakCategory: return "Weak category"
+        case .weakCategory: return "Category"
         }
     }
 
@@ -34,16 +34,17 @@ enum ReviewQueueReason: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Longer explanation for docs / code — not shown as primary UI copy.
     var shortHint: String {
         switch self {
         case .unlockedDefaultMultiplier:
-            return "Multiplier not locked; may still be a base rate"
+            return "Rewards rate not locked; Sync may overwrite"
         case .ambiguousRail:
-            return "Debit vs ACH unclear (affects X Money–style rewards)"
+            return "Debit vs ACH unclear (matters for debit cashback)"
         case .billPayCandidate:
-            return "Looks like a card payment but isn’t categorized as bill pay"
+            return "Looks like a card payment but isn’t bill pay"
         case .weakCategory:
-            return "Misc / empty / uncategorized — pick a better bucket"
+            return "Misc / empty / uncategorized"
         }
     }
 }

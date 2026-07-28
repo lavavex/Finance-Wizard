@@ -291,8 +291,6 @@ struct CardsView: View {
                     }
                 } header: {
                     Text("Overview")
-                } footer: {
-                    Text("Bill payments are under Total paid (not spend). Logos and credit terms come from Plaid. Pull down to Sync.")
                 }
 
                 if let syncBanner {
@@ -311,8 +309,6 @@ struct CardsView: View {
                         }
                     } header: {
                         Text("Upcoming bills")
-                    } footer: {
-                        Text("Min payment and due date from Plaid Liabilities when the bank provides them.")
                     }
                 }
 
@@ -322,7 +318,7 @@ struct CardsView: View {
                         ContentUnavailableView(
                             "No credit cards",
                             systemImage: "creditcard",
-                            description: Text("Link a bank from Transactions → Sync → Link bank account, then pull to sync.")
+                            description: Text("Link a bank in Settings, then Sync on Transactions.")
                         )
                         .listRowBackground(Color.clear)
                     } else {
@@ -346,8 +342,6 @@ struct CardsView: View {
                     }
                 } header: {
                     Text("Checking & savings")
-                } footer: {
-                    Text("Set debit vs ACH rewards on an account when cashback differs (e.g. 3% debit, 0% ACH).")
                 }
 
                 if !otherSpendRows.isEmpty {
@@ -357,8 +351,6 @@ struct CardsView: View {
                         }
                     } header: {
                         Text("Other spend")
-                    } footer: {
-                        Text("Payment methods that don’t match a linked account yet.")
                     }
                 }
             }
@@ -837,7 +829,7 @@ struct CardDetailView: View {
                 TextField("Display name", text: $nicknameDraft)
                     .textInputAutocapitalization(.words)
                 if let credit = creditAccount {
-                    LabeledContent("Plaid name") {
+                    LabeledContent("Bank name") {
                         Text(credit.plaidDisplayName)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
@@ -850,7 +842,7 @@ struct CardDetailView: View {
                         }
                     }
                 } else if let bank = bankAccount {
-                    LabeledContent("Plaid name") {
+                    LabeledContent("Bank name") {
                         Text(bank.plaidDisplayName)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
@@ -879,8 +871,6 @@ struct CardDetailView: View {
                 }
             } header: {
                 Text("Account name")
-            } footer: {
-                Text("Nicknames are per account (by last four). Multiple cards at the same bank stay separate.")
             }
 
             Section {
@@ -983,7 +973,7 @@ struct CardDetailView: View {
                     } header: {
                         Text("Debit vs ACH rewards")
                     } footer: {
-                        Text("Applied on Sync to unlocked purchases by rail. Example: X Money → Debit 0.03 (3% cashback), ACH 0. Use transaction detail to correct Debit vs ACH when Plaid is wrong.")
+                        Text("Cash back can differ for card purchases vs bank transfers. Edit a transaction if the type is wrong.")
                     }
                 }
             }
@@ -1059,10 +1049,8 @@ struct CardDetailView: View {
                 } header: {
                     Text("Credit details")
                 } footer: {
-                    if credit.liabilitiesSyncedAt != nil {
-                        Text("From Plaid Liabilities. Coverage varies by bank.")
-                    } else {
-                        Text("Sync after linking to load APR and due dates when the bank supports them.")
+                    if credit.liabilitiesSyncedAt == nil {
+                        Text("Sync after linking to load APR and due dates when available.")
                     }
                 }
             }

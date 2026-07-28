@@ -188,7 +188,7 @@ struct TransactionDetailView: View {
                     }
                 }
                 if let channel = transaction.plaidPaymentChannel, !channel.isEmpty {
-                    LabeledContent("Plaid channel") {
+                    LabeledContent("Payment channel") {
                         Text(channel)
                             .foregroundStyle(.secondary)
                     }
@@ -280,8 +280,6 @@ struct TransactionDetailView: View {
                 }
             } header: {
                 Text("Edit")
-            } footer: {
-                Text("General category drives charts; reward category drives Benefits rates (e.g. Personal Care → Drugstores). Travel: mark Portal vs Direct so Sapphire/portal rates apply. Save locks category, rail, reward bucket, and multiplier.")
             }
 
             Section {
@@ -290,23 +288,14 @@ struct TransactionDetailView: View {
                         Text(mode.label).tag(mode)
                     }
                 }
-                if subscriptionMode == .yearly {
-                    Text("Counts toward Subscriptions even as a one-off annual charge. Est. monthly burn = amount ÷ 12.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if subscriptionMode == .auto {
-                    Text("Auto-detect looks for fixed amounts on a regular schedule. Monthly subs with no charge in 3+ months are treated as cancelled.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             } header: {
                 Text("Subscriptions")
             } footer: {
-                Text("Use Yearly for annual bills (insurance, domains, software). Mark Not a subscription to hide a merchant from the list.")
+                Text("Mark yearly bills so they appear under Subscriptions.")
             }
 
             Section {
-                Toggle("Remember for this vendor (learn)", isOn: $learn)
+                Toggle("Remember for this vendor", isOn: $learn)
                 Toggle("Only same card/account", isOn: $scopePaymentMethod)
                     .disabled(applyToMatching)
                 Toggle("Apply to other matching transactions", isOn: $applyToMatching)
@@ -314,9 +303,7 @@ struct TransactionDetailView: View {
                         if isOn { scopePaymentMethod = true }
                     }
             } header: {
-                Text("Local rules")
-            } footer: {
-                Text("Learn stores a rule on this device for future Plaid rows. Apply to matching only updates other rows on the same card so points multipliers never copy across cards.")
+                Text("Remember")
             }
 
             Section("Points (estimate)") {
