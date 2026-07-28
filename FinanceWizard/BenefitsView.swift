@@ -632,7 +632,7 @@ struct CardBenefitsDetailView: View {
                 }
 
                 HStack {
-                    TextField("Merchant or category", text: $newCustomCategory)
+                    TextField("Dining or Amazon: amazon.com, amzn", text: $newCustomCategory)
                     TextField(profile.rewardKind == .points ? "3" : "3", text: $newCustomRate)
                         .keyboardType(.decimalPad)
                         .frame(width: 56)
@@ -823,13 +823,35 @@ struct CardBenefitsDetailView: View {
         let rateText = newCustomRate.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: ",", with: ".")
         guard !name.isEmpty, let rate = Double(rateText), rate >= 0 else { return }
-        // Known reward categories → category map; anything else → merchant needle
-        profile.setRate(rate, forCategory: name)
-        rateDrafts[name] = formatRateDraft(rate)
-        // Merchant chips use display capitalization
-        if RewardCategory.canonicalName(for: name) == nil {
-            let label = CardBenefitsProfile.displayNameForMerchantNeedle(name.lowercased())
+        // Known reward categories → category map; free text → merchant partner
+        // (use a comma-separated list of match needles after the name, e.g. "Amazon: amazon.com, amzn.com")
+        if RewardCategory.canonicalName(for: name) != nil {
+            profile.setRate(rate, forCategory: name)
+            rateDrafts[name] = formatRateDraft(rate)
+        } else if name.contains(":") {
+            let parts = name.split(separator: ":", maxSplits: 1).map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let label = parts[0]
+            let needles = (parts.count > 1 ? parts[1] : label)
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+            var list = profile.partnerBoosts
+            list.removeAll { $0.displayName.caseInsensitiveCompare(label) == .orderedSame }
+            list.append(
+                MerchantBoostPartner(
+                    id: label.lowercased().replacingOccurrences(of: " ", with: "_"),
+                    displayName: label,
+                    matchNeedles: needles.isEmpty ? [label.lowercased()] : needles,
+                    rate: rate
+                )
+            )
+            profile.partnerBoosts = list
             rateDrafts[label] = formatRateDraft(rate)
+        } else {
+            profile.setRate(rate, forCategory: name)
+            rateDrafts[name] = formatRateDraft(rate)
         }
         newCustomCategory = ""
         newCustomRate = ""
