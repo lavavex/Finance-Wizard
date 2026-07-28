@@ -31,11 +31,10 @@ struct FinanceWizardApp: App {
         InstitutionLogoCache.seedBundledLogos()
     }
 
-    // Root scene: one window showing ContentView, with SwiftData injected
+    // Root scene: splash → main tabs, with SwiftData injected
     var body: some Scene {
         WindowGroup {
-            // Main screen
-            ContentView()
+            RootWithSplash()
         }
         // Every view under this window can use @Query and modelContext
         .modelContainer(container)
