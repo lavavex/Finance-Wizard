@@ -16,6 +16,8 @@ struct FinanceWizardBundle: WidgetBundle {
         FinanceHomeWidget()
         // Spend by category charts (default horizontal bars)
         CategorySpendWidget()
+        // Checking & savings balances
+        BalancesWidget()
         // Template Control / Live Activity widgets are left out for now
     }
 }

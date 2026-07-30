@@ -70,6 +70,30 @@ struct CategorySpendSnapshot {
     let message: String?
 }
 
+// One checking/savings (or other cash) account for the balances widget
+struct DepositBalanceRow: Identifiable, Sendable {
+    var id: String { accountId }
+    let accountId: String
+    let displayName: String
+    let institutionName: String
+    let kind: DepositoryKind
+    /// Available when known, else ledger current balance
+    let balance: Double
+    let mask: String?
+}
+
+// Widget snapshot: cash on hand across depository accounts
+struct DepositBalancesSnapshot: Sendable {
+    let accounts: [DepositBalanceRow]
+    let totalBalance: Double
+    let checkingTotal: Double
+    let savingsTotal: Double
+    let otherTotal: Double
+    let lastSyncedAt: Date?
+    let isEmptyOrError: Bool
+    let message: String?
+}
+
 // Which calendar window totals use
 enum SnapshotPeriod: String, CaseIterable, Identifiable, Sendable {
     // Calendar week containing `referenceDate` (locale-aware week start → end)
@@ -692,6 +716,71 @@ enum SharedStore {
                 totalSpend: 0,
                 transactionCount: 0,
                 period: period,
+                isEmptyOrError: true,
+                message: "Store error"
+            )
+        }
+    }
+
+    /// Checking + savings (+ other depository) balances for the home-screen widget.
+    static func loadDepositBalancesSnapshot(accountLimit: Int = 12) -> DepositBalancesSnapshot {
+        do {
+            let container = try makeContainer()
+            let context = ModelContext(container)
+            let all = try context.fetch(FetchDescriptor<BankAccount>())
+            let deposit = all.filter(\.isDepository)
+
+            if deposit.isEmpty {
+                return DepositBalancesSnapshot(
+                    accounts: [],
+                    totalBalance: 0,
+                    checkingTotal: 0,
+                    savingsTotal: 0,
+                    otherTotal: 0,
+                    lastSyncedAt: nil,
+                    isEmptyOrError: true,
+                    message: "Link a bank in Settings, then Sync"
+                )
+            }
+
+            let rows: [DepositBalanceRow] = deposit
+                .map { account in
+                    DepositBalanceRow(
+                        accountId: account.accountId,
+                        displayName: account.displayName,
+                        institutionName: account.institutionName,
+                        kind: account.depositoryKind,
+                        balance: account.displayCashBalance,
+                        mask: account.mask
+                    )
+                }
+                // Highest balances first so the widget shows the important accounts
+                .sorted { $0.balance > $1.balance }
+
+            let limited = Array(rows.prefix(accountLimit))
+            let checking = rows.filter { $0.kind == .checking }.reduce(0.0) { $0 + $1.balance }
+            let savings = rows.filter { $0.kind == .savings }.reduce(0.0) { $0 + $1.balance }
+            let other = rows.filter { $0.kind == .other }.reduce(0.0) { $0 + $1.balance }
+            let lastSync = deposit.compactMap(\.lastSyncedAt).max()
+
+            return DepositBalancesSnapshot(
+                accounts: limited,
+                totalBalance: checking + savings + other,
+                checkingTotal: checking,
+                savingsTotal: savings,
+                otherTotal: other,
+                lastSyncedAt: lastSync,
+                isEmptyOrError: false,
+                message: nil
+            )
+        } catch {
+            return DepositBalancesSnapshot(
+                accounts: [],
+                totalBalance: 0,
+                checkingTotal: 0,
+                savingsTotal: 0,
+                otherTotal: 0,
+                lastSyncedAt: nil,
                 isEmptyOrError: true,
                 message: "Store error"
             )
