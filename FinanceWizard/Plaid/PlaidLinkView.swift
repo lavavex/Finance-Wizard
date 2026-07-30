@@ -15,8 +15,27 @@ enum PlaidHostedLink {
     static let completionRedirectURI = "financewizard://hosted-link-complete"
 }
 
+/// New Link vs update mode (re-auth / add accounts for an existing Item).
+enum PlaidLinkMode: Equatable {
+    case new
+    case update(PlaidLinkedItem)
+
+    var navigationTitle: String {
+        switch self {
+        case .new: return "Link bank"
+        case .update: return "Relink bank"
+        }
+    }
+
+    var existingItem: PlaidLinkedItem? {
+        if case .update(let item) = self { return item }
+        return nil
+    }
+}
+
 /// Sheet: create Hosted Link token → open secure browser session → poll for public_token → save Item.
 struct PlaidLinkSheet: View {
+    var mode: PlaidLinkMode = .new
     var onFinished: (Result<PlaidLinkedItem, Error>) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -36,11 +55,19 @@ struct PlaidLinkSheet: View {
             Group {
                 switch phase {
                 case .starting:
-                    ProgressView("Preparing Plaid Link…")
+                    ProgressView(
+                        mode.existingItem == nil
+                        ? "Preparing Plaid Link…"
+                        : "Preparing relink…"
+                    )
                 case .waitingForUser:
                     VStack(spacing: 16) {
                         ProgressView()
-                        Text("Complete bank login in the browser window.")
+                        Text(
+                            mode.existingItem == nil
+                            ? "Complete bank login in the browser window."
+                            : "Re-authenticate \(mode.existingItem?.institutionName ?? "your bank") in the browser. You can also select more accounts."
+                        )
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -51,17 +78,21 @@ struct PlaidLinkSheet: View {
                     }
                     .padding()
                 case .finishing:
-                    ProgressView("Saving linked bank…")
+                    ProgressView(
+                        mode.existingItem == nil
+                        ? "Saving linked bank…"
+                        : "Updating linked bank…"
+                    )
                 case .failed:
                     ContentUnavailableView(
-                        "Link failed",
+                        mode.existingItem == nil ? "Link failed" : "Relink failed",
                         systemImage: "exclamationmark.triangle",
                         description: Text(errorMessage ?? "Unknown error")
                     )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("Link bank")
+            .navigationTitle(mode.navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -80,7 +111,9 @@ struct PlaidLinkSheet: View {
     private func startHostedLink() async {
         phase = .starting
         do {
-            let session = try await PlaidAPIClient.createHostedLinkSession()
+            let session = try await PlaidAPIClient.createHostedLinkSession(
+                accessToken: mode.existingItem?.accessToken
+            )
             phase = .waitingForUser
 
             let controller = HostedLinkSessionController()
@@ -115,6 +148,26 @@ struct PlaidLinkSheet: View {
 
     private func completeWithSuccess(_ success: PlaidAPIClient.LinkSuccessPayload) async {
         do {
+            if let existing = mode.existingItem {
+                // Update mode: keep the same Item access token + sync cursor.
+                // Plaid does not require exchanging the public_token after a successful update.
+                let name = success.institutionName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let item = PlaidLinkedItem(
+                    id: existing.id,
+                    accessToken: existing.accessToken,
+                    institutionName: (name?.isEmpty == false ? name! : existing.institutionName),
+                    accountNames: success.accountNames.isEmpty
+                        ? existing.accountNames
+                        : success.accountNames,
+                    transactionsCursor: existing.transactionsCursor,
+                    linkedAt: existing.linkedAt
+                )
+                PlaidItemStore.upsert(item)
+                onFinished(.success(item))
+                dismiss()
+                return
+            }
+
             let exchanged = try await PlaidAPIClient.exchangePublicToken(success.publicToken)
             let item = PlaidLinkedItem(
                 id: exchanged.itemID,
