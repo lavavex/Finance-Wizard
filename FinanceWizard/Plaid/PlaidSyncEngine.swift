@@ -764,11 +764,42 @@ enum PlaidSyncEngine {
             count += 1
         }
 
+        // Drop local rows for this Item that Plaid no longer returns (deselected on Relink).
+        pruneAccounts(forItemId: item.id, keepingAccountIds: Set(details.map(\.account_id)), modelContext: modelContext)
+
         // Seed Benefits rates for newly recognized products (won't overwrite saved profiles)
         let allAccounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         _ = CardBenefitsStore.autoApplyKnownProducts(accounts: allAccounts)
 
         return count
+    }
+
+    /// Remove `BankAccount`s on this Item that are no longer linked at Plaid.
+    @MainActor
+    static func pruneAccounts(
+        forItemId itemId: String,
+        keepingAccountIds: Set<String>,
+        modelContext: ModelContext
+    ) {
+        let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        for account in all where account.itemId == itemId && !keepingAccountIds.contains(account.accountId) {
+            modelContext.delete(account)
+        }
+    }
+
+    /// After Relink / Link, refresh balances and drop accounts removed in Link.
+    @MainActor
+    static func reconcileItemAccounts(
+        item: PlaidLinkedItem,
+        modelContext: ModelContext
+    ) async throws -> Int {
+        let details = try await PlaidAPIClient.accountsGet(accessToken: item.accessToken)
+        let institutionId: String? = {
+            // Prefer existing institution id on any account for this item
+            let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+            return all.first(where: { $0.itemId == item.id })?.institutionId
+        }()
+        return upsertAccounts(details, item: item, institutionId: institutionId, modelContext: modelContext)
     }
 
     /// Merge `/liabilities/get` credit rows onto existing `BankAccount`s by account_id.

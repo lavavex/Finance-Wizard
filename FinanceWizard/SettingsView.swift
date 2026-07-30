@@ -18,8 +18,8 @@ struct SettingsView: View {
     @State private var redirectURI: String = ""
     @State private var didSave = false
     @State private var showSecret = false
-    @State private var showLinkSheet = false
-    @State private var linkMode: PlaidLinkMode = .new
+    /// Sheet payload so Relink always passes the correct Item (avoids stale `.new` mode).
+    @State private var linkSheetRequest: LinkSheetRequest?
     @State private var linkedItems: [PlaidLinkedItem] = []
     @State private var statusMessage: String?
     @State private var statusIsError = false
@@ -163,8 +163,7 @@ struct SettingsView: View {
                     }
 
                     Button {
-                        linkMode = .new
-                        showLinkSheet = true
+                        linkSheetRequest = LinkSheetRequest(mode: .new)
                     } label: {
                         Label("Link bank account", systemImage: "plus.circle.fill")
                     }
@@ -234,16 +233,18 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onAppear(perform: reload)
-            .sheet(isPresented: $showLinkSheet, onDismiss: reload) {
-                PlaidLinkSheet(mode: linkMode) { result in
+            .sheet(item: $linkSheetRequest, onDismiss: reload) { request in
+                PlaidLinkSheet(mode: request.mode) { result in
                     switch result {
                     case .success(let item):
                         statusIsError = false
-                        switch linkMode {
+                        switch request.mode {
                         case .new:
                             statusMessage = "Linked \(item.institutionName). Tap Sync on Transactions."
+                            Task { await reconcileAfterRelink(item) }
                         case .update:
-                            statusMessage = "Relinked \(item.institutionName). Tap Sync on Transactions to refresh."
+                            statusMessage = "Relinked \(item.institutionName). Refreshing accounts…"
+                            Task { await reconcileAfterRelink(item) }
                         }
                     case .failure(let error):
                         statusIsError = true
@@ -251,6 +252,16 @@ struct SettingsView: View {
                     }
                     reload()
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .plaidItemsReplaced)) { note in
+                let ids = (note.userInfo?["itemIds"] as? [String]) ?? []
+                guard !ids.isEmpty else { return }
+                let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+                for account in all where ids.contains(account.itemId) {
+                    modelContext.delete(account)
+                }
+                try? modelContext.save()
+                reload()
             }
             .confirmationDialog(
                 "Unlink \(itemPendingDelete?.institutionName ?? "bank")?",
@@ -351,8 +362,25 @@ struct SettingsView: View {
             statusMessage = "Add Plaid credentials before relinking."
             return
         }
-        linkMode = .update(item)
-        showLinkSheet = true
+        linkSheetRequest = LinkSheetRequest(mode: .update(item))
+    }
+
+    /// Pull live accounts after update-mode Link and drop deselected ones from SwiftData.
+    @MainActor
+    private func reconcileAfterRelink(_ item: PlaidLinkedItem) async {
+        do {
+            let n = try await PlaidSyncEngine.reconcileItemAccounts(
+                item: item,
+                modelContext: modelContext
+            )
+            try? modelContext.save()
+            statusIsError = false
+            statusMessage = "Relinked \(item.institutionName) · \(n) account(s). Tap Sync for transactions."
+            reload()
+        } catch {
+            statusIsError = true
+            statusMessage = "Relinked, but account refresh failed: \(error.localizedDescription). Tap Sync."
+        }
     }
 
     private func unlink(_ item: PlaidLinkedItem) {
@@ -360,6 +388,12 @@ struct SettingsView: View {
             // Best-effort remote remove
             try? await PlaidAPIClient.removeItem(accessToken: item.accessToken)
             await MainActor.run {
+                // Remove local bank rows for this Item so they don’t linger after unlink
+                let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+                for account in all where account.itemId == item.id {
+                    modelContext.delete(account)
+                }
+                try? modelContext.save()
                 PlaidItemStore.remove(itemID: item.id)
                 reload()
                 statusIsError = false
@@ -367,6 +401,13 @@ struct SettingsView: View {
             }
         }
     }
+}
+
+// MARK: - Link sheet request (stable mode capture)
+
+private struct LinkSheetRequest: Identifiable {
+    let id = UUID()
+    let mode: PlaidLinkMode
 }
 
 // MARK: - Build info (from Info.plist / Xcode versions)

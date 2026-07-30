@@ -15,6 +15,11 @@ enum PlaidHostedLink {
     static let completionRedirectURI = "financewizard://hosted-link-complete"
 }
 
+extension Notification.Name {
+    /// Posted when a new Link replaces an older Item for the same institution.
+    static let plaidItemsReplaced = Notification.Name("PlaidLink.plaidItemsReplaced")
+}
+
 /// New Link vs update mode (re-auth / add accounts for an existing Item).
 enum PlaidLinkMode: Equatable {
     case new
@@ -30,6 +35,12 @@ enum PlaidLinkMode: Equatable {
     var existingItem: PlaidLinkedItem? {
         if case .update(let item) = self { return item }
         return nil
+    }
+
+    /// True only for update mode with a non-empty access token.
+    var isUpdateMode: Bool {
+        guard let item = existingItem else { return false }
+        return !item.accessToken.isEmpty
     }
 }
 
@@ -111,8 +122,10 @@ struct PlaidLinkSheet: View {
     private func startHostedLink() async {
         phase = .starting
         do {
+            // Only pass access_token when truly updating — never open a “new Item” flow for Relink.
+            let accessTokenForUpdate = mode.isUpdateMode ? mode.existingItem?.accessToken : nil
             let session = try await PlaidAPIClient.createHostedLinkSession(
-                accessToken: mode.existingItem?.accessToken
+                accessToken: accessTokenForUpdate
             )
             phase = .waitingForUser
 
@@ -196,14 +209,24 @@ struct PlaidLinkSheet: View {
             if let existing = mode.existingItem {
                 // Update mode: keep the same Item access token + sync cursor.
                 // Plaid does not require exchanging the public_token after a successful update.
+                // Refresh account names from /accounts/get so deselected accounts drop out.
+                let liveNames = (try? await PlaidAPIClient.accountsGet(accessToken: existing.accessToken))
+                    .map { details in
+                        details.map { detail -> String in
+                            let name = detail.name ?? detail.official_name ?? existing.institutionName
+                            if let mask = detail.mask, !mask.isEmpty {
+                                return "\(name) ···\(mask)"
+                            }
+                            return name
+                        }
+                    } ?? success.accountNames
+
                 let name = success.institutionName?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let item = PlaidLinkedItem(
                     id: existing.id,
                     accessToken: existing.accessToken,
                     institutionName: (name?.isEmpty == false ? name! : existing.institutionName),
-                    accountNames: success.accountNames.isEmpty
-                        ? existing.accountNames
-                        : success.accountNames,
+                    accountNames: liveNames.isEmpty ? success.accountNames : liveNames,
                     transactionsCursor: existing.transactionsCursor,
                     linkedAt: existing.linkedAt
                 )
@@ -214,10 +237,32 @@ struct PlaidLinkSheet: View {
             }
 
             let exchanged = try await PlaidAPIClient.exchangePublicToken(success.publicToken)
+            let institutionName = success.institutionName ?? "Linked bank"
+
+            // If the user linked the same bank again as a *new* Item (instead of Relink),
+            // replace the previous Item so Settings doesn't stack duplicate connections.
+            let priorDuplicates = PlaidItemStore.loadItems().filter { old in
+                old.id != exchanged.itemID
+                    && old.institutionName.caseInsensitiveCompare(institutionName) == .orderedSame
+            }
+            let replacedItemIds = priorDuplicates.map(\.id)
+            for old in priorDuplicates {
+                try? await PlaidAPIClient.removeItem(accessToken: old.accessToken)
+                PlaidItemStore.remove(itemID: old.id)
+            }
+            // Notify host to drop orphaned local BankAccount rows for replaced Items
+            if !replacedItemIds.isEmpty {
+                NotificationCenter.default.post(
+                    name: .plaidItemsReplaced,
+                    object: nil,
+                    userInfo: ["itemIds": replacedItemIds]
+                )
+            }
+
             let item = PlaidLinkedItem(
                 id: exchanged.itemID,
                 accessToken: exchanged.accessToken,
-                institutionName: success.institutionName ?? "Linked bank",
+                institutionName: institutionName,
                 accountNames: success.accountNames,
                 transactionsCursor: "",
                 linkedAt: Date()
