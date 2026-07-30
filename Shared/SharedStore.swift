@@ -454,8 +454,12 @@ enum TransactionAnalytics {
             )
         }
 
-        let inPeriodRows = inPeriod(allTransactions, period: period, referenceDate: referenceDate)
-        let spendRows = spendOnly(inPeriodRows)
+        let index = PeriodSpendIndex.build(
+            transactions: allTransactions,
+            period: period,
+            referenceDate: referenceDate
+        )
+        let spendRows = index.spendTransactions
         if spendRows.isEmpty {
             return CategorySpendSnapshot(
                 categories: [],
@@ -535,11 +539,12 @@ enum TransactionAnalytics {
             )
         }
 
-        // Period only — used for the big total (ignores hide-card)
-        let inPeriodRows = inPeriod(allTransactions, period: period)
-        let spendRows = spendOnly(inPeriodRows)
+        let index = PeriodSpendIndex.build(
+            transactions: allTransactions,
+            period: period
+        )
 
-        if spendRows.isEmpty {
+        if index.spendTransactions.isEmpty {
             return FinanceSnapshot(
                 cards: [],
                 totalSpend: 0,
@@ -552,7 +557,7 @@ enum TransactionAnalytics {
         }
 
         let cards = cardSummaries(
-            from: spendRows,
+            from: index.spendTransactions,
             excludedCards: excludedCards,
             cardLimit: cardLimit
         )
@@ -560,9 +565,9 @@ enum TransactionAnalytics {
         return FinanceSnapshot(
             cards: cards,
             // Full period total — hide-card does not change this; bill payments excluded
-            totalSpend: totalSpend(in: spendRows),
-            balance: balance(in: spendRows),
-            transactionCount: spendRows.count,
+            totalSpend: index.totalSpend,
+            balance: index.spendBalance,
+            transactionCount: index.spendTransactions.count,
             period: period,
             isEmptyOrError: false,
             message: nil

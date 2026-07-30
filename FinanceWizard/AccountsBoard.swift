@@ -35,13 +35,12 @@ struct AccountsBoard {
         var board = AccountsBoard()
         let creditAccounts = accounts.filter(\.isCredit)
         let depositoryAccounts = accounts.filter(\.isDepository)
-        let periodTxs = TransactionAnalytics.inPeriod(
-            transactions,
+        let index = PeriodSpendIndex.build(
+            transactions: transactions,
             period: period,
             referenceDate: referenceDate
         )
-        let spendTxs = TransactionAnalytics.spendOnly(periodTxs)
-        board.periodTotalSpend = TransactionAnalytics.totalSpend(in: periodTxs)
+        board.periodTotalSpend = index.totalSpend
         board.periodPayments = CreditAnalytics.payments(
             in: payments,
             period: period,
@@ -73,31 +72,16 @@ struct AccountsBoard {
                 ($0.nextPaymentDueDate ?? .distantFuture) < ($1.nextPaymentDueDate ?? .distantFuture)
             }
 
-        // Index spend once: method → (spend, count)
-        var spendByMethod: [String: (spend: Double, count: Int)] = [:]
-        var allMethods = Set<String>()
-        for tx in transactions {
-            allMethods.insert(TransactionAnalytics.cardName(for: tx))
-        }
-        for tx in spendTxs {
-            let method = TransactionAnalytics.cardName(for: tx)
-            allMethods.insert(method)
-            var entry = spendByMethod[method] ?? (0, 0)
-            entry.spend += abs(tx.amount)
-            entry.count += 1
-            spendByMethod[method] = entry
-        }
-
+        let pool = index.allKnownMethods
         var claimed = Set<String>()
 
         // Credit rows
         for account in creditAccounts.sorted(by: {
             max(0, $0.currentBalance) > max(0, $1.currentBalance)
         }) {
-            let methods = methods(for: account, pool: allMethods)
+            let methods = account.matchingPaymentMethods(in: pool)
             for m in methods { claimed.insert(m) }
-            let spent = methods.reduce(0.0) { $0 + (spendByMethod[$1]?.spend ?? 0) }
-            let count = methods.reduce(0) { $0 + (spendByMethod[$1]?.count ?? 0) }
+            let totals = index.totals(for: methods)
             let primary = methods.sorted().first ?? account.plaidDisplayName
             let paid = CreditAnalytics.totalPaid(
                 in: paymentsMatching(
@@ -112,8 +96,8 @@ struct AccountsBoard {
                     displayName: account.displayName,
                     rawPaymentMethod: primary,
                     matchingPaymentMethods: methods,
-                    spent: spent,
-                    transactionCount: count,
+                    spent: totals.spend,
+                    transactionCount: totals.count,
                     creditAccount: account,
                     bankAccount: account,
                     paidInPeriod: paid
@@ -125,11 +109,10 @@ struct AccountsBoard {
         for account in depositoryAccounts.sorted(by: {
             ($0.availableBalance ?? $0.currentBalance) > ($1.availableBalance ?? $1.currentBalance)
         }) {
-            let methods = methods(for: account, pool: allMethods)
+            let methods = account.matchingPaymentMethods(in: pool)
             let own = methods.subtracting(claimed)
             for m in methods { claimed.insert(m) }
-            let spent = own.reduce(0.0) { $0 + (spendByMethod[$1]?.spend ?? 0) }
-            let count = own.reduce(0) { $0 + (spendByMethod[$1]?.count ?? 0) }
+            let totals = index.totals(for: own)
             let primary = methods.sorted().first ?? account.plaidDisplayName
             board.depositoryRows.append(
                 UnifiedCardRow(
@@ -137,8 +120,8 @@ struct AccountsBoard {
                     displayName: account.displayName,
                     rawPaymentMethod: primary,
                     matchingPaymentMethods: methods,
-                    spent: spent,
-                    transactionCount: count,
+                    spent: totals.spend,
+                    transactionCount: totals.count,
                     creditAccount: nil,
                     bankAccount: account,
                     paidInPeriod: 0
@@ -147,12 +130,12 @@ struct AccountsBoard {
         }
 
         // Orphan spend methods
-        let orphanMethods = spendByMethod.keys
+        let orphanMethods = index.spendByMethod.keys
             .filter { !claimed.contains($0) }
             .filter { !AppleCardAccount.isAppleCard(paymentMethod: $0) }
             .sorted()
         for method in orphanMethods {
-            let entry = spendByMethod[method] ?? (0, 0)
+            let entry = index.spendByMethod[method] ?? .init(spend: 0, count: 0)
             guard entry.spend > 0 || entry.count > 0 else { continue }
             board.otherSpendRows.append(
                 UnifiedCardRow(
@@ -170,15 +153,6 @@ struct AccountsBoard {
         }
 
         return board
-    }
-
-    private static func methods(for account: BankAccount, pool: Set<String>) -> Set<String> {
-        var methods = Set<String>()
-        for method in pool where account.matchesPaymentMethod(method) {
-            methods.insert(method)
-        }
-        methods.insert(account.plaidDisplayName)
-        return methods
     }
 
     static func paymentsMatching(
