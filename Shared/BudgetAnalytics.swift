@@ -37,7 +37,14 @@ struct BudgetSnapshot {
     let periodLabel: String
     let totalSpent: Double
     let monthlyLimit: Double?
+    /// Actual income deposited in the period (from synced Income rows).
     let income: Double
+    /// Planned income for the period from expected streams.
+    let expectedIncome: Double
+    /// Sum of stream monthly estimates (always monthly cadence).
+    let expectedMonthlyIncome: Double
+    /// Soonest next payday across streams (if any).
+    let nextPayday: Date?
     let categories: [BudgetCategoryProgress]
     let unbudgetedSpend: Double
     let transactionCount: Int
@@ -55,6 +62,18 @@ struct BudgetSnapshot {
     var isOverTotal: Bool {
         guard let monthlyLimit else { return false }
         return totalSpent > monthlyLimit + 0.005
+    }
+
+    /// Actual − expected for the period (positive = more income than planned).
+    var incomeVsExpected: Double? {
+        guard expectedIncome > 0.005 || !expectedMonthlyIncome.isZero else { return nil }
+        return income - expectedIncome
+    }
+
+    /// Spend headroom if using expected monthly income as the soft ceiling.
+    var expectedIncomeRemaining: Double? {
+        guard expectedMonthlyIncome > 0.005 else { return nil }
+        return expectedMonthlyIncome - totalSpent
     }
 
     /// Sum of category limits (for display).
@@ -128,6 +147,15 @@ enum BudgetAnalytics {
             in: IncomeAnalytics.inPeriod(incomeRows, period: period, referenceDate: referenceDate)
         )
 
+        let streams = plan.expectedIncomeStreams
+        let expectedInPeriod = streams.reduce(0.0) {
+            $0 + $1.expectedAmount(in: period, referenceDate: referenceDate)
+        }
+        let expectedMonthly = plan.expectedMonthlyIncome
+        let nextPayday = streams
+            .compactMap { $0.nextDate(from: Date()) }
+            .min()
+
         return BudgetSnapshot(
             period: period,
             referenceDate: referenceDate,
@@ -138,6 +166,9 @@ enum BudgetAnalytics {
                 return m
             }(),
             income: income,
+            expectedIncome: expectedInPeriod,
+            expectedMonthlyIncome: expectedMonthly,
+            nextPayday: nextPayday,
             categories: categories,
             unbudgetedSpend: unbudgeted,
             transactionCount: spendIndex.spendTransactions.count
