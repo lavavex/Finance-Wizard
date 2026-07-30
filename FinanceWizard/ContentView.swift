@@ -156,26 +156,24 @@ struct AllTransactionsView: View {
     /// Which week/month to show (any day in that period; months use month start).
     @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
     @State private var sort: TransactionSort = .dateNewest
-    // Cards hidden from the list (does not change Total Spend header)
-    @State private var hiddenCards: Set<String> = []
     @State private var searchText: String = ""
     /// Heavy scans (review queue / subscriptions) — not computed every body pass.
     @State private var reviewCount: Int = 0
     @State private var subscriptionMonthly: Double = 0
 
-    // Rows for the list: period + hide cards + sort + search
+    // Rows for the list: period + sort + search
     private var visibleTransactions: [Transaction] {
         let base = TransactionAnalytics.filter(
             transactions,
             period: period,
             referenceDate: referenceDate,
-            excludedCards: hiddenCards,
+            excludedCards: [],
             sort: sort
         )
         return TransactionSearch.filter(base, query: searchText, accounts: bankAccounts)
     }
 
-    // Period-only set (for totals — hide cards does not apply)
+    // Period-only set (for totals)
     private var periodTransactions: [Transaction] {
         TransactionAnalytics.inPeriod(transactions, period: period, referenceDate: referenceDate)
     }
@@ -212,11 +210,6 @@ struct AllTransactionsView: View {
     // Optional net: earned − spent for the same period
     private var periodNet: Double {
         totalIncome - totalSpend
-    }
-
-    // Cards available to hide (from full store, so you can hide even if not in period)
-    private var allCards: [String] {
-        TransactionAnalytics.paymentMethods(in: transactions)
     }
 
     var body: some View {
@@ -307,11 +300,6 @@ struct AllTransactionsView: View {
                     Text("\(periodTransactions.count) expenses · \(periodIncome.count) income in \(periodLabel.lowercased())")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if !hiddenCards.isEmpty {
-                        Text("Hiding \(hiddenCards.count) card(s) from the expense list only")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
                 Section {
@@ -471,34 +459,6 @@ struct AllTransactionsView: View {
                         Image(systemName: "arrow.up.arrow.down")
                     }
 
-                    // Hide cards from list only
-                    Menu {
-                        if allCards.isEmpty {
-                            Text("No cards yet — Sync first")
-                        } else {
-                            ForEach(allCards, id: \.self) { card in
-                                Button {
-                                    toggleHidden(card)
-                                } label: {
-                                    HStack {
-                                        Text(card)
-                                        if hiddenCards.contains(card) {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                            if !hiddenCards.isEmpty {
-                                Divider()
-                                Button("Show all cards", role: .destructive) {
-                                    hiddenCards.removeAll()
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "eye.slash")
-                    }
-
                     Menu {
                         Button {
                             importMode = .json
@@ -554,7 +514,7 @@ struct AllTransactionsView: View {
         if periodTransactions.isEmpty {
             return "No expenses in \(periodLabel.lowercased())."
         }
-        return "All cards in this period are hidden. Show some cards to see the list."
+        return "No expenses match your search."
     }
 
     private var incomeEmptyMessage: String {
@@ -562,14 +522,6 @@ struct AllTransactionsView: View {
             return "No income yet. Tap Sync after linking a bank."
         }
         return "No income in \(periodLabel.lowercased())."
-    }
-
-    private func toggleHidden(_ card: String) {
-        if hiddenCards.contains(card) {
-            hiddenCards.remove(card)
-        } else {
-            hiddenCards.insert(card)
-        }
     }
 
     // MARK: - Import / sync
