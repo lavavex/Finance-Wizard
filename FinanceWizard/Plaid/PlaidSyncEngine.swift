@@ -358,7 +358,7 @@ enum PlaidSyncEngine {
                     )
                 } else if code == "ADDITIONAL_CONSENT_REQUIRED" {
                     report.warnings.append(
-                        "\(item.institutionName): Relink required to consent to credit details (APR, due date)."
+                        "\(item.institutionName): Plaid needs your consent for credit details (ADDITIONAL_CONSENT_REQUIRED). Settings → Relink this bank, accept the data-sharing screen for liabilities, then Sync."
                     )
                 } else if softProductCodes.contains(code) {
                     report.warnings.append("\(item.institutionName) liabilities: \(message)")

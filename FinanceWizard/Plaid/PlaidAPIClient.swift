@@ -152,10 +152,13 @@ enum PlaidAPIClient {
         let useMobileAppHostedLink = httpsRedirect != nil
 
         let isUpdate = accessToken.map { !$0.isEmpty } ?? false
-        // Liabilities (APR / due dates) is a separate Plaid product. New Link initializes it
-        // when the institution supports it. Relink (update mode) must *add* it via `products`
-        // — otherwise old Items never gain credit details no matter how many times you Sync.
-        // See: Plaid “How do I add a product to an existing Item?”
+        // Liabilities (APR / due dates) needs explicit end-user consent (Data Transparency).
+        // Calling /liabilities/get without it → ADDITIONAL_CONSENT_REQUIRED / PRODUCT_LIABILITIES.
+        //
+        // • New Link: initialize with transactions + liabilities-if-supported.
+        // • Relink (update mode): do NOT put liabilities in `products` (only Assets/Income/etc.
+        //   use that path). Put it in `additional_consented_products` so Link collects consent.
+        //   Arrays must not overlap. See Plaid update mode → “Requesting additional consented products”.
         let body = Body(
             client_id: PlaidCredentialsStore.clientID,
             secret: PlaidCredentialsStore.secret,
@@ -163,9 +166,10 @@ enum PlaidAPIClient {
             language: "en",
             country_codes: ["US"],
             user: .init(client_user_id: userID),
-            products: isUpdate ? ["liabilities"] : ["transactions"],
+            products: isUpdate ? nil : ["transactions"],
             required_if_supported_products: isUpdate ? nil : ["liabilities"],
-            additional_consented_products: ["liabilities"],
+            // Relink only — new Link already covers liabilities via required_if_supported.
+            additional_consented_products: isUpdate ? ["liabilities"] : nil,
             transactions: isUpdate ? nil : .init(days_requested: 730),
             access_token: isUpdate ? accessToken : nil,
             update: isUpdate ? .init(account_selection_enabled: true) : nil,
