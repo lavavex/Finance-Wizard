@@ -848,13 +848,112 @@ enum PlaidSyncEngine {
         return removed
     }
 
-    /// Orphans + name/mask duplicates (safe to run on Sync / Settings / after Relink).
+    /// Orphans + account/tx duplicates (safe to run on Sync / Settings / after Relink).
     @MainActor
     @discardableResult
     static func cleanupStaleBankAccounts(modelContext: ModelContext) -> Int {
         let a = pruneOrphanBankAccounts(modelContext: modelContext)
         let b = dedupeBankAccounts(modelContext: modelContext)
-        return a + b
+        // Relink creates new Plaid transaction_ids for the same real-world spend;
+        // remove content duplicates left after the old Item was dropped.
+        let c = dedupeTransactions(modelContext: modelContext)
+        let d = dedupeIncome(modelContext: modelContext)
+        return a + b + c + d
+    }
+
+    /// Same calendar day + amount + title + soft payment method → keep one expense row.
+    @MainActor
+    @discardableResult
+    static func dedupeTransactions(modelContext: ModelContext) -> Int {
+        let all = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
+        guard all.count > 1 else { return 0 }
+
+        let cal = Calendar.current
+        let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        var groups: [String: [Transaction]] = [:]
+        groups.reserveCapacity(all.count)
+
+        for tx in all {
+            let day = cal.startOfDay(for: tx.date).timeIntervalSince1970
+            let amountKey = String(format: "%.2f", abs(tx.amount))
+            let titleKey = normalizeDedupeText(tx.title)
+            let methodKey = normalizePaymentMethodForDedupe(tx.paymentMethod)
+            let key = "\(day)|\(amountKey)|\(titleKey)|\(methodKey)"
+            groups[key, default: []].append(tx)
+        }
+
+        var removed = 0
+        for (_, var rows) in groups where rows.count > 1 {
+            rows.sort { a, b in
+                // Prefer user locks, then a payment method still matched to a live account
+                let aScore = transactionKeepScore(a, accounts: accounts)
+                let bScore = transactionKeepScore(b, accounts: accounts)
+                if aScore != bScore { return aScore > bScore }
+                return a.transactionId < b.transactionId
+            }
+            for drop in rows.dropFirst() {
+                modelContext.delete(drop)
+                removed += 1
+            }
+        }
+        return removed
+    }
+
+    /// Same day + amount + source (+ account mask when present) → keep one income row.
+    @MainActor
+    @discardableResult
+    static func dedupeIncome(modelContext: ModelContext) -> Int {
+        let all = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
+        guard all.count > 1 else { return 0 }
+
+        let cal = Calendar.current
+        var groups: [String: [Income]] = [:]
+        for row in all {
+            let day = cal.startOfDay(for: row.date).timeIntervalSince1970
+            let amountKey = String(format: "%.2f", abs(row.amount))
+            let sourceKey = normalizeDedupeText(row.source)
+            let maskKey = (row.accountMask ?? "").lowercased()
+            let key = "\(day)|\(amountKey)|\(sourceKey)|\(maskKey)"
+            groups[key, default: []].append(row)
+        }
+
+        var removed = 0
+        for (_, var rows) in groups where rows.count > 1 {
+            rows.sort { $0.transactionId < $1.transactionId }
+            for drop in rows.dropFirst() {
+                modelContext.delete(drop)
+                removed += 1
+            }
+        }
+        return removed
+    }
+
+    private static func transactionKeepScore(_ tx: Transaction, accounts: [BankAccount]) -> Int {
+        var score = 0
+        if tx.isCategoryLocked { score += 4 }
+        if tx.isMultiplierLocked { score += 2 }
+        if tx.isPaymentRailLocked { score += 1 }
+        if BankAccount.matching(paymentMethod: tx.paymentMethod, in: accounts) != nil {
+            score += 8
+        }
+        // Prefer non–Apple Card only when both are same method family (already grouped)
+        return score
+    }
+
+    private static func normalizeDedupeText(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    /// Collapse “X Money Checking ···1234” vs “X Money Checking” for fingerprinting.
+    private static func normalizePaymentMethodForDedupe(_ method: String) -> String {
+        var t = method.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        t = t.replacingOccurrences(of: #"···\d+"#, with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"\.{3}\d+"#, with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// After Relink / Link, refresh balances and drop accounts removed in Link.
