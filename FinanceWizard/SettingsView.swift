@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var clientID: String = ""
     @State private var secret: String = ""
     @State private var environment: PlaidEnvironment = .sandbox
+    @State private var redirectURI: String = ""
     @State private var didSave = false
     @State private var showSecret = false
     @State private var showLinkSheet = false
@@ -78,6 +79,13 @@ struct SettingsView: View {
                         }
                     }
 
+                    TextField("https://… OAuth redirect (optional)", text: $redirectURI)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.body.monospaced())
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+
                     Button("Save credentials") {
                         saveCredentials()
                     }
@@ -89,7 +97,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Plaid account")
                 } footer: {
-                    Text("Get keys from the Plaid Dashboard. They’re stored only on this device.")
+                    Text("Keys stay on this device. For Chase and other OAuth banks (and Relink), add an https redirect URI here and in the Plaid Dashboard → Allowed redirect URIs. Use a Universal Link if you have one. The app still finishes Link via financewizard://…")
                 }
 
                 // MARK: Linked banks
@@ -309,8 +317,9 @@ struct SettingsView: View {
         clientID = PlaidCredentialsStore.clientID
         secret = PlaidCredentialsStore.secret
         environment = PlaidCredentialsStore.environment
-        // Drop legacy localhost OAuth redirect (Hosted Link does not need it)
+        // Drop legacy localhost OAuth redirect (not a valid Plaid allowlist target)
         PlaidCredentialsStore.clearLegacyLocalhostRedirectIfNeeded()
+        redirectURI = PlaidCredentialsStore.redirectURI
         linkedItems = PlaidItemStore.loadItems()
     }
 
@@ -318,7 +327,15 @@ struct SettingsView: View {
         PlaidCredentialsStore.clientID = clientID
         PlaidCredentialsStore.secret = secret
         PlaidCredentialsStore.environment = environment
+        let trimmedRedirect = redirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedRedirect.isEmpty, !trimmedRedirect.lowercased().hasPrefix("https://") {
+            statusIsError = true
+            statusMessage = "OAuth redirect must start with https:// (Plaid does not allow custom schemes there)."
+            return
+        }
+        PlaidCredentialsStore.redirectURI = trimmedRedirect
         PlaidCredentialsStore.clearLegacyLocalhostRedirectIfNeeded()
+        redirectURI = PlaidCredentialsStore.redirectURI
         didSave = true
         statusIsError = false
         statusMessage = "Credentials saved on this device."

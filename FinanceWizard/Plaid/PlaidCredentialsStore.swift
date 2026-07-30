@@ -53,8 +53,11 @@ enum PlaidCredentialsStore {
         }
     }
 
-    /// Optional https redirect for rare Production app-to-app OAuth (not used by Hosted Link UI).
-    /// Hosted Link uses `financewizard://hosted-link-complete` instead.
+    /// Optional **https** OAuth redirect (Universal Link). Required by Plaid for many
+    /// banks (Chase, etc.) and for update/relink when OAuth is involved.
+    /// Must be allowlisted under Team Settings → API → Allowed redirect URIs.
+    /// Hosted Link still uses `financewizard://hosted-link-complete` as the
+    /// mobile *completion* URI (that one may be a custom scheme).
     static var redirectURI: String {
         get {
             let stored = UserDefaults.standard.string(forKey: redirectURIKey)?
@@ -67,8 +70,15 @@ enum PlaidCredentialsStore {
         }
     }
 
+    /// `redirect_uri` for `/link/token/create` — only an https URL, never a custom scheme.
+    static var httpsRedirectURI: String? {
+        let value = redirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.lowercased().hasPrefix("https://") else { return nil }
+        return value
+    }
+
     /// Removes old sample values like `https://localhost/plaid-oauth` left from early setup.
-    /// Those are not needed for Hosted Link and confuse Settings.
+    /// Localhost is not a valid production OAuth redirect and confuses Plaid.
     static func clearLegacyLocalhostRedirectIfNeeded() {
         let value = redirectURI.lowercased()
         guard !value.isEmpty else { return }

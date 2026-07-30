@@ -88,8 +88,20 @@ enum PlaidAPIClient {
 
             struct HostedLink: Encodable {
                 let is_mobile_app: Bool
-                let completion_redirect_uri: String
+                /// Custom scheme allowed only when `is_mobile_app` is true.
+                let completion_redirect_uri: String?
                 let url_lifetime_seconds: Int
+
+                enum CodingKeys: String, CodingKey {
+                    case is_mobile_app, completion_redirect_uri, url_lifetime_seconds
+                }
+
+                func encode(to encoder: Encoder) throws {
+                    var c = encoder.container(keyedBy: CodingKeys.self)
+                    try c.encode(is_mobile_app, forKey: .is_mobile_app)
+                    try c.encodeIfPresent(completion_redirect_uri, forKey: .completion_redirect_uri)
+                    try c.encode(url_lifetime_seconds, forKey: .url_lifetime_seconds)
+                }
             }
 
             enum CodingKeys: String, CodingKey {
@@ -119,18 +131,16 @@ enum PlaidAPIClient {
             }
         }
 
-        // When hosted_link.is_mobile_app is true, Plaid requires BOTH redirect_uri and
-        // hosted_link.completion_redirect_uri. Prefer an https OAuth URI if configured;
-        // otherwise use the same custom-scheme completion URI for both.
+        // redirect_uri (OAuth) MUST be https and allowlisted in the Plaid Dashboard.
+        // Never send a custom scheme there — Plaid rejects it with
+        // "redirect_uri must use HTTPS". Custom schemes belong only on
+        // hosted_link.completion_redirect_uri (closes ASWebAuthenticationSession).
         let completionURI = PlaidHostedLink.completionRedirectURI
-        let redirect = PlaidCredentialsStore.redirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
-        let oauthRedirect: String = {
-            if !redirect.isEmpty,
-               redirect.hasPrefix("http://") || redirect.hasPrefix("https://") {
-                return redirect
-            }
-            return completionURI
-        }()
+        let httpsRedirect = PlaidCredentialsStore.httpsRedirectURI
+        // Full mobile Hosted Link (app-to-app OAuth + custom-scheme completion)
+        // only when we have a valid https redirect. Otherwise omit redirect_uri
+        // entirely (sending financewizard:// was the Relink failure).
+        let useMobileAppHostedLink = httpsRedirect != nil
 
         let isUpdate = accessToken.map { !$0.isEmpty } ?? false
         let body = Body(
@@ -145,10 +155,11 @@ enum PlaidAPIClient {
             transactions: isUpdate ? nil : .init(days_requested: 730),
             access_token: isUpdate ? accessToken : nil,
             update: isUpdate ? .init(account_selection_enabled: true) : nil,
-            redirect_uri: oauthRedirect,
+            redirect_uri: httpsRedirect,
             hosted_link: .init(
-                is_mobile_app: true,
-                completion_redirect_uri: completionURI,
+                is_mobile_app: useMobileAppHostedLink,
+                // Custom-scheme completion only valid for mobile Hosted Link sessions.
+                completion_redirect_uri: useMobileAppHostedLink ? completionURI : nil,
                 url_lifetime_seconds: 1800
             )
         )
@@ -159,7 +170,28 @@ enum PlaidAPIClient {
             let expiration: String?
         }
 
-        let response: Response = try await post(path: "/link/token/create", body: body)
+        let response: Response
+        do {
+            response = try await post(path: "/link/token/create", body: body)
+        } catch let err as PlaidAPIError {
+            // Surface a clear fix when Plaid wants an https redirect (OAuth / update mode).
+            if case .http(_, let code, let message) = err {
+                let blob = "\(code ?? "") \(message ?? "")".lowercased()
+                if blob.contains("redirect_uri") && httpsRedirect == nil {
+                    throw PlaidAPIError.http(
+                        status: 0,
+                        code: code,
+                        message: """
+                        Plaid needs an https OAuth redirect URI for this bank (and for Relink). \
+                        In Settings, set “OAuth redirect” to an https URL you’ve added under \
+                        Plaid Dashboard → Team Settings → API → Allowed redirect URIs. \
+                        (Custom schemes like financewizard:// are only for the in-app completion callback.)
+                        """
+                    )
+                }
+            }
+            throw err
+        }
         guard let urlString = response.hosted_link_url,
               let url = URL(string: urlString) else {
             throw PlaidAPIError.http(
