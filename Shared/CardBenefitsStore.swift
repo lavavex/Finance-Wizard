@@ -3,7 +3,7 @@
 //  Finance Wizard
 //
 //  Rewards profiles per card / payment method: models + persistence + Sync rates.
-//  List analytics live in BenefitsAnalytics.swift.
+//  Used for transaction multipliers / product defaults (Budget tab replaced Benefits UI).
 //
 //  Rates are keyed by **RewardCategory** names (Drugstores, Travel (Portal), …),
 //  not general spend categories (see KnownCategory vs RewardCategory).
