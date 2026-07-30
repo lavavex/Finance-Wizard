@@ -79,6 +79,8 @@ enum PlaidSyncEngine {
         // Drop older rows that were stored as spend/income but look like transfers/payments
         VendorRulesStore.removeBillPayMisrules()
         report.cleanedLegacy = cleanLegacyMisclassifiedRows(modelContext: modelContext)
+        // Stale BankAccounts from unlinked/replaced Items (e.g. duped X Money after Relink)
+        _ = cleanupStaleBankAccounts(modelContext: modelContext)
 
         for item in items {
             progress?("Syncing \(item.institutionName)…")
@@ -787,6 +789,74 @@ enum PlaidSyncEngine {
         }
     }
 
+    /// Drop local accounts whose Plaid Item was unlinked (or replaced) but rows were left behind.
+    /// Keeps the synthetic Apple Card account.
+    @MainActor
+    @discardableResult
+    static func pruneOrphanBankAccounts(modelContext: ModelContext) -> Int {
+        let linkedIds = Set(PlaidItemStore.loadItems().map(\.id))
+        let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        var removed = 0
+        for account in all {
+            if AppleCardAccount.isAppleCard(account: account) { continue }
+            if linkedIds.contains(account.itemId) { continue }
+            modelContext.delete(account)
+            removed += 1
+        }
+        return removed
+    }
+
+    /// Collapse obvious duplicates (same institution + mask + type) left after Relink created a new account_id.
+    /// Keeps the row on a currently linked Item with the newest `lastSyncedAt`.
+    @MainActor
+    @discardableResult
+    static func dedupeBankAccounts(modelContext: ModelContext) -> Int {
+        let linkedIds = Set(PlaidItemStore.loadItems().map(\.id))
+        let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        var groups: [String: [BankAccount]] = [:]
+        for account in all {
+            if AppleCardAccount.isAppleCard(account: account) { continue }
+            let key = [
+                account.institutionName.lowercased(),
+                (account.mask ?? "").lowercased(),
+                account.type.lowercased(),
+                (account.subtype ?? "").lowercased(),
+                account.name.lowercased()
+            ].joined(separator: "|")
+            groups[key, default: []].append(account)
+        }
+
+        var removed = 0
+        for (_, var rows) in groups where rows.count > 1 {
+            // Prefer accounts still on a live Item, then most recently synced
+            rows.sort { a, b in
+                let aLive = linkedIds.contains(a.itemId)
+                let bLive = linkedIds.contains(b.itemId)
+                if aLive != bLive { return aLive && !bLive }
+                return a.lastSyncedAt > b.lastSyncedAt
+            }
+            let keep = rows[0]
+            for orphan in rows.dropFirst() {
+                // Only drop when we have a clear duplicate of the kept row
+                let sameMask = (keep.mask ?? "") == (orphan.mask ?? "")
+                let sameName = keep.name.caseInsensitiveCompare(orphan.name) == .orderedSame
+                guard sameMask || sameName else { continue }
+                modelContext.delete(orphan)
+                removed += 1
+            }
+        }
+        return removed
+    }
+
+    /// Orphans + name/mask duplicates (safe to run on Sync / Settings / after Relink).
+    @MainActor
+    @discardableResult
+    static func cleanupStaleBankAccounts(modelContext: ModelContext) -> Int {
+        let a = pruneOrphanBankAccounts(modelContext: modelContext)
+        let b = dedupeBankAccounts(modelContext: modelContext)
+        return a + b
+    }
+
     /// After Relink / Link, refresh balances and drop accounts removed in Link.
     @MainActor
     static func reconcileItemAccounts(
@@ -799,7 +869,9 @@ enum PlaidSyncEngine {
             let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
             return all.first(where: { $0.itemId == item.id })?.institutionId
         }()
-        return upsertAccounts(details, item: item, institutionId: institutionId, modelContext: modelContext)
+        let n = upsertAccounts(details, item: item, institutionId: institutionId, modelContext: modelContext)
+        _ = cleanupStaleBankAccounts(modelContext: modelContext)
+        return n
     }
 
     /// Merge `/liabilities/get` credit rows onto existing `BankAccount`s by account_id.
