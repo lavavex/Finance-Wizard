@@ -13,3 +13,8 @@ build/
 **/AuthKey_*.p8
 # Local Instruments captures
 .perf-traces/
+
+# Cloudflare Workers local
+node_modules/
+.wrangler/
+workers/**/dist/

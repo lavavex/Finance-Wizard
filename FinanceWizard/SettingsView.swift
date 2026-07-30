@@ -117,7 +117,11 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.institutionName)
                                         .font(.body.weight(.semibold))
-                                    if !item.accountNames.isEmpty {
+                                    if item.needsRelink {
+                                        Text(item.errorMessage ?? "Login expired — Relink required")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.orange)
+                                    } else if !item.accountNames.isEmpty {
                                         Text(item.accountNames.joined(separator: ", "))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -171,7 +175,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Linked banks")
                 } footer: {
-                    Text("After linking, use Sync on Transactions. Swipe a bank left for Relink if login expires or you want to add accounts.")
+                    Text("After linking, use Sync on Transactions. Swipe a bank left for Relink if login expires or you want to add accounts. Orange banners mean Plaid needs a Relink.")
                 }
 
                 // MARK: Sync info
@@ -373,6 +377,7 @@ struct SettingsView: View {
     /// Pull live accounts after update-mode Link and drop deselected ones from SwiftData.
     @MainActor
     private func reconcileAfterRelink(_ item: PlaidLinkedItem) async {
+        PlaidItemStore.clearItemError(itemID: item.id)
         do {
             let n = try await PlaidSyncEngine.reconcileItemAccounts(
                 item: item,
@@ -385,6 +390,7 @@ struct SettingsView: View {
         } catch {
             statusIsError = true
             statusMessage = "Relinked, but account refresh failed: \(error.localizedDescription). Tap Sync."
+            reload()
         }
     }
 

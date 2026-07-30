@@ -45,6 +45,30 @@ final class Transaction {
     /// `"none"` = not a subscription.
     var subscriptionCadenceOverride: String?
 
+    // MARK: - Plaid enrichment (optional; nil on CSV / older rows)
+
+    /// When the charge was authorized (prefer over `date` for posted txs when present).
+    var authorizedDate: Date?
+    /// Pending twin id — when a posted tx arrives, we drop the pending row.
+    var pendingTransactionId: String?
+    /// Plaid account_id (for cleanup when accounts are unlinked).
+    var plaidAccountId: String?
+    /// Stable merchant entity id when Plaid provides one.
+    var merchantEntityId: String?
+    /// Enriched merchant name (may differ from `title`).
+    var merchantName: String?
+    /// Merchant / counterparty logo URL (https).
+    var logoURL: String?
+    /// Merchant website.
+    var website: String?
+    /// PFC confidence: VERY_HIGH / HIGH / MEDIUM / LOW / UNKNOWN
+    var pfcConfidence: String?
+    /// Still pending at the bank.
+    var isPending: Bool?
+
+    /// Date to show in lists: authorized when known, else posted/bank date.
+    var displayDate: Date { authorizedDate ?? date }
+
     /// Effective lock flag (nil → unlocked)
     var isCategoryLocked: Bool { categoryLocked ?? false }
     /// Effective lock flag (nil → unlocked)
@@ -95,7 +119,16 @@ final class Transaction {
         paymentRail: String? = nil,
         paymentRailLocked: Bool = false,
         rewardCategoryOverride: String? = nil,
-        subscriptionCadenceOverride: String? = nil
+        subscriptionCadenceOverride: String? = nil,
+        authorizedDate: Date? = nil,
+        pendingTransactionId: String? = nil,
+        plaidAccountId: String? = nil,
+        merchantEntityId: String? = nil,
+        merchantName: String? = nil,
+        logoURL: String? = nil,
+        website: String? = nil,
+        pfcConfidence: String? = nil,
+        isPending: Bool? = nil
     ) {
         self.transactionId = transactionId
         self.title = title
@@ -112,5 +145,14 @@ final class Transaction {
         self.paymentRailLocked = paymentRailLocked
         self.rewardCategoryOverride = rewardCategoryOverride
         self.subscriptionCadenceOverride = subscriptionCadenceOverride
+        self.authorizedDate = authorizedDate
+        self.pendingTransactionId = pendingTransactionId
+        self.plaidAccountId = plaidAccountId
+        self.merchantEntityId = merchantEntityId
+        self.merchantName = merchantName
+        self.logoURL = logoURL
+        self.website = website
+        self.pfcConfidence = pfcConfidence
+        self.isPending = isPending
     }
 }

@@ -16,10 +16,13 @@ struct PlaidSyncReport: Sendable {
     var incomeUpserted: Int = 0
     var creditPaymentsUpserted: Int = 0
     var removed: Int = 0
+    var pendingMerged: Int = 0
     var skippedTransfers: Int = 0
     var cleanedLegacy: Int = 0
     var accountsUpdated: Int = 0
     var liabilitiesUpdated: Int = 0
+    var recurringStreams: Int = 0
+    var refreshedItems: Int = 0
     var warnings: [String] = []
 
     var summary: String {
@@ -28,10 +31,13 @@ struct PlaidSyncReport: Sendable {
         lines.append("Expenses upserted: \(expensesUpserted)")
         lines.append("Income upserted: \(incomeUpserted)")
         lines.append("Card payments tracked: \(creditPaymentsUpserted)")
+        if pendingMerged > 0 { lines.append("Pending→posted merged: \(pendingMerged)") }
         if skippedTransfers > 0 { lines.append("Skipped transfers: \(skippedTransfers)") }
         if cleanedLegacy > 0 { lines.append("Removed mis-filed transfers: \(cleanedLegacy)") }
         if accountsUpdated > 0 { lines.append("Accounts refreshed: \(accountsUpdated)") }
         if liabilitiesUpdated > 0 { lines.append("Credit details refreshed: \(liabilitiesUpdated)") }
+        if recurringStreams > 0 { lines.append("Recurring streams: \(recurringStreams)") }
+        if refreshedItems > 0 { lines.append("Forced bank refresh: \(refreshedItems)") }
         if removed > 0 { lines.append("Removed by bank: \(removed)") }
         if !warnings.isEmpty {
             lines.append("Warnings:")
@@ -48,12 +54,26 @@ private struct AccountMeta {
 }
 
 enum PlaidSyncEngine {
+    /// Soft-fail Plaid product codes (add-on not enabled / not ready / unsupported).
+    private static let softProductCodes: Set<String> = [
+        "PRODUCTS_NOT_SUPPORTED",
+        "PRODUCT_NOT_READY",
+        "PRODUCT_NOT_ENABLED",
+        "INVALID_PRODUCT",
+        "ADDITIONAL_CONSENT_REQUIRED",
+        "NO_LIABILITY_ACCOUNTS",
+        "ITEM_PRODUCT_NOT_READY"
+    ]
+
     /// Sync all linked Items. If `resetCursors`, start from full history again.
+    /// - Parameter forceRefresh: call `/transactions/refresh` before sync (paid add-on; soft-fails).
+    /// - Parameter includePending: store pending txs (merged to posted via `pending_transaction_id`).
     @MainActor
     static func syncAll(
         modelContext: ModelContext,
         resetCursors: Bool = false,
-        includePending: Bool = false,
+        includePending: Bool = true,
+        forceRefresh: Bool = false,
         progress: ((String) -> Void)? = nil
     ) async throws -> PlaidSyncReport {
         try PlaidCredentialsStore.requireConfigured()
@@ -82,6 +102,9 @@ enum PlaidSyncEngine {
         // Stale BankAccounts from unlinked/replaced Items (e.g. duped X Money after Relink)
         _ = cleanupStaleBankAccounts(modelContext: modelContext)
 
+        // Preload accounts once for reward multipliers (avoids N fetches per tx).
+        let allAccounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+
         for item in items {
             progress?("Syncing \(item.institutionName)…")
             do {
@@ -89,15 +112,21 @@ enum PlaidSyncEngine {
                     item,
                     modelContext: modelContext,
                     includePending: includePending,
+                    forceRefresh: forceRefresh,
+                    allAccounts: allAccounts,
                     progress: progress
                 )
                 report.expensesUpserted += itemReport.expensesUpserted
                 report.incomeUpserted += itemReport.incomeUpserted
                 report.creditPaymentsUpserted += itemReport.creditPaymentsUpserted
                 report.removed += itemReport.removed
+                report.pendingMerged += itemReport.pendingMerged
                 report.skippedTransfers += itemReport.skippedTransfers
                 report.accountsUpdated += itemReport.accountsUpdated
                 report.liabilitiesUpdated += itemReport.liabilitiesUpdated
+                report.recurringStreams += itemReport.recurringStreams
+                report.refreshedItems += itemReport.refreshedItems
+                report.warnings.append(contentsOf: itemReport.warnings)
                 report.itemLines.append(
                     "\(item.institutionName): +\(itemReport.expensesUpserted) exp / +\(itemReport.incomeUpserted) inc / \(itemReport.creditPaymentsUpserted) card pmts"
                 )
@@ -119,6 +148,8 @@ enum PlaidSyncEngine {
         _ item: PlaidLinkedItem,
         modelContext: ModelContext,
         includePending: Bool,
+        forceRefresh: Bool,
+        allAccounts: [BankAccount],
         progress: ((String) -> Void)?
     ) async throws -> PlaidSyncReport {
         var report = PlaidSyncReport()
@@ -127,6 +158,49 @@ enum PlaidSyncEngine {
         var hasMore = true
         var accountMeta: [String: AccountMeta] = [:]
         var safety = 0
+        // Refresh account list after balances upsert so later txs see new cards.
+        var accountsCache = allAccounts
+
+        // Item health (login required → Relink)
+        progress?("\(item.institutionName): status…")
+        var institutionId: String?
+        do {
+            let status = try await PlaidAPIClient.itemGet(accessToken: item.accessToken)
+            institutionId = status.institutionID
+            PlaidItemStore.updateItemStatus(
+                itemID: item.id,
+                errorCode: status.errorCode,
+                errorMessage: status.errorMessage
+            )
+            if status.needsRelink {
+                let msg = status.errorMessage ?? status.errorCode ?? "Login required"
+                report.warnings.append(
+                    "\(item.institutionName): needs Relink — \(msg)"
+                )
+            }
+        } catch {
+            report.warnings.append("\(item.institutionName) status: \(error.localizedDescription)")
+        }
+
+        // Optional on-demand bank pull before cursor sync
+        if forceRefresh {
+            progress?("\(item.institutionName): force refresh…")
+            do {
+                _ = try await PlaidAPIClient.transactionsRefresh(accessToken: item.accessToken)
+                report.refreshedItems = 1
+            } catch {
+                if case PlaidAPIError.http(_, let code, _) = error,
+                   let code, softProductCodes.contains(code) {
+                    report.warnings.append(
+                        "\(item.institutionName): force refresh unavailable (\(code)). Using normal sync."
+                    )
+                } else {
+                    report.warnings.append(
+                        "\(item.institutionName) refresh: \(error.localizedDescription)"
+                    )
+                }
+            }
+        }
 
         while hasMore {
             safety += 1
@@ -168,6 +242,7 @@ enum PlaidSyncEngine {
                     tx,
                     item: item,
                     accountMeta: accountMeta,
+                    allAccounts: accountsCache,
                     modelContext: modelContext,
                     report: &report
                 )
@@ -192,35 +267,29 @@ enum PlaidSyncEngine {
 
         // Balances / credit limits + institution logo (Plaid metadata, not product card photos)
         progress?("\(item.institutionName): balances…")
-        var institutionId: String?
-        do {
-            institutionId = try await PlaidAPIClient.itemInstitutionID(accessToken: item.accessToken)
-            if let institutionId {
-                do {
-                    let branding = try await PlaidAPIClient.institutionBranding(institutionID: institutionId)
+        if let institutionId {
+            do {
+                let branding = try await PlaidAPIClient.institutionBranding(institutionID: institutionId)
+                InstitutionLogoCache.store(
+                    institutionID: branding.institutionID,
+                    name: branding.name ?? item.institutionName,
+                    logoBase64: branding.logoBase64,
+                    primaryColorHex: branding.primaryColorHex
+                )
+                // Also index under the Link display name (e.g. "Chase") when Plaid’s name differs
+                if branding.name?.caseInsensitiveCompare(item.institutionName) != .orderedSame {
                     InstitutionLogoCache.store(
                         institutionID: branding.institutionID,
-                        name: branding.name ?? item.institutionName,
+                        name: item.institutionName,
                         logoBase64: branding.logoBase64,
                         primaryColorHex: branding.primaryColorHex
                     )
-                    // Also index under the Link display name (e.g. "Chase") when Plaid’s name differs
-                    if branding.name?.caseInsensitiveCompare(item.institutionName) != .orderedSame {
-                        InstitutionLogoCache.store(
-                            institutionID: branding.institutionID,
-                            name: item.institutionName,
-                            logoBase64: branding.logoBase64,
-                            primaryColorHex: branding.primaryColorHex
-                        )
-                    }
-                } catch {
-                    report.warnings.append(
-                        "\(item.institutionName) logo: \(error.localizedDescription)"
-                    )
                 }
+            } catch {
+                report.warnings.append(
+                    "\(item.institutionName) logo: \(error.localizedDescription)"
+                )
             }
-        } catch {
-            report.warnings.append("\(item.institutionName) institution: \(error.localizedDescription)")
         }
 
         do {
@@ -231,6 +300,7 @@ enum PlaidSyncEngine {
                 institutionId: institutionId,
                 modelContext: modelContext
             )
+            accountsCache = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? accountsCache
         } catch {
             report.warnings.append("\(item.institutionName) balances: \(error.localizedDescription)")
         }
@@ -245,17 +315,8 @@ enum PlaidSyncEngine {
             )
         } catch {
             if case PlaidAPIError.http(_, let code, let message) = error {
-                // Expected when Item was linked before Liabilities, product still warming up, or unsupported.
-                let softCodes: Set<String> = [
-                    "PRODUCTS_NOT_SUPPORTED",
-                    "PRODUCT_NOT_READY",
-                    "PRODUCT_NOT_ENABLED",
-                    "INVALID_PRODUCT",
-                    "ADDITIONAL_CONSENT_REQUIRED",
-                    "NO_LIABILITY_ACCOUNTS"
-                ]
-                if let code, softCodes.contains(code) {
-                    if code == "PRODUCT_NOT_READY" {
+                if let code, softProductCodes.contains(code) {
+                    if code == "PRODUCT_NOT_READY" || code == "ITEM_PRODUCT_NOT_READY" {
                         report.warnings.append(
                             "\(item.institutionName): credit details still preparing — Sync again in a few minutes."
                         )
@@ -278,6 +339,29 @@ enum PlaidSyncEngine {
             }
         }
 
+        // Recurring streams (subscriptions / payroll) — optional add-on
+        progress?("\(item.institutionName): recurring…")
+        do {
+            report.recurringStreams = try await syncRecurringStreams(
+                item: item,
+                modelContext: modelContext
+            )
+        } catch {
+            if case PlaidAPIError.http(_, let code, _) = error,
+               let code, softProductCodes.contains(code) {
+                // Recurring is an add-on; stay quiet unless not-ready (retry later).
+                if code == "PRODUCT_NOT_READY" || code == "ITEM_PRODUCT_NOT_READY" {
+                    report.warnings.append(
+                        "\(item.institutionName): recurring streams still preparing."
+                    )
+                }
+            } else {
+                report.warnings.append(
+                    "\(item.institutionName) recurring: \(error.localizedDescription)"
+                )
+            }
+        }
+
         return report
     }
 
@@ -288,14 +372,26 @@ enum PlaidSyncEngine {
         _ tx: PlaidTransaction,
         item: PlaidLinkedItem,
         accountMeta: [String: AccountMeta],
+        allAccounts: [BankAccount],
         modelContext: ModelContext,
         report: inout PlaidSyncReport
     ) {
+        // Posted row supersedes its pending twin (different transaction_id).
+        if let pendingId = tx.pending_transaction_id,
+           !pendingId.isEmpty,
+           pendingId != tx.transaction_id {
+            if deleteLocal(transactionID: pendingId, modelContext: modelContext) {
+                report.pendingMerged += 1
+            }
+        }
+
         let title = (tx.merchant_name?.isEmpty == false ? tx.merchant_name : tx.name)
             ?? tx.original_description
             ?? "Transaction"
 
         guard let date = parseDate(tx.date) else { return }
+        // Prefer authorized date for display; keep posted `date` as bank settle day.
+        let authorizedDate = tx.authorized_date.flatMap(parseDate)
 
         let meta = accountMeta[tx.account_id]
         let paymentMethod = meta?.label ?? item.paymentMethodLabel
@@ -333,6 +429,7 @@ enum PlaidSyncEngine {
                 tx: tx,
                 title: title,
                 date: date,
+                authorizedDate: authorizedDate,
                 paymentMethod: paymentMethod,
                 modelContext: modelContext
             )
@@ -346,8 +443,10 @@ enum PlaidSyncEngine {
                 tx: tx,
                 title: title,
                 date: date,
+                authorizedDate: authorizedDate,
                 paymentMethod: paymentMethod,
                 accountId: tx.account_id,
+                allAccounts: allAccounts,
                 modelContext: modelContext
             )
             report.expensesUpserted += 1
@@ -374,8 +473,10 @@ enum PlaidSyncEngine {
         tx: PlaidTransaction,
         title: String,
         date: Date,
+        authorizedDate: Date?,
         paymentMethod: String,
         accountId: String,
+        allAccounts: [BankAccount],
         modelContext: ModelContext
     ) {
         let targetId = tx.transaction_id
@@ -391,8 +492,8 @@ enum PlaidSyncEngine {
         let mappedCategory = rule?.category ?? defaultCategory
         let channel = tx.payment_channel
         let inferredRail = PaymentRail.infer(plaidChannel: channel, title: title)
-        let bankAccount = fetchBankAccount(accountId: accountId, modelContext: modelContext)
-        let allAccounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        let bankAccount = allAccounts.first { $0.accountId == accountId }
+            ?? fetchBankAccount(accountId: accountId, modelContext: modelContext)
         let railMultiplier = bankAccount?.rewardMultiplier(for: inferredRail)
         let rewardsEligible = CardBenefitsStore.isRewardsEligible(
             account: bankAccount,
@@ -414,6 +515,7 @@ enum PlaidSyncEngine {
             return benefitsRate
         }()
         let amount = -abs(tx.amount)
+        let pending = tx.pending ?? false
 
         if let existing = try? modelContext.fetch(descriptor).first {
             existing.title = title
@@ -421,6 +523,7 @@ enum PlaidSyncEngine {
             existing.date = date
             existing.paymentMethod = paymentMethod
             existing.plaidPaymentChannel = channel
+            applyEnrichment(to: existing, from: tx, authorizedDate: authorizedDate, isPending: pending)
             if !existing.isPaymentRailLocked {
                 existing.paymentRail = inferredRail.rawValue
             }
@@ -450,24 +553,56 @@ enum PlaidSyncEngine {
                 }
             }
         } else {
-            modelContext.insert(
-                Transaction(
-                    transactionId: targetId,
-                    title: title,
-                    amount: amount,
-                    date: date,
-                    category: mappedCategory,
-                    paymentMethod: paymentMethod,
-                    multiplier: mappedMultiplier,
-                    categoryLocked: false,
-                    multiplierLocked: false,
-                    overrideSource: rule != nil ? "rule" : (railMultiplier != nil ? "account-rail" : nil),
-                    plaidPaymentChannel: channel,
-                    paymentRail: inferredRail.rawValue,
-                    paymentRailLocked: false
-                )
+            let row = Transaction(
+                transactionId: targetId,
+                title: title,
+                amount: amount,
+                date: date,
+                category: mappedCategory,
+                paymentMethod: paymentMethod,
+                multiplier: mappedMultiplier,
+                categoryLocked: false,
+                multiplierLocked: false,
+                overrideSource: rule != nil ? "rule" : (railMultiplier != nil ? "account-rail" : nil),
+                plaidPaymentChannel: channel,
+                paymentRail: inferredRail.rawValue,
+                paymentRailLocked: false,
+                authorizedDate: authorizedDate,
+                pendingTransactionId: tx.pending_transaction_id,
+                plaidAccountId: tx.account_id,
+                merchantEntityId: tx.resolvedMerchantEntityID,
+                merchantName: tx.merchant_name,
+                logoURL: tx.resolvedLogoURL,
+                website: tx.resolvedWebsite,
+                pfcConfidence: tx.personal_finance_category?.confidence_level,
+                isPending: pending
             )
+            modelContext.insert(row)
         }
+    }
+
+    /// Map Plaid enrichment fields onto a local expense row.
+    private static func applyEnrichment(
+        to row: Transaction,
+        from tx: PlaidTransaction,
+        authorizedDate: Date?,
+        isPending: Bool
+    ) {
+        if let authorizedDate {
+            row.authorizedDate = authorizedDate
+        }
+        if let pendingId = tx.pending_transaction_id, !pendingId.isEmpty {
+            row.pendingTransactionId = pendingId
+        }
+        row.plaidAccountId = tx.account_id
+        if let entity = tx.resolvedMerchantEntityID { row.merchantEntityId = entity }
+        if let name = tx.merchant_name, !name.isEmpty { row.merchantName = name }
+        if let logo = tx.resolvedLogoURL { row.logoURL = logo }
+        if let site = tx.resolvedWebsite { row.website = site }
+        if let conf = tx.personal_finance_category?.confidence_level {
+            row.pfcConfidence = conf
+        }
+        row.isPending = isPending
     }
 
     @MainActor
@@ -625,6 +760,7 @@ enum PlaidSyncEngine {
         tx: PlaidTransaction,
         title: String,
         date: Date,
+        authorizedDate: Date?,
         paymentMethod: String,
         modelContext: ModelContext
     ) {
@@ -640,6 +776,7 @@ enum PlaidSyncEngine {
         let amount = -abs(tx.amount)
         let channel = tx.payment_channel
         let rail = PaymentRail.infer(plaidChannel: channel, title: title)
+        let pending = tx.pending ?? false
 
         if let existing = try? modelContext.fetch(descriptor).first {
             existing.title = title
@@ -657,6 +794,7 @@ enum PlaidSyncEngine {
                 existing.paymentRail = looksLikeACHBillPay(title) ? PaymentRail.ach.rawValue : rail.rawValue
             }
             existing.overrideSource = "credit-payment"
+            applyEnrichment(to: existing, from: tx, authorizedDate: authorizedDate, isPending: pending)
         } else {
             modelContext.insert(
                 Transaction(
@@ -672,10 +810,110 @@ enum PlaidSyncEngine {
                     overrideSource: "credit-payment",
                     plaidPaymentChannel: channel,
                     paymentRail: (looksLikeACHBillPay(title) ? PaymentRail.ach : rail).rawValue,
-                    paymentRailLocked: false
+                    paymentRailLocked: false,
+                    authorizedDate: authorizedDate,
+                    pendingTransactionId: tx.pending_transaction_id,
+                    plaidAccountId: tx.account_id,
+                    merchantEntityId: tx.resolvedMerchantEntityID,
+                    merchantName: tx.merchant_name,
+                    logoURL: tx.resolvedLogoURL,
+                    website: tx.resolvedWebsite,
+                    pfcConfidence: tx.personal_finance_category?.confidence_level,
+                    isPending: pending
                 )
             )
         }
+    }
+
+    // MARK: - Recurring streams
+
+    /// Pull `/transactions/recurring/get` and upsert local `RecurringStream` rows for this Item.
+    @MainActor
+    @discardableResult
+    private static func syncRecurringStreams(
+        item: PlaidLinkedItem,
+        modelContext: ModelContext
+    ) async throws -> Int {
+        let response = try await PlaidAPIClient.transactionsRecurringGet(
+            accessToken: item.accessToken
+        )
+        let now = Date()
+        var seen = Set<String>()
+        var count = 0
+
+        func upsert(_ stream: PlaidRecurringStream, direction: String) {
+            let id = stream.stream_id
+            seen.insert(id)
+            var descriptor = FetchDescriptor<RecurringStream>(
+                predicate: #Predicate<RecurringStream> { row in
+                    row.streamId == id
+                }
+            )
+            descriptor.fetchLimit = 1
+
+            let avg = abs(stream.average_amount?.amount ?? 0)
+            let last = abs(stream.last_amount?.amount ?? 0)
+            let firstDate = stream.first_date.flatMap(parseDate)
+            let lastDate = stream.last_date.flatMap(parseDate)
+            let isActive = stream.is_active ?? (stream.status?.uppercased() != "TOMBSTONED")
+            let ids = stream.transaction_ids ?? []
+
+            if let existing = try? modelContext.fetch(descriptor).first {
+                existing.itemId = item.id
+                existing.direction = direction
+                existing.streamDescription = stream.description ?? existing.streamDescription
+                existing.merchantName = stream.merchant_name
+                existing.averageAmount = avg
+                existing.lastAmount = last
+                existing.frequency = stream.frequency ?? existing.frequency
+                existing.firstDate = firstDate
+                existing.lastDate = lastDate
+                existing.isActive = isActive
+                existing.transactionIdsJSON = try? JSONEncoder().encode(ids)
+                existing.accountId = stream.account_id
+                existing.updatedAt = now
+            } else {
+                modelContext.insert(
+                    RecurringStream(
+                        streamId: id,
+                        itemId: item.id,
+                        direction: direction,
+                        streamDescription: stream.description ?? stream.merchant_name ?? "Recurring",
+                        merchantName: stream.merchant_name,
+                        averageAmount: avg,
+                        lastAmount: last,
+                        frequency: stream.frequency ?? "UNKNOWN",
+                        firstDate: firstDate,
+                        lastDate: lastDate,
+                        isActive: isActive,
+                        transactionIds: ids,
+                        accountId: stream.account_id,
+                        updatedAt: now
+                    )
+                )
+            }
+            count += 1
+        }
+
+        for stream in response.outflow_streams ?? [] {
+            upsert(stream, direction: "outflow")
+        }
+        for stream in response.inflow_streams ?? [] {
+            upsert(stream, direction: "inflow")
+        }
+
+        // Drop streams that vanished for this Item
+        let itemId = item.id
+        let existing = (try? modelContext.fetch(
+            FetchDescriptor<RecurringStream>(
+                predicate: #Predicate<RecurringStream> { $0.itemId == itemId }
+            )
+        )) ?? []
+        for row in existing where !seen.contains(row.streamId) {
+            modelContext.delete(row)
+        }
+
+        return count
     }
 
     private static func looksLikeACHBillPay(_ title: String) -> Bool {
@@ -1172,12 +1410,17 @@ enum PlaidSyncEngine {
         return name
     }
 
-    private static func parseDate(_ string: String) -> Date? {
+    /// Shared yyyy-MM-dd parser (DateFormatter creation is relatively expensive).
+    private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: string)
+        return formatter
+    }()
+
+    private static func parseDate(_ string: String) -> Date? {
+        dayFormatter.date(from: string)
     }
 }

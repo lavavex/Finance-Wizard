@@ -2,7 +2,7 @@
 //  SubscriptionsView.swift
 //  Finance Wizard
 //
-//  Likely recurring charges detected from spend history.
+//  Recurring charges: prefer Plaid Recurring Streams, fall back to local heuristics.
 //
 
 import SwiftUI
@@ -11,10 +11,17 @@ import SwiftData
 struct SubscriptionsView: View {
     @Query private var transactions: [Transaction]
     @Query private var bankAccounts: [BankAccount]
+    @Query(
+        filter: #Predicate<RecurringStream> { $0.isActive == true },
+        sort: \RecurringStream.lastDate,
+        order: .reverse
+    )
+    private var activeStreams: [RecurringStream]
 
     @State private var candidates: [SubscriptionCandidate] = []
     @State private var monthlyBurn: Double = 0
     @State private var isScanning = true
+    @State private var usingPlaidStreams = false
 
     var body: some View {
         List {
@@ -32,9 +39,16 @@ struct SubscriptionsView: View {
                         }
                     }
                     Spacer()
-                    Text(isScanning && candidates.isEmpty ? "Scanning…" : "\(candidates.count) recurring")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(isScanning && candidates.isEmpty ? "Scanning…" : "\(candidates.count) recurring")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if usingPlaidStreams && !candidates.isEmpty {
+                            Text("Plaid streams")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
                 }
                 .padding(.vertical, 4)
             }
@@ -44,7 +58,7 @@ struct SubscriptionsView: View {
                     ContentUnavailableView(
                         "No active subscriptions",
                         systemImage: "repeat.circle",
-                        description: Text("Recurring charges show up here. Mark a yearly bill on the transaction if it’s missing.")
+                        description: Text("Recurring charges show up here after Sync. Mark a yearly bill on the transaction if it’s missing.")
                     )
                     .listRowBackground(Color.clear)
                 } else {
@@ -93,7 +107,7 @@ struct SubscriptionsView: View {
         }
         .navigationTitle("Subscriptions")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: transactions.count) {
+        .task(id: "\(transactions.count)|\(activeStreams.count)") {
             await rescan()
         }
     }
@@ -101,12 +115,70 @@ struct SubscriptionsView: View {
     @MainActor
     private func rescan() async {
         isScanning = true
+
+        // Prefer Plaid outflow streams when Sync has populated them.
+        let outflow = activeStreams.filter(\.isOutflow)
+        if !outflow.isEmpty {
+            let fromPlaid = outflow.compactMap { stream -> SubscriptionCandidate? in
+                guard let cadence = stream.subscriptionCadence else { return nil }
+                let typical = abs(stream.averageAmount > 0 ? stream.averageAmount : stream.lastAmount)
+                guard typical >= 0.99 else { return nil }
+                let last = stream.lastDate ?? stream.updatedAt
+                let methods: [String] = {
+                    guard let accountId = stream.accountId,
+                          let account = bankAccounts.first(where: { $0.accountId == accountId }) else {
+                        return []
+                    }
+                    return [account.plaidDisplayName]
+                }()
+                return SubscriptionCandidate(
+                    displayVendor: stream.displayName,
+                    normalizedVendor: SubscriptionAnalytics.normalizeVendor(stream.displayName),
+                    typicalAmount: typical,
+                    cadence: cadence,
+                    estimatedMonthly: stream.estimatedMonthly,
+                    occurrenceCount: max(stream.transactionIds.count, 1),
+                    lastDate: last,
+                    paymentMethods: methods,
+                    sampleTransactionIds: stream.transactionIds,
+                    confidenceNote: "Plaid · \(stream.frequency)",
+                    isUserDeclared: false
+                )
+            }
+            .filter { SubscriptionAnalytics.isActive($0) }
+            .sorted { $0.estimatedMonthly > $1.estimatedMonthly }
+
+            // Merge user-declared heuristics that Plaid may have missed (yearly etc.)
+            let snaps = SubscriptionAnalytics.snapshots(from: transactions)
+            let heuristic = await Task.detached(priority: .userInitiated) {
+                SubscriptionAnalytics.detect(snapshots: snaps)
+            }.value
+            let declaredOnly = heuristic.filter(\.isUserDeclared)
+            var merged = fromPlaid
+            var claimed = Set(fromPlaid.map { SubscriptionAnalytics.normalizeVendor($0.displayVendor) })
+            for d in declaredOnly {
+                let key = d.normalizedVendor
+                guard !claimed.contains(key) else { continue }
+                claimed.insert(key)
+                merged.append(d)
+            }
+            merged.sort { $0.estimatedMonthly > $1.estimatedMonthly }
+
+            candidates = merged
+            monthlyBurn = SubscriptionAnalytics.totalMonthlyBurn(merged)
+            usingPlaidStreams = !fromPlaid.isEmpty
+            isScanning = false
+            return
+        }
+
+        // Fallback: local cadence detection
         let snaps = SubscriptionAnalytics.snapshots(from: transactions)
         let found = await Task.detached(priority: .userInitiated) {
             SubscriptionAnalytics.detect(snapshots: snaps)
         }.value
         candidates = found
         monthlyBurn = SubscriptionAnalytics.totalMonthlyBurn(found)
+        usingPlaidStreams = false
         isScanning = false
     }
 }
@@ -124,7 +196,7 @@ private struct SubscriptionDetailView: View {
                 ids.contains($0.transactionId)
                     || SubscriptionAnalytics.normalizeVendor($0.title) == norm
             }
-            .sorted { $0.date > $1.date }
+            .sorted { $0.displayDate > $1.displayDate }
     }
 
     var body: some View {
