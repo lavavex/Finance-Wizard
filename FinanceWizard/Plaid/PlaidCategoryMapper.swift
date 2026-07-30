@@ -208,58 +208,129 @@ enum PlaidCategoryMapper {
     // MARK: - Display categories
 
     /// Human-readable expense category from PFC primary/detailed.
+    /// Always returns a `KnownCategory` spend name (or Credit Card Payment).
     static func expenseCategory(from pfc: PlaidPFC?) -> String {
         let primary = (pfc?.primary ?? "").uppercased()
         let detailed = (pfc?.detailed ?? "").uppercased()
 
-        if detailed.contains("GAS") || detailed.contains("FUEL") {
-            return "Gas (Car)"
+        // --- Detailed first (most specific) ---
+        if detailed.contains("GAS_STATION") || detailed.contains("GAS_")
+            || (detailed.contains("FUEL") && !detailed.contains("REFUEL")) {
+            return KnownCategory.gas.rawValue
+        }
+        if detailed.contains("EV_CHARGING") || detailed.contains("ELECTRIC_VEHICLE") {
+            return KnownCategory.gas.rawValue
         }
         if detailed.contains("GROCER") {
-            return "Groceries"
+            return KnownCategory.groceries.rawValue
         }
-        if detailed.contains("COFFEE") || detailed.contains("RESTAURANT") || detailed.contains("FAST_FOOD") {
-            return "Dining"
+        if detailed.contains("COFFEE") || detailed.contains("RESTAURANT")
+            || detailed.contains("FAST_FOOD") || detailed.contains("FOOD_DELIVERY") {
+            return KnownCategory.dining.rawValue
         }
-        if detailed.contains("SUBSCRIPTION") || detailed.contains("STREAMING") {
-            return "Subscriptions"
+        if detailed.contains("STREAMING") || detailed.contains("SUBSCRIPTION")
+            || detailed.contains("DIGITAL_PURCHASE") && detailed.contains("ENTERTAINMENT") {
+            return KnownCategory.subscriptions.rawValue
         }
-        if detailed.contains("INTERNET") || detailed.contains("UTILITIES") {
-            return "Home Internet"
+        if detailed.contains("INTERNET") || detailed.contains("CABLE")
+            || detailed.contains("TELECOM") || detailed.contains("PHONE") {
+            return KnownCategory.homeInternet.rawValue
+        }
+        if detailed.contains("RENT") || detailed.contains("MORTGAGE") {
+            return KnownCategory.housing.rawValue
+        }
+        if detailed.contains("UTILITIES") || detailed.contains("ELECTRIC")
+            || detailed.contains("WATER") || detailed.contains("SEWAGE")
+            || detailed.contains("GARBAGE") {
+            return KnownCategory.utilities.rawValue
         }
         if detailed.contains("INSURANCE") {
-            return "Car Insurance"
+            return KnownCategory.carInsurance.rawValue
+        }
+        if detailed.contains("PHARMACY") || detailed.contains("DENTAL")
+            || detailed.contains("VISION") || detailed.contains("HOSPITAL")
+            || detailed.contains("PHYSICIAN") || detailed.contains("PRIMARY_CARE") {
+            return KnownCategory.health.rawValue
+        }
+        if detailed.contains("GYM") || detailed.contains("FITNESS")
+            || detailed.contains("HAIR") || detailed.contains("SPA") {
+            return KnownCategory.personalCare.rawValue
+        }
+        if detailed.contains("PET") || detailed.contains("VETERINAR") {
+            return KnownCategory.pets.rawValue
+        }
+        if detailed.contains("EDUCATION") || detailed.contains("TUITION")
+            || detailed.contains("STUDENT") && detailed.contains("LOAN") == false {
+            return KnownCategory.education.rawValue
+        }
+        if detailed.contains("DONATION") || detailed.contains("CHARIT")
+            || detailed.contains("GIFT") && !detailed.contains("CARD") {
+            return KnownCategory.giftsDonations.rawValue
+        }
+        if detailed.contains("PARKING") || detailed.contains("TOLLS")
+            || detailed.contains("PUBLIC_TRANSIT") || detailed.contains("TAXI")
+            || detailed.contains("RIDESHARE") || detailed.contains("RIDE_SHARE") {
+            return KnownCategory.transit.rawValue
+        }
+        if detailed.contains("AIRLINE") || detailed.contains("LODGING")
+            || detailed.contains("HOTEL") || detailed.contains("CAR_RENTAL") {
+            return KnownCategory.travel.rawValue
+        }
+        if detailed.contains("ENTERTAINMENT") || detailed.contains("MUSIC")
+            || detailed.contains("MOVIE") || detailed.contains("VIDEO_GAMES")
+            || detailed.contains("SPORTING") {
+            return KnownCategory.entertainment.rawValue
+        }
+        if detailed.contains("BANK_FEE") || detailed.contains("ATM")
+            || detailed.contains("OVERDRAFT") || detailed.contains("LATE_FEE") {
+            return KnownCategory.fees.rawValue
         }
 
+        // --- Primary buckets ---
         switch primary {
         case "FOOD_AND_DRINK":
-            return "Dining"
-        case "GENERAL_MERCHANDISE", "GENERAL_SERVICES":
-            return "Shopping"
+            return KnownCategory.dining.rawValue
+        case "GENERAL_MERCHANDISE":
+            return KnownCategory.shopping.rawValue
+        case "GENERAL_SERVICES":
+            // Services often = subscriptions / home services — shopping is a safer budget bucket
+            // than inventing a free-form label.
+            return KnownCategory.shopping.rawValue
         case "TRANSPORTATION":
-            return "Gas (Car)"
+            // Gas already handled above; remaining transit-like spend.
+            return KnownCategory.transit.rawValue
         case "TRAVEL":
-            return "Travel"
+            return KnownCategory.travel.rawValue
         case "ENTERTAINMENT":
-            return "Subscriptions"
-        case "PERSONAL_CARE", "MEDICAL", "HEALTHCARE":
-            return "Personal Care"
+            return KnownCategory.entertainment.rawValue
+        case "PERSONAL_CARE":
+            return KnownCategory.personalCare.rawValue
+        case "MEDICAL", "HEALTHCARE":
+            return KnownCategory.health.rawValue
         case "RENT_AND_UTILITIES":
-            return "Home Internet"
+            return KnownCategory.utilities.rawValue
         case "LOAN_PAYMENTS":
             if detailed.contains("CREDIT_CARD") {
                 return TransactionAnalytics.creditCardPaymentCategory
             }
-            return "Miscellaneous"
+            // Student / auto / mortgage payments → housing-ish or education
+            if detailed.contains("MORTGAGE") || detailed.contains("HOME") {
+                return KnownCategory.housing.rawValue
+            }
+            if detailed.contains("STUDENT") {
+                return KnownCategory.education.rawValue
+            }
+            return KnownCategory.miscellaneous.rawValue
         case "BANK_FEES":
-            return "Miscellaneous"
+            return KnownCategory.fees.rawValue
+        case "GOVERNMENT_AND_NON_PROFIT":
+            if detailed.contains("DONATION") || detailed.contains("CHARIT") {
+                return KnownCategory.giftsDonations.rawValue
+            }
+            return KnownCategory.miscellaneous.rawValue
         default:
-            if primary.isEmpty { return "Miscellaneous" }
-            return primary
-                .lowercased()
-                .split(separator: "_")
-                .map { $0.capitalized }
-                .joined(separator: " ")
+            // Never invent free-form titles like "Income" / "Transfer Out" — stay in KnownCategory.
+            return KnownCategory.miscellaneous.rawValue
         }
     }
 

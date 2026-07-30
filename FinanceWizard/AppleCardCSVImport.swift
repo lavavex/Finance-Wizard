@@ -219,35 +219,60 @@ enum AppleCardCSVImporter {
 
     private static func mapAppleCategory(_ apple: String) -> String {
         let c = apple.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if c.isEmpty { return "Miscellaneous" }
-        if c.contains("gas") || c.contains("fuel") || c.contains("parking") || c.contains("transit") {
-            return "Gas (Car)"
+        if c.isEmpty { return KnownCategory.miscellaneous.rawValue }
+        if c.contains("parking") || c.contains("transit") || c.contains("rideshare") || c.contains("taxi") {
+            return KnownCategory.transit.rawValue
         }
-        if c.contains("grocery") || c.contains("grocer") { return "Groceries" }
+        if c.contains("gas") || c.contains("fuel") {
+            return KnownCategory.gas.rawValue
+        }
+        if c.contains("grocery") || c.contains("grocer") { return KnownCategory.groceries.rawValue }
         if c.contains("restaurant") || c.contains("food") || c.contains("coffee") || c.contains("dining") {
-            return "Dining"
+            return KnownCategory.dining.rawValue
         }
-        if c.contains("entertainment") || c.contains("music") || c.contains("movie") {
-            return "Subscriptions"
+        if c.contains("entertainment") || c.contains("music") || c.contains("movie") || c.contains("game") {
+            return KnownCategory.entertainment.rawValue
         }
         if c.contains("shopping") || c.contains("retail") || c.contains("clothing") {
-            return "Shopping"
+            return KnownCategory.shopping.rawValue
         }
-        if c.contains("travel") || c.contains("airline") || c.contains("hotel") || c.contains("rideshare") {
-            return "Travel"
+        if c.contains("airline") || c.contains("hotel") || c.contains("travel") {
+            return KnownCategory.travel.rawValue
         }
-        if c.contains("health") || c.contains("medical") || c.contains("pharmacy") || c.contains("personal") {
-            return "Personal Care"
+        if c.contains("health") || c.contains("medical") || c.contains("pharmacy") {
+            return KnownCategory.health.rawValue
         }
-        if c.contains("utilities") || c.contains("internet") || c.contains("phone") {
-            return "Home Internet"
+        if c.contains("personal") {
+            return KnownCategory.personalCare.rawValue
+        }
+        if c.contains("rent") || c.contains("mortgage") || c.contains("housing") {
+            return KnownCategory.housing.rawValue
+        }
+        if c.contains("internet") || c.contains("phone") || c.contains("cable") {
+            return KnownCategory.homeInternet.rawValue
+        }
+        if c.contains("utilities") || c.contains("electric") || c.contains("water") {
+            return KnownCategory.utilities.rawValue
+        }
+        if c.contains("education") || c.contains("tuition") {
+            return KnownCategory.education.rawValue
+        }
+        if c.contains("pet") {
+            return KnownCategory.pets.rawValue
+        }
+        if c.contains("gift") || c.contains("donation") || c.contains("charity") {
+            return KnownCategory.giftsDonations.rawValue
+        }
+        if c.contains("fee") {
+            return KnownCategory.fees.rawValue
         }
         if c.contains("payment") { return TransactionAnalytics.creditCardPaymentCategory }
-        if c.contains("other") { return "Miscellaneous" }
-        // Keep Apple’s label capitalized reasonably
-        return apple.split(separator: " ")
-            .map { $0.capitalized }
-            .joined(separator: " ")
+        if c.contains("other") { return KnownCategory.miscellaneous.rawValue }
+        // Prefer a known category; otherwise Miscellaneous (avoid free-form Apple labels drifting)
+        if let known = KnownCategory.canonicalName(for: apple) {
+            return known
+        }
+        return KnownCategory.miscellaneous.rawValue
     }
 
     // MARK: - Upserts

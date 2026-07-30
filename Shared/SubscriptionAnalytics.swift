@@ -338,8 +338,9 @@ enum SubscriptionAnalytics {
     private static func isHabitCategory(_ category: String) -> Bool {
         let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let blocked = [
-            "dining", "groceries", "grocery", "gas (car)", "gas",
-            "shopping", "personal care", "travel", "flights", "hotels",
+            "dining", "groceries", "grocery", "gas (car)", "gas", "transit",
+            "shopping", "personal care", "health", "travel", "flights", "hotels",
+            "housing", "utilities", "pets", "fees",
             "transfer", "transfers", "credit card payment"
         ]
         return blocked.contains(c)

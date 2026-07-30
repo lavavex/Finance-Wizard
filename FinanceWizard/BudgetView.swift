@@ -20,7 +20,7 @@ struct BudgetView: View {
     @State private var editingCategory: String?
     @State private var categoryDraft: String = ""
     @State private var showAddCategory = false
-    @State private var addCategoryName = KnownCategory.dining.rawValue
+    @State private var addCategoryName = KnownCategory.groceries.rawValue
     @State private var addCategoryAmount = ""
 
     private var periodLabel: String {
@@ -279,9 +279,14 @@ struct BudgetView: View {
         NavigationStack {
             Form {
                 Picker("Category", selection: $addCategoryName) {
-                    ForEach(KnownCategory.spendNames, id: \.self) { name in
+                    ForEach(KnownCategory.budgetPickerNames, id: \.self) { name in
                         Text(name).tag(name)
                     }
+                }
+                if let cat = KnownCategory.match(for: addCategoryName) {
+                    Text(cat.budgetHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 HStack {
                     Text("Monthly limit")
