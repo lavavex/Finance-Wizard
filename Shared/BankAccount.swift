@@ -8,6 +8,31 @@
 import Foundation
 import SwiftData
 
+/// Cash account bucket for widgets / lists (Plaid depository subtypes).
+enum DepositoryKind: String, Sendable, CaseIterable, Identifiable {
+    case checking
+    case savings
+    case other
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .checking: return "Checking"
+        case .savings: return "Savings"
+        case .other: return "Cash"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .checking: return "building.columns.fill"
+        case .savings: return "leaf.fill"
+        case .other: return "banknote.fill"
+        }
+    }
+}
+
 @Model
 final class BankAccount {
     /// Plaid account_id (unique)
@@ -97,6 +122,30 @@ final class BankAccount {
 
     var isDepository: Bool {
         type.lowercased() == "depository"
+    }
+
+    /// Checking / savings / other cash (money market, prepaid, etc.).
+    var depositoryKind: DepositoryKind {
+        let sub = (subtype ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let name = self.name.lowercased()
+        if sub.contains("saving") || name.contains("saving") { return .savings }
+        if sub.contains("check") || name.contains("check") || name.contains("spend") {
+            return .checking
+        }
+        if sub.contains("money market") || sub.contains("cash management") || sub.contains("prepaid") {
+            return .other
+        }
+        // Plaid often uses exact subtype strings
+        switch sub {
+        case "checking", "paypal": return .checking
+        case "savings", "cd", "hsa": return .savings
+        default: return .other
+        }
+    }
+
+    /// Preferred cash balance for display (available when bank provides it).
+    var displayCashBalance: Double {
+        availableBalance ?? currentBalance
     }
 
     /// Reward multiplier for a payment rail, if configured on this account.
