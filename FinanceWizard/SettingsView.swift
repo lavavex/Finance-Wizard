@@ -79,7 +79,7 @@ struct SettingsView: View {
                         }
                     }
 
-                    TextField("https://… OAuth redirect (optional)", text: $redirectURI)
+                    TextField("OAuth redirect override", text: $redirectURI)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.body.monospaced())
@@ -97,7 +97,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Plaid account")
                 } footer: {
-                    Text("Keys stay on this device. For Chase and other OAuth banks (and Relink), add an https redirect URI here and in the Plaid Dashboard → Allowed redirect URIs. Use a Universal Link if you have one. The app still finishes Link via financewizard://…")
+                    Text("Keys stay on this device. OAuth banks (Chase, etc.) use \(PlaidCredentialsStore.defaultRedirectURI) by default — add that exact URL under Plaid Dashboard → Allowed redirect URIs. Override only if you use a Universal Link. The app still finishes Link via financewizard://…")
                 }
 
                 // MARK: Linked banks

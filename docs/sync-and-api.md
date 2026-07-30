@@ -62,7 +62,9 @@ In-app WKWebView Link is **deprecated**. Finance Wizard uses [Hosted Link](https
 7. Store access_token (Keychain) + item metadata
 ```
 
-No Dashboard allowlist is required for `completion_redirect_uri` (custom scheme). Optional `redirect_uri` (https Universal Link) is only for Production app-to-app OAuth.
+No Dashboard allowlist is required for `completion_redirect_uri` (custom scheme).
+
+`redirect_uri` defaults to **`https://budgetmagi.pages.dev/`** (must be allowlisted in the Plaid Dashboard). Settings can override for a Universal Link.
 
 ## Plaid endpoints used
 

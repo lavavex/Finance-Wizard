@@ -14,9 +14,10 @@ enum PlaidCredentialsStore {
     private static let redirectURIKey = "plaid.redirectURI"
     private static let secretAccount = "plaid.secret"
 
-    /// Optional Universal Link / https OAuth redirect for app-to-app bank auth.
-    /// Leave empty for Sandbox Hosted Link; set an allowlisted https URI in Production if needed.
-    static let defaultRedirectURI = ""
+    /// Default https OAuth redirect (Cloudflare Pages bounce). Must match Plaid Dashboard
+    /// → Allowed redirect URIs exactly (including trailing slash if allowlisted that way).
+    /// Settings can override (e.g. Universal Link later); leave blank to use this default.
+    static let defaultRedirectURI = "https://budgetmagi.pages.dev/"
 
     /// Cloudflare Worker that receives Plaid webhooks (free tier).
     /// Passed as `webhook` on `/link/token/create` so new/relinked Items notify this URL.
@@ -57,8 +58,8 @@ enum PlaidCredentialsStore {
         }
     }
 
-    /// Optional **https** OAuth redirect (Universal Link). Required by Plaid for many
-    /// banks (Chase, etc.) and for update/relink when OAuth is involved.
+    /// Effective **https** OAuth redirect for `/link/token/create`.
+    /// Uses Settings override when set; otherwise `defaultRedirectURI`.
     /// Must be allowlisted under Team Settings → API → Allowed redirect URIs.
     /// Hosted Link still uses `financewizard://hosted-link-complete` as the
     /// mobile *completion* URI (that one may be a custom scheme).
@@ -70,8 +71,21 @@ enum PlaidCredentialsStore {
         }
         set {
             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            UserDefaults.standard.set(trimmed.isEmpty ? nil : trimmed, forKey: redirectURIKey)
+            // Treat clearing the field or re-entering the built-in default as “use default”
+            // so we don’t permanently override later default changes.
+            if trimmed.isEmpty || trimmed == defaultRedirectURI {
+                UserDefaults.standard.removeObject(forKey: redirectURIKey)
+            } else {
+                UserDefaults.standard.set(trimmed, forKey: redirectURIKey)
+            }
         }
+    }
+
+    /// True when the user set a custom redirect (not the built-in Pages URL).
+    static var hasCustomRedirectURI: Bool {
+        let stored = UserDefaults.standard.string(forKey: redirectURIKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !stored.isEmpty && stored != defaultRedirectURI
     }
 
     /// `redirect_uri` for `/link/token/create` — only an https URL, never a custom scheme.
@@ -84,10 +98,12 @@ enum PlaidCredentialsStore {
     /// Removes old sample values like `https://localhost/plaid-oauth` left from early setup.
     /// Localhost is not a valid production OAuth redirect and confuses Plaid.
     static func clearLegacyLocalhostRedirectIfNeeded() {
-        let value = redirectURI.lowercased()
-        guard !value.isEmpty else { return }
-        if value.contains("localhost") || value.contains("127.0.0.1") {
-            redirectURI = ""
+        let stored = UserDefaults.standard.string(forKey: redirectURIKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        guard !stored.isEmpty else { return }
+        if stored.contains("localhost") || stored.contains("127.0.0.1") {
+            UserDefaults.standard.removeObject(forKey: redirectURIKey)
         }
     }
 
