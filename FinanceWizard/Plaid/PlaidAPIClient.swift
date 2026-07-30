@@ -45,9 +45,12 @@ enum PlaidAPIClient {
     }
 
     /// Create link_token + Hosted Link URL (webview Link is deprecated).
+    /// - Parameter accessToken: When set, opens **update mode** to re-authenticate an existing Item
+    ///   (and optionally pick more accounts). Do not pass products in that case.
     static func createHostedLinkSession(
         clientName: String = "Finance Wizard",
-        userID: String = "finance-wizard-user"
+        userID: String = "finance-wizard-user",
+        accessToken: String? = nil
     ) async throws -> HostedLinkSession {
         try PlaidCredentialsStore.requireConfigured()
 
@@ -58,10 +61,14 @@ enum PlaidAPIClient {
             let language: String
             let country_codes: [String]
             let user: User
-            let products: [String]
-            /// Credit APR / due dates when the institution supports Liabilities.
-            let required_if_supported_products: [String]
-            let transactions: TransactionsOpts
+            /// New Link only — omit in update mode.
+            let products: [String]?
+            /// Credit APR / due dates when the institution supports Liabilities (new Link).
+            let required_if_supported_products: [String]?
+            let transactions: TransactionsOpts?
+            /// Existing Item access token → update mode (re-auth / add accounts).
+            let access_token: String?
+            let update: UpdateOpts?
             /// Optional OAuth app-to-app return (https Universal Link preferred in Production).
             let redirect_uri: String?
             let hosted_link: HostedLink
@@ -74,6 +81,11 @@ enum PlaidAPIClient {
                 let days_requested: Int
             }
 
+            struct UpdateOpts: Encodable {
+                /// Let the user add/remove accounts while repairing login.
+                let account_selection_enabled: Bool
+            }
+
             struct HostedLink: Encodable {
                 let is_mobile_app: Bool
                 let completion_redirect_uri: String
@@ -83,7 +95,7 @@ enum PlaidAPIClient {
             enum CodingKeys: String, CodingKey {
                 case client_id, secret, client_name, language, country_codes
                 case user, products, required_if_supported_products, transactions
-                case redirect_uri, hosted_link
+                case access_token, update, redirect_uri, hosted_link
             }
 
             func encode(to encoder: Encoder) throws {
@@ -94,9 +106,14 @@ enum PlaidAPIClient {
                 try c.encode(language, forKey: .language)
                 try c.encode(country_codes, forKey: .country_codes)
                 try c.encode(user, forKey: .user)
-                try c.encode(products, forKey: .products)
-                try c.encode(required_if_supported_products, forKey: .required_if_supported_products)
-                try c.encode(transactions, forKey: .transactions)
+                try c.encodeIfPresent(products, forKey: .products)
+                try c.encodeIfPresent(
+                    required_if_supported_products,
+                    forKey: .required_if_supported_products
+                )
+                try c.encodeIfPresent(transactions, forKey: .transactions)
+                try c.encodeIfPresent(access_token, forKey: .access_token)
+                try c.encodeIfPresent(update, forKey: .update)
                 try c.encodeIfPresent(redirect_uri, forKey: .redirect_uri)
                 try c.encode(hosted_link, forKey: .hosted_link)
             }
@@ -115,6 +132,7 @@ enum PlaidAPIClient {
             return completionURI
         }()
 
+        let isUpdate = accessToken.map { !$0.isEmpty } ?? false
         let body = Body(
             client_id: PlaidCredentialsStore.clientID,
             secret: PlaidCredentialsStore.secret,
@@ -122,9 +140,11 @@ enum PlaidAPIClient {
             language: "en",
             country_codes: ["US"],
             user: .init(client_user_id: userID),
-            products: ["transactions"],
-            required_if_supported_products: ["liabilities"],
-            transactions: .init(days_requested: 730),
+            products: isUpdate ? nil : ["transactions"],
+            required_if_supported_products: isUpdate ? nil : ["liabilities"],
+            transactions: isUpdate ? nil : .init(days_requested: 730),
+            access_token: isUpdate ? accessToken : nil,
+            update: isUpdate ? .init(account_selection_enabled: true) : nil,
             redirect_uri: oauthRedirect,
             hosted_link: .init(
                 is_mobile_app: true,

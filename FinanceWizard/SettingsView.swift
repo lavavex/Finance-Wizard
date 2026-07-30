@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var didSave = false
     @State private var showSecret = false
     @State private var showLinkSheet = false
+    @State private var linkMode: PlaidLinkMode = .new
     @State private var linkedItems: [PlaidLinkedItem] = []
     @State private var statusMessage: String?
     @State private var statusIsError = false
@@ -117,6 +118,31 @@ struct SettingsView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
                                 }
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
+                            .contextMenu {
+                                Button {
+                                    startRelink(item)
+                                } label: {
+                                    Label("Relink…", systemImage: "arrow.triangle.2.circlepath")
+                                }
+                                .disabled(!PlaidCredentialsStore.isConfigured)
+
+                                Button(role: .destructive) {
+                                    itemPendingDelete = item
+                                } label: {
+                                    Label("Unlink", systemImage: "trash")
+                                }
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                Button {
+                                    startRelink(item)
+                                } label: {
+                                    Label("Relink", systemImage: "arrow.triangle.2.circlepath")
+                                }
+                                .tint(.blue)
+                                .disabled(!PlaidCredentialsStore.isConfigured)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
@@ -129,6 +155,7 @@ struct SettingsView: View {
                     }
 
                     Button {
+                        linkMode = .new
                         showLinkSheet = true
                     } label: {
                         Label("Link bank account", systemImage: "plus.circle.fill")
@@ -137,7 +164,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Linked banks")
                 } footer: {
-                    Text("After linking, use Sync on Transactions. Re-link a bank if credit details are missing.")
+                    Text("After linking, use Sync on Transactions. Swipe a bank left for Relink if login expires or you want to add accounts.")
                 }
 
                 // MARK: Sync info
@@ -200,11 +227,16 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .onAppear(perform: reload)
             .sheet(isPresented: $showLinkSheet, onDismiss: reload) {
-                PlaidLinkSheet { result in
+                PlaidLinkSheet(mode: linkMode) { result in
                     switch result {
                     case .success(let item):
                         statusIsError = false
-                        statusMessage = "Linked \(item.institutionName). Tap Sync on Transactions."
+                        switch linkMode {
+                        case .new:
+                            statusMessage = "Linked \(item.institutionName). Tap Sync on Transactions."
+                        case .update:
+                            statusMessage = "Relinked \(item.institutionName). Tap Sync on Transactions to refresh."
+                        }
                     case .failure(let error):
                         statusIsError = true
                         statusMessage = error.localizedDescription
@@ -294,6 +326,16 @@ struct SettingsView: View {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             didSave = false
         }
+    }
+
+    private func startRelink(_ item: PlaidLinkedItem) {
+        guard PlaidCredentialsStore.isConfigured else {
+            statusIsError = true
+            statusMessage = "Add Plaid credentials before relinking."
+            return
+        }
+        linkMode = .update(item)
+        showLinkSheet = true
     }
 
     private func unlink(_ item: PlaidLinkedItem) {
