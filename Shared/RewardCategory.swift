@@ -101,6 +101,8 @@ enum RewardCategory: String, CaseIterable, Identifiable, Codable, Sendable {
             return .dining
         case "gas (car)", "gas":
             return looksLikeTransit(t) ? .transit : .gas
+        case "transit", "transportation":
+            return .transit
         case "groceries", "grocery":
             // Online grocery is hard to detect; default to stores
             if t.contains("instacart") || t.contains("amazon fresh") || t.contains("whole foods") {
@@ -109,6 +111,8 @@ enum RewardCategory: String, CaseIterable, Identifiable, Codable, Sendable {
             return .groceries
         case "subscriptions", "subscription":
             return .streaming
+        case "entertainment":
+            return looksLikeStreaming(t) ? .streaming : .everythingElse
         case "shopping", "retail":
             if looksLikeAmazon(t) { return .amazon }
             if t.contains("http") || t.contains(".com") || t.contains("online") {
@@ -120,13 +124,16 @@ enum RewardCategory: String, CaseIterable, Identifiable, Codable, Sendable {
                 return .travelPortal
             }
             return .travelOther
-        case "personal care", "health", "medical":
+        case "health", "medical", "pharmacy":
             return looksLikeDrugstore(t) ? .drugstores : .personalCare
-        case "home internet", "internet", "utilities":
+        case "personal care":
+            return looksLikeDrugstore(t) ? .drugstores : .personalCare
+        case "home internet", "internet", "utilities", "housing", "phone":
             return .homeInternet
         case "car insurance", "insurance":
             return .carInsurance
-        case "miscellaneous", "misc", "other", "uncategorized", "":
+        case "education", "pets", "gifts & donations", "gifts and donations",
+             "fees", "miscellaneous", "misc", "other", "uncategorized", "":
             return .everythingElse
         default:
             // Unknown general category string — try reward name match
@@ -143,12 +150,15 @@ enum RewardCategory: String, CaseIterable, Identifiable, Codable, Sendable {
         switch g {
         case "dining": return [.dining]
         case "gas (car)", "gas": return [.gas, .transit]
+        case "transit": return [.transit]
         case "groceries": return [.groceries, .onlineGrocery, .amazon]
         case "subscriptions": return [.streaming]
+        case "entertainment": return [.streaming, .everythingElse]
         case "shopping": return [.shopping, .onlineRetail, .amazon, .drugstores]
         case "travel": return [.travelPortal, .travelOther]
+        case "health": return [.drugstores, .personalCare]
         case "personal care": return [.personalCare, .drugstores]
-        case "home internet": return [.homeInternet]
+        case "home internet", "utilities", "housing": return [.homeInternet]
         case "car insurance": return [.carInsurance]
         default: return [.everythingElse]
         }

@@ -91,24 +91,42 @@ enum CategoryStyle {
         }
 
         switch normalize(category) {
-        case let c where matches(c, ["gas (car)", "gas", "fuel"]):
+        case let c where matches(c, ["housing", "rent", "mortgage"]):
+            return "house.fill"
+        case let c where matches(c, ["utilities", "utility", "electric", "water"]):
+            return "bolt.fill"
+        case let c where matches(c, ["home internet", "internet", "cable", "phone", "telecom"]):
+            return "wifi"
+        case let c where matches(c, ["car insurance", "insurance", "auto insurance"]):
+            return "car.fill"
+        case let c where matches(c, ["gas (car)", "gas", "fuel", "ev charging"]):
             return "fuelpump.fill"
-        case let c where matches(c, ["dining", "restaurants", "food", "food and drink", "food & drink"]):
+        case let c where matches(c, ["transit", "transportation", "rideshare", "parking", "tolls"]):
+            return "bus.fill"
+        case let c where matches(c, ["dining", "restaurants", "food", "food and drink", "food & drink", "coffee"]):
             return "fork.knife"
-        case let c where matches(c, ["shopping", "retail", "groceries", "grocery"]):
+        case let c where matches(c, ["groceries", "grocery"]):
+            return "cart.fill"
+        case let c where matches(c, ["shopping", "retail", "merchandise"]):
             return "bag.fill"
-        case let c where matches(c, ["subscriptions", "subscription"]):
+        case let c where matches(c, ["subscriptions", "subscription", "streaming"]):
             return "repeat.circle.fill"
+        case let c where matches(c, ["entertainment", "movies", "music", "games", "hobbies"]):
+            return "theatermasks.fill"
         case let c where matches(c, ["travel", "flights", "flight", "hotels", "hotel"]):
             return "airplane"
-        case let c where matches(c, ["car insurance", "insurance"]):
-            return "car.fill"
-        case let c where matches(c, ["home internet", "internet", "utilities", "utility"]):
-            return "wifi"
-        case let c where matches(c, ["personal care", "health", "medical", "pharmacy"]):
+        case let c where matches(c, ["health", "medical", "pharmacy", "dental", "vision"]):
+            return "cross.case.fill"
+        case let c where matches(c, ["personal care", "salon", "spa", "gym", "fitness"]):
             return "heart.text.square.fill"
-        case let c where matches(c, ["entertainment", "movies", "music", "streaming"]):
-            return "theatermasks.fill"
+        case let c where matches(c, ["education", "tuition", "school"]):
+            return "graduationcap.fill"
+        case let c where matches(c, ["pets", "pet", "vet"]):
+            return "pawprint.fill"
+        case let c where matches(c, ["gifts & donations", "gifts and donations", "gifts", "donations", "charity"]):
+            return "gift.fill"
+        case let c where matches(c, ["fees", "bank fees", "atm"]):
+            return "building.columns.fill"
         case let c where matches(c, ["coffee"]):
             return "cup.and.saucer.fill"
         // Income categories (GET /api/income — Payroll, Direct Deposit, Interest, Refund, Other Income)
@@ -198,14 +216,15 @@ enum CategoryStyle {
         ]) { return .travel }
 
         if matches(c, [
-            "gas (car)", "gas", "fuel", "transportation", "transport",
-            "transit", "rideshare", "parking", "car", "automotive"
+            "gas (car)", "gas", "fuel", "ev charging", "transportation", "transport",
+            "transit", "rideshare", "parking", "tolls", "car", "automotive"
         ]) { return .transportation }
 
         if matches(c, [
             "subscriptions", "subscription", "services", "service",
             "home internet", "internet", "utilities", "utility",
-            "car insurance", "insurance", "phone", "telecom"
+            "car insurance", "insurance", "phone", "telecom",
+            "housing", "rent", "mortgage", "education", "fees", "bank fees"
         ]) { return .services }
 
         if matches(c, [
@@ -213,7 +232,9 @@ enum CategoryStyle {
         ]) { return .entertainment }
 
         if matches(c, [
-            "health", "medical", "pharmacy", "personal care", "fitness", "wellness"
+            "health", "medical", "pharmacy", "dental", "vision",
+            "personal care", "fitness", "wellness", "pets", "pet",
+            "gifts & donations", "gifts and donations", "gifts", "donations", "charity"
         ]) { return .health }
 
         return .other

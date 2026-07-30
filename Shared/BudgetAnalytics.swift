@@ -89,10 +89,10 @@ enum BudgetAnalytics {
         for (cat, limit) in plan.categoryLimits where limit > 0 {
             keys.insert(KnownCategory.canonicalName(for: cat) ?? cat)
         }
-        // Prefer a stable order: KnownCategory order, then extras A–Z
-        let knownOrder = KnownCategory.spendNames
+        // Prefer Budget picker order, then any free-form leftovers A–Z
+        let knownOrder = KnownCategory.budgetPickerNames
         let ordered = knownOrder.filter { keys.contains($0) }
-            + keys.subtracting(knownOrder).sorted()
+            + keys.subtracting(Set(knownOrder)).sorted()
 
         var categories: [BudgetCategoryProgress] = []
         var budgetedSpend = 0.0
