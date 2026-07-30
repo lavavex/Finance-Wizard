@@ -18,6 +18,5 @@ struct FinanceWizardBundle: WidgetBundle {
         CategorySpendWidget()
         // Checking & savings balances
         BalancesWidget()
-        // Template Control / Live Activity widgets are left out for now
     }
 }
