@@ -65,7 +65,7 @@ struct IncomeExportFile: Decodable {
 private enum AppTab: Hashable {
     case transactions
     case accounts
-    case benefits
+    case budget
     case settings
 }
 
@@ -98,11 +98,11 @@ struct ContentView: View {
             .tabItem { Label("Accounts", systemImage: "building.columns") }
             .tag(AppTab.accounts)
 
-            lazyTab(.benefits) {
-                BenefitsView()
+            lazyTab(.budget) {
+                BudgetView()
             }
-            .tabItem { Label("Benefits", systemImage: "gift") }
-            .tag(AppTab.benefits)
+            .tabItem { Label("Budget", systemImage: "chart.pie.fill") }
+            .tag(AppTab.budget)
 
             lazyTab(.settings) {
                 SettingsView()
