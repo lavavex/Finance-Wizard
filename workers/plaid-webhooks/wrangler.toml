@@ -1,21 +1,16 @@
 # Plaid webhook receiver — free Cloudflare Workers tier.
-# Deploy when ready (ask before first deploy):
-#   cd workers/plaid-webhooks && npx wrangler deploy
 #
-# Then set in Plaid Dashboard → Webhooks:
-#   https://plaid-webhooks.<your-subdomain>.workers.dev/plaid/webhook
+# Plaid Dashboard webhook URL:
+#   https://plaid-webhooks.<subdomain>.workers.dev/plaid/webhook
 #
-# Optional KV (persist last event per item for /pending poll):
-#   npx wrangler kv namespace create WEBHOOKS
-#   # paste id below and uncomment
+# Optional: wrangler secret put WEBHOOK_INGEST_KEY
+# Protects GET /pending only (Plaid POSTs have no custom header).
 
 name = "plaid-webhooks"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
 
-# [[kv_namespaces]]
-# binding = "WEBHOOKS"
-# id = "YOUR_KV_NAMESPACE_ID"
-
-# Optional: wrangler secret put WEBHOOK_INGEST_KEY
-# Protects GET /pending only (Plaid POSTs have no custom header).
+[[kv_namespaces]]
+binding = "WEBHOOKS"
+id = "d572bfb4e66a4038bc94071553b9e381"
+preview_id = "76e08027201044059476166b9d78977d"

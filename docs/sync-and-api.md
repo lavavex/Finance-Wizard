@@ -78,13 +78,30 @@ No Dashboard allowlist is required for `completion_redirect_uri` (custom scheme)
 | `POST /liabilities/get` | Credit APR, min payment, due dates, statement balance |
 | `POST /item/remove` | Optional unlink on Plaid side |
 
-### Webhooks (optional)
+### Webhooks
 
-Repo Worker: `workers/plaid-webhooks/`. Point Plaid Dashboard webhooks at:
+Live Worker (Cloudflare free tier + KV):
 
-`https://<worker-host>/plaid/webhook`
+```text
+https://plaid-webhooks.lavavex.workers.dev/plaid/webhook
+```
 
-It records `SYNC_UPDATES_AVAILABLE`, item login errors, and recurring updates. The app still relies on manual/periodic **Sync** (no silent push into SwiftData without a server holding access tokens). Deploy only when you want Dashboard webhook delivery (ask before first deploy).
+- Health: `GET https://plaid-webhooks.lavavex.workers.dev/health`
+- Pending events: `GET https://plaid-webhooks.lavavex.workers.dev/pending?item_id=…`
+
+The app sends this URL as `webhook` on every `/link/token/create` (Link + Relink). You can also set the same URL in the Plaid Dashboard for team-level defaults.
+
+**Important webhooks we handle (by code):**
+
+| Type | Code | Meaning |
+|------|------|---------|
+| TRANSACTIONS | `SYNC_UPDATES_AVAILABLE` | New/changed txs — tap Sync |
+| TRANSACTIONS | `RECURRING_TRANSACTIONS_UPDATE` | Recurring streams changed |
+| TRANSACTIONS | `INITIAL_UPDATE` / `HISTORICAL_UPDATE` / `DEFAULT_UPDATE` / `TRANSACTIONS_REMOVED` | Legacy / extra signals |
+| ITEM | `ERROR` (e.g. `ITEM_LOGIN_REQUIRED`) | Needs Relink |
+| ITEM | `PENDING_EXPIRATION` / `USER_PERMISSION_REVOKED` | Needs Relink |
+
+The Worker **stores** last event per Item in KV. The iOS app does **not** auto-sync from webhooks yet (no push path into SwiftData without your access tokens on a server). Use **Sync** in the app; `/item/get` still surfaces login errors on sync.
 
 Host depends on Settings environment:
 

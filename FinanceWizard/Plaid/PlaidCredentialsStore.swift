@@ -18,6 +18,10 @@ enum PlaidCredentialsStore {
     /// Leave empty for Sandbox Hosted Link; set an allowlisted https URI in Production if needed.
     static let defaultRedirectURI = ""
 
+    /// Cloudflare Worker that receives Plaid webhooks (free tier).
+    /// Passed as `webhook` on `/link/token/create` so new/relinked Items notify this URL.
+    static let plaidWebhookURL = "https://plaid-webhooks.lavavex.workers.dev/plaid/webhook"
+
     static var clientID: String {
         get {
             UserDefaults.standard.string(forKey: clientIDKey)?
