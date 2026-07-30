@@ -44,28 +44,33 @@ enum BenefitsAnalytics {
         referenceDate: Date,
         includeCategoryBreakdown: Bool = true
     ) -> [CardPeriodSummary] {
-        let spendTxs = TransactionAnalytics.spendOnly(
-            TransactionAnalytics.inPeriod(transactions, period: period, referenceDate: referenceDate)
+        let index = PeriodSpendIndex.build(
+            transactions: transactions,
+            period: period,
+            referenceDate: referenceDate
         )
+        return summaries(
+            accounts: accounts,
+            index: index,
+            includeCategoryBreakdown: includeCategoryBreakdown
+        )
+    }
 
-        // One pass: group period spend by payment method
-        var txsByMethod: [String: [Transaction]] = [:]
-        txsByMethod.reserveCapacity(32)
-        for tx in spendTxs {
-            let method = TransactionAnalytics.cardName(for: tx)
-            txsByMethod[method, default: []].append(tx)
-        }
-        let allMethods = Set(txsByMethod.keys)
-            .union(transactions.lazy.map { TransactionAnalytics.cardName(for: $0) })
-
+    /// Same as `summaries(transactions:…)` when the caller already built a period index.
+    static func summaries(
+        accounts: [BankAccount],
+        index: PeriodSpendIndex,
+        includeCategoryBreakdown: Bool = true
+    ) -> [CardPeriodSummary] {
+        let pool = index.allKnownMethods
         var claimed = Set<String>()
         var rows: [CardPeriodSummary] = []
 
         // 1) Credit cards
         for account in accounts where account.isCredit {
-            let methods = matchingMethods(for: account, pool: allMethods)
+            let methods = account.matchingPaymentMethods(in: pool)
             for m in methods { claimed.insert(m) }
-            let txs = txsForMethods(methods, in: txsByMethod)
+            let txs = index.spendTransactions(for: methods)
             let profile = CardBenefitsStore.profile(
                 accountId: account.accountId,
                 paymentMethod: account.plaidDisplayName
@@ -83,9 +88,9 @@ enum BenefitsAnalytics {
 
         // 2) Debit-reward deposit accounts only (X Money) — not Chase College checking
         for account in accounts where CardBenefitsStore.hasDebitRewards(account) {
-            let methods = matchingMethods(for: account, pool: allMethods)
+            let methods = account.matchingPaymentMethods(in: pool)
             for m in methods { claimed.insert(m) }
-            let txs = txsForMethods(methods, in: txsByMethod).filter {
+            let txs = index.spendTransactions(for: methods).filter {
                 // ACH does not earn on X Money
                 $0.effectivePaymentRail != .ach
             }
@@ -106,19 +111,19 @@ enum BenefitsAnalytics {
 
         // 3) Claim all other depository methods so they never look like orphan “cards”
         for account in accounts where account.isDepository {
-            for m in matchingMethods(for: account, pool: allMethods) {
+            for m in account.matchingPaymentMethods(in: pool) {
                 claimed.insert(m)
             }
         }
 
         // 4) Orphan card-like methods (Apple Card CSV, etc.)
-        let orphanMethods = allMethods
+        let orphanMethods = pool
             .subtracting(claimed)
             .filter { looksLikeCardMethod($0) }
             .sorted()
 
         for method in orphanMethods {
-            let txs = txsByMethod[method] ?? []
+            let txs = index.spendTxsByMethod[method] ?? []
             guard !txs.isEmpty else { continue }
             let profile = CardBenefitsStore.profile(accountId: nil, paymentMethod: method)
             rows.append(buildSummary(
@@ -133,19 +138,6 @@ enum BenefitsAnalytics {
         }
 
         return rows.sorted { $0.estimatedValueUSD > $1.estimatedValueUSD }
-    }
-
-    private static func txsForMethods(
-        _ methods: Set<String>,
-        in txsByMethod: [String: [Transaction]]
-    ) -> [Transaction] {
-        var out: [Transaction] = []
-        for m in methods {
-            if let chunk = txsByMethod[m] {
-                out.append(contentsOf: chunk)
-            }
-        }
-        return out
     }
 
     /// Breakdown for one card’s methods + profile (uses latest profile if passed).
@@ -344,18 +336,6 @@ enum BenefitsAnalytics {
             }
         }
         return (spend, units, value)
-    }
-
-    private static func matchingMethods(
-        for account: BankAccount,
-        pool: Set<String>
-    ) -> Set<String> {
-        var methods = Set<String>()
-        for method in pool where account.matchesPaymentMethod(method) {
-            methods.insert(method)
-        }
-        methods.insert(account.plaidDisplayName)
-        return methods
     }
 
     private static func looksLikeCardMethod(_ method: String) -> Bool {
