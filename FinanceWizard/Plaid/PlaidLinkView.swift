@@ -119,22 +119,67 @@ struct PlaidLinkSheet: View {
             let controller = HostedLinkSessionController()
             sessionController = controller
 
-            let callbackURL = try await controller.start(
-                url: session.hostedLinkURL,
-                callbackScheme: PlaidHostedLink.callbackScheme
-            )
+            // Race browser callback against token polling. When no https OAuth
+            // redirect is configured, Hosted Link may not bounce via
+            // financewizard:// — success is still visible on /link/token/get.
+            enum RaceEvent {
+                case browserClosed(callback: URL?)
+                case linkReady(PlaidAPIClient.LinkSuccessPayload)
+            }
 
-            // User cancelled the system browser sheet
-            if callbackURL == nil {
+            let success = try await withThrowingTaskGroup(of: RaceEvent.self) { group in
+                group.addTask { @MainActor in
+                    let url = try await controller.start(
+                        url: session.hostedLinkURL,
+                        callbackScheme: PlaidHostedLink.callbackScheme
+                    )
+                    return .browserClosed(callback: url)
+                }
+                group.addTask {
+                    let payload = try await PlaidAPIClient.waitForLinkSuccess(
+                        linkToken: session.linkToken,
+                        maxAttempts: 60,
+                        delayNanoseconds: 500_000_000
+                    )
+                    return .linkReady(payload)
+                }
+
+                var ready: PlaidAPIClient.LinkSuccessPayload?
+                for try await event in group {
+                    switch event {
+                    case .linkReady(let payload):
+                        ready = payload
+                        group.cancelAll()
+                        await MainActor.run { controller.cancel() }
+                    case .browserClosed(let callback):
+                        if callback != nil {
+                            // Custom-scheme completion fired — wait briefly for token
+                            group.cancelAll()
+                            ready = try await PlaidAPIClient.waitForLinkSuccess(
+                                linkToken: session.linkToken,
+                                maxAttempts: 12,
+                                delayNanoseconds: 400_000_000
+                            )
+                        } else {
+                            // User dismissed browser; stop polling
+                            group.cancelAll()
+                        }
+                    }
+                    break
+                }
+                return ready
+            }
+
+            guard let success else {
                 dismiss()
                 return
             }
 
             phase = .finishing
-            let success = try await PlaidAPIClient.waitForLinkSuccess(linkToken: session.linkToken)
             await completeWithSuccess(success)
+        } catch is CancellationError {
+            dismiss()
         } catch {
-            // ASWebAuthenticationSession cancel is reported as error
             if let authError = error as? ASWebAuthenticationSessionError,
                authError.code == .canceledLogin {
                 dismiss()
