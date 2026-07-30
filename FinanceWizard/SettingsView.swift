@@ -332,6 +332,11 @@ struct SettingsView: View {
         PlaidCredentialsStore.clearLegacyLocalhostRedirectIfNeeded()
         redirectURI = PlaidCredentialsStore.redirectURI
         linkedItems = PlaidItemStore.loadItems()
+        // One-shot cleanup of BankAccounts left behind by old Relink/Unlink bugs
+        let removed = PlaidSyncEngine.cleanupStaleBankAccounts(modelContext: modelContext)
+        if removed > 0 {
+            try? modelContext.save()
+        }
     }
 
     private func saveCredentials() {
