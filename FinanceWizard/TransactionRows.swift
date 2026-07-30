@@ -52,9 +52,15 @@ struct TransactionRowView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                Text(transaction.date, style: .date)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text(transaction.displayDate, style: .date)
+                    if transaction.isPending == true {
+                        Text("· Pending")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {

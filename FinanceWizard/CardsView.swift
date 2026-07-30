@@ -280,7 +280,8 @@ struct CardsView: View {
             let report = try await PlaidSyncEngine.syncAll(
                 modelContext: modelContext,
                 resetCursors: false,
-                includePending: false
+                includePending: true,
+                forceRefresh: false
             )
             await MainActor.run {
                 syncBanner = report.summary

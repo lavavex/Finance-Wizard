@@ -593,7 +593,8 @@ enum SharedStore {
             Income.self,
             BankAccount.self,
             CreditCardPayment.self,
-            BudgetPlan.self
+            BudgetPlan.self,
+            RecurringStream.self
         ])
 
         if inMemory {

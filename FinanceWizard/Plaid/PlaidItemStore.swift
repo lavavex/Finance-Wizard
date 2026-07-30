@@ -18,11 +18,23 @@ struct PlaidLinkedItem: Codable, Identifiable, Equatable, Sendable {
     /// Cursor for /transactions/sync (empty = full history from start)
     var transactionsCursor: String
     var linkedAt: Date
+    /// From `/item/get` — e.g. ITEM_LOGIN_REQUIRED → user should Relink.
+    var errorCode: String?
+    var errorMessage: String?
+    var lastStatusCheckAt: Date?
 
     /// Payment method label used on local transactions for this Item.
     var paymentMethodLabel: String {
         if institutionName.isEmpty { return "Linked account" }
         return institutionName
+    }
+
+    var needsRelink: Bool {
+        guard let code = errorCode?.uppercased() else { return false }
+        return code == "ITEM_LOGIN_REQUIRED"
+            || code == "ITEM_LOCKED"
+            || code == "USER_PERMISSION_REVOKED"
+            || code == "PENDING_EXPIRATION"
     }
 }
 
@@ -46,7 +58,10 @@ enum PlaidItemStore {
                 institutionName: meta.institutionName,
                 accountNames: meta.accountNames,
                 transactionsCursor: meta.transactionsCursor,
-                linkedAt: meta.linkedAt
+                linkedAt: meta.linkedAt,
+                errorCode: meta.errorCode,
+                errorMessage: meta.errorMessage,
+                lastStatusCheckAt: meta.lastStatusCheckAt
             )
         }
     }
@@ -63,7 +78,10 @@ enum PlaidItemStore {
                 institutionName: $0.institutionName,
                 accountNames: $0.accountNames,
                 transactionsCursor: $0.transactionsCursor,
-                linkedAt: $0.linkedAt
+                linkedAt: $0.linkedAt,
+                errorCode: $0.errorCode,
+                errorMessage: $0.errorMessage,
+                lastStatusCheckAt: $0.lastStatusCheckAt
             )
         }
         if let data = try? JSONEncoder().encode(metas) {
@@ -88,6 +106,23 @@ enum PlaidItemStore {
         saveItems(items)
     }
 
+    static func updateItemStatus(
+        itemID: String,
+        errorCode: String?,
+        errorMessage: String?
+    ) {
+        var items = loadItems()
+        guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
+        items[idx].errorCode = errorCode
+        items[idx].errorMessage = errorMessage
+        items[idx].lastStatusCheckAt = Date()
+        saveItems(items)
+    }
+
+    static func clearItemError(itemID: String) {
+        updateItemStatus(itemID: itemID, errorCode: nil, errorMessage: nil)
+    }
+
     static func resetAllCursors() {
         var items = loadItems()
         for i in items.indices {
@@ -98,13 +133,18 @@ enum PlaidItemStore {
 
     static func remove(itemID: String) {
         PlaidKeychain.delete(account: accessTokenPrefix + itemID)
-        var items = loadItems().filter { $0.id != itemID }
+        let items = loadItems().filter { $0.id != itemID }
         // Also drop any orphan metadata if token missing
         saveItems(items)
     }
 
     static var hasLinkedItems: Bool {
         !loadItems().isEmpty
+    }
+
+    /// Items that need Relink (login expired / permission revoked).
+    static var itemsNeedingRelink: [PlaidLinkedItem] {
+        loadItems().filter(\.needsRelink)
     }
 
     // Metadata only (no secret access token)
@@ -114,5 +154,8 @@ enum PlaidItemStore {
         var accountNames: [String]
         var transactionsCursor: String
         var linkedAt: Date
+        var errorCode: String?
+        var errorMessage: String?
+        var lastStatusCheckAt: Date?
     }
 }

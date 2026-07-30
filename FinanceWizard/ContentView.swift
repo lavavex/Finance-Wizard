@@ -418,12 +418,17 @@ struct AllTransactionsView: View {
                         // Incremental Plaid sync + optional full re-pull
                         Menu {
                             Button {
-                                Task { await syncFromPlaid(resetCursors: false) }
+                                Task { await syncFromPlaid(resetCursors: false, forceRefresh: false) }
                             } label: {
                                 Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
                             }
                             Button {
-                                Task { await syncFromPlaid(resetCursors: true) }
+                                Task { await syncFromPlaid(resetCursors: false, forceRefresh: true) }
+                            } label: {
+                                Label("Force bank refresh", systemImage: "bolt.horizontal.circle")
+                            }
+                            Button {
+                                Task { await syncFromPlaid(resetCursors: true, forceRefresh: false) }
                             } label: {
                                 Label("Full re-sync", systemImage: "arrow.down.circle")
                             }
@@ -605,12 +610,18 @@ struct AllTransactionsView: View {
 
     /// Pull transactions directly from the user’s Plaid developer account.
     /// - Parameter resetCursors: if true, re-download full history for each Item.
-    private func syncFromPlaid(resetCursors: Bool) async {
+    /// - Parameter forceRefresh: call `/transactions/refresh` first (on-demand bank pull).
+    private func syncFromPlaid(resetCursors: Bool, forceRefresh: Bool = false) async {
         await MainActor.run {
             isSyncing = true
+            let title: String = {
+                if resetCursors { return "Full re-sync…" }
+                if forceRefresh { return "Force refreshing banks…" }
+                return "Syncing with Plaid…"
+            }()
             setSyncStatus(
                 .running,
-                title: resetCursors ? "Full re-sync…" : "Syncing with Plaid…",
+                title: title,
                 detail: PlaidCredentialsStore.isConfigured
                     ? "Environment: \(PlaidCredentialsStore.environment.displayName)"
                     : "Missing credentials"
@@ -621,7 +632,8 @@ struct AllTransactionsView: View {
             let report = try await PlaidSyncEngine.syncAll(
                 modelContext: modelContext,
                 resetCursors: resetCursors,
-                includePending: false
+                includePending: true,
+                forceRefresh: forceRefresh
             ) { message in
                 Task { @MainActor in
                     setSyncStatus(.running, title: "Syncing…", detail: message)

@@ -399,8 +399,60 @@ enum PlaidAPIClient {
         )
     }
 
-    /// Institution id for a linked Item (`/item/get`).
-    static func itemInstitutionID(accessToken: String) async throws -> String? {
+    /// On-demand bank pull (`/transactions/refresh`). Optional paid add-on; soft-fail if not enabled.
+    /// After success, call `/transactions/sync` to pull the new cursor updates.
+    @discardableResult
+    static func transactionsRefresh(accessToken: String) async throws -> String? {
+        try PlaidCredentialsStore.requireConfigured()
+
+        struct Body: Encodable {
+            let client_id: String
+            let secret: String
+            let access_token: String
+        }
+
+        struct Response: Decodable {
+            let request_id: String?
+        }
+
+        let response: Response = try await post(
+            path: "/transactions/refresh",
+            body: Body(
+                client_id: PlaidCredentialsStore.clientID,
+                secret: PlaidCredentialsStore.secret,
+                access_token: accessToken
+            )
+        )
+        return response.request_id
+    }
+
+    /// Recurring inflow/outflow streams (`/transactions/recurring/get`). Optional add-on.
+    static func transactionsRecurringGet(
+        accessToken: String,
+        accountIDs: [String]? = nil
+    ) async throws -> PlaidRecurringGetResponse {
+        try PlaidCredentialsStore.requireConfigured()
+
+        struct Body: Encodable {
+            let client_id: String
+            let secret: String
+            let access_token: String
+            let account_ids: [String]?
+        }
+
+        return try await post(
+            path: "/transactions/recurring/get",
+            body: Body(
+                client_id: PlaidCredentialsStore.clientID,
+                secret: PlaidCredentialsStore.secret,
+                access_token: accessToken,
+                account_ids: accountIDs
+            )
+        )
+    }
+
+    /// Institution id + error status for a linked Item (`/item/get`).
+    static func itemGet(accessToken: String) async throws -> PlaidItemGetResult {
         try PlaidCredentialsStore.requireConfigured()
 
         struct Body: Encodable {
@@ -413,7 +465,15 @@ enum PlaidAPIClient {
             let item: Item
 
             struct Item: Decodable {
+                let item_id: String?
                 let institution_id: String?
+                let error: ItemError?
+
+                struct ItemError: Decodable {
+                    let error_code: String?
+                    let error_message: String?
+                    let display_message: String?
+                }
             }
         }
 
@@ -425,7 +485,18 @@ enum PlaidAPIClient {
                 access_token: accessToken
             )
         )
-        return response.item.institution_id
+        return PlaidItemGetResult(
+            itemID: response.item.item_id,
+            institutionID: response.item.institution_id,
+            errorCode: response.item.error?.error_code,
+            errorMessage: response.item.error?.display_message
+                ?? response.item.error?.error_message
+        )
+    }
+
+    /// Institution id for a linked Item (`/item/get`).
+    static func itemInstitutionID(accessToken: String) async throws -> String? {
+        try await itemGet(accessToken: accessToken).institutionID
     }
 
     /// Logo + brand color via `/institutions/get_by_id` (optional metadata).
@@ -687,10 +758,90 @@ struct PlaidTransaction: Decodable {
     let payment_channel: String?
     let iso_currency_code: String?
     let original_description: String?
+    /// Prefer for UI date when present (user-facing “when I spent”).
+    let authorized_date: String?
+    /// Posted tx points at its former pending twin (delete the pending row).
+    let pending_transaction_id: String?
+    let merchant_entity_id: String?
+    let logo_url: String?
+    let website: String?
+    let counterparties: [PlaidCounterparty]?
+
+    /// Best merchant logo: top-level, else first merchant counterparty.
+    var resolvedLogoURL: String? {
+        if let logo_url, !logo_url.isEmpty { return logo_url }
+        return counterparties?.first(where: { $0.type == "merchant" })?.logo_url
+            ?? counterparties?.first?.logo_url
+    }
+
+    var resolvedWebsite: String? {
+        if let website, !website.isEmpty { return website }
+        return counterparties?.first(where: { $0.type == "merchant" })?.website
+            ?? counterparties?.first?.website
+    }
+
+    var resolvedMerchantEntityID: String? {
+        if let merchant_entity_id, !merchant_entity_id.isEmpty { return merchant_entity_id }
+        return counterparties?.first(where: { $0.type == "merchant" })?.entity_id
+    }
+}
+
+struct PlaidCounterparty: Decodable {
+    let name: String?
+    let entity_id: String?
+    let type: String?
+    let website: String?
+    let logo_url: String?
+    let confidence_level: String?
 }
 
 struct PlaidPFC: Decodable {
     let primary: String?
     let detailed: String?
     let confidence_level: String?
+}
+
+struct PlaidItemGetResult: Sendable {
+    let itemID: String?
+    let institutionID: String?
+    let errorCode: String?
+    let errorMessage: String?
+
+    var needsRelink: Bool {
+        guard let code = errorCode?.uppercased() else { return false }
+        return code == "ITEM_LOGIN_REQUIRED"
+            || code == "ITEM_LOCKED"
+            || code == "ITEM_NOT_SUPPORTED"
+            || code == "USER_PERMISSION_REVOKED"
+            || code == "PENDING_EXPIRATION"
+    }
+}
+
+struct PlaidRecurringGetResponse: Decodable {
+    let inflow_streams: [PlaidRecurringStream]?
+    let outflow_streams: [PlaidRecurringStream]?
+    let updated_datetime: String?
+    let request_id: String?
+}
+
+struct PlaidRecurringStream: Decodable {
+    let account_id: String?
+    let stream_id: String
+    let description: String?
+    let merchant_name: String?
+    let first_date: String?
+    let last_date: String?
+    let predicted_next_date: String?
+    let frequency: String?
+    let transaction_ids: [String]?
+    let average_amount: PlaidStreamAmount?
+    let last_amount: PlaidStreamAmount?
+    let is_active: Bool?
+    let status: String?
+    let personal_finance_category: PlaidPFC?
+}
+
+struct PlaidStreamAmount: Decodable {
+    let amount: Double?
+    let iso_currency_code: String?
 }

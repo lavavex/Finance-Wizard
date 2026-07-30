@@ -25,16 +25,26 @@ Toolbar **Sync** menu:
 
 ```text
 For each linked Plaid Item:
+  /item/get → institution + login-error status (Relink banner)
   loop /transactions/sync with stored cursor
-    added + modified → upsert expense or income into SwiftData
+    added + modified → upsert expense or income (with enrichment)
+    pending_transaction_id → drop pending twin when posted arrives
     removed → delete local row
+  /accounts/get + /liabilities/get
+  /transactions/recurring/get → RecurringStream (add-on; soft-fail)
   save next_cursor for that Item
 Reload widget timelines
 ```
 
+Pending transactions are stored and merged into posted rows via `pending_transaction_id`. UI prefers `authorized_date` when present.
+
+### Force bank refresh
+
+Calls `/transactions/refresh` (optional paid add-on) before the normal cursor sync so Plaid does an on-demand bank pull. Soft-fails if the product is not enabled.
+
 ### Full re-sync
 
-Same as above, but **clears cursors** first so Plaid re-sends the full transaction stream for each Item (use after schema resets or missing history).
+Same as Sync now, but **clears cursors** first so Plaid re-sends the full transaction stream for each Item (use after schema resets or missing history).
 
 ### Link bank account (Hosted Link)
 
@@ -61,10 +71,20 @@ No Dashboard allowlist is required for `completion_redirect_uri` (custom scheme)
 | `POST /link/token/create` | Link session: `transactions` + `liabilities` when supported (up to 730 days) |
 | `POST /item/public_token/exchange` | public_token → access_token + item_id |
 | `POST /transactions/sync` | Incremental transaction updates (cursor-based) |
+| `POST /transactions/refresh` | On-demand bank pull (optional add-on; Force bank refresh) |
+| `POST /transactions/recurring/get` | Subscription / payroll streams (optional add-on) |
 | `POST /accounts/get` | Balances and credit limits |
-| `POST /item/get` + `/institutions/get_by_id` | Institution id, logo, primary color |
+| `POST /item/get` + `/institutions/get_by_id` | Institution id, login errors, logo, primary color |
 | `POST /liabilities/get` | Credit APR, min payment, due dates, statement balance |
 | `POST /item/remove` | Optional unlink on Plaid side |
+
+### Webhooks (optional)
+
+Repo Worker: `workers/plaid-webhooks/`. Point Plaid Dashboard webhooks at:
+
+`https://<worker-host>/plaid/webhook`
+
+It records `SYNC_UPDATES_AVAILABLE`, item login errors, and recurring updates. The app still relies on manual/periodic **Sync** (no silent push into SwiftData without a server holding access tokens). Deploy only when you want Dashboard webhook delivery (ask before first deploy).
 
 Host depends on Settings environment:
 
