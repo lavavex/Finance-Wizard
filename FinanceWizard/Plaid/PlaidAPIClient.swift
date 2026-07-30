@@ -186,9 +186,9 @@ enum PlaidAPIClient {
                         status: 0,
                         code: code,
                         message: """
-                        Plaid needs an https OAuth redirect URI for this bank (and for Relink). \
-                        In Settings, set “OAuth redirect” to an https URL you’ve added under \
-                        Plaid Dashboard → Team Settings → API → Allowed redirect URIs. \
+                        Plaid rejected the OAuth redirect URI. Add this exact URL under \
+                        Plaid Dashboard → Allowed redirect URIs: \
+                        \(PlaidCredentialsStore.defaultRedirectURI) \
                         (Custom schemes like financewizard:// are only for the in-app completion callback.)
                         """
                     )
