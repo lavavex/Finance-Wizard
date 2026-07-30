@@ -71,6 +71,8 @@ enum PlaidAPIClient {
             let update: UpdateOpts?
             /// Optional OAuth app-to-app return (https Universal Link preferred in Production).
             let redirect_uri: String?
+            /// HTTPS endpoint for Item/Transactions webhooks (Cloudflare Worker).
+            let webhook: String?
             let hosted_link: HostedLink
 
             struct User: Encodable {
@@ -107,7 +109,7 @@ enum PlaidAPIClient {
             enum CodingKeys: String, CodingKey {
                 case client_id, secret, client_name, language, country_codes
                 case user, products, required_if_supported_products, transactions
-                case access_token, update, redirect_uri, hosted_link
+                case access_token, update, redirect_uri, webhook, hosted_link
             }
 
             func encode(to encoder: Encoder) throws {
@@ -127,6 +129,7 @@ enum PlaidAPIClient {
                 try c.encodeIfPresent(access_token, forKey: .access_token)
                 try c.encodeIfPresent(update, forKey: .update)
                 try c.encodeIfPresent(redirect_uri, forKey: .redirect_uri)
+                try c.encodeIfPresent(webhook, forKey: .webhook)
                 try c.encode(hosted_link, forKey: .hosted_link)
             }
         }
@@ -156,6 +159,7 @@ enum PlaidAPIClient {
             access_token: isUpdate ? accessToken : nil,
             update: isUpdate ? .init(account_selection_enabled: true) : nil,
             redirect_uri: httpsRedirect,
+            webhook: PlaidCredentialsStore.plaidWebhookURL,
             hosted_link: .init(
                 is_mobile_app: useMobileAppHostedLink,
                 // Custom-scheme completion only valid for mobile Hosted Link sessions.
