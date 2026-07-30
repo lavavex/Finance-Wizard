@@ -161,12 +161,14 @@ enum PlaidSyncEngine {
         // Refresh account list after balances upsert so later txs see new cards.
         var accountsCache = allAccounts
 
-        // Item health (login required → Relink)
+        // Item health (login required → Relink) + product access (liabilities)
         progress?("\(item.institutionName): status…")
         var institutionId: String?
+        var itemHasLiabilitiesProduct = false
         do {
             let status = try await PlaidAPIClient.itemGet(accessToken: item.accessToken)
             institutionId = status.institutionID
+            itemHasLiabilitiesProduct = status.hasLiabilitiesProduct
             PlaidItemStore.updateItemStatus(
                 itemID: item.id,
                 errorCode: status.errorCode,
@@ -176,6 +178,11 @@ enum PlaidSyncEngine {
                 let msg = status.errorMessage ?? status.errorCode ?? "Login required"
                 report.warnings.append(
                     "\(item.institutionName): needs Relink — \(msg)"
+                )
+            }
+            if !itemHasLiabilitiesProduct {
+                report.warnings.append(
+                    "\(item.institutionName): Liabilities not on this Item yet — swipe Relink in Settings (adds APR/due dates product), then Sync."
                 )
             }
         } catch {
@@ -307,30 +314,54 @@ enum PlaidSyncEngine {
 
         // Credit APR / due dates / min payment (Liabilities product)
         progress?("\(item.institutionName): credit details…")
+        let creditAccountCount = ((try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? [])
+            .filter { $0.itemId == item.id && $0.isCredit }
+            .count
         do {
             let creditLiabilities = try await PlaidAPIClient.liabilitiesGet(accessToken: item.accessToken)
             report.liabilitiesUpdated = applyCreditLiabilities(
                 creditLiabilities,
                 modelContext: modelContext
             )
+            if creditAccountCount > 0 && creditLiabilities.isEmpty {
+                report.warnings.append(
+                    "\(item.institutionName): \(creditAccountCount) credit card(s) linked but Plaid returned no APR/due-date rows. Enable **Liabilities** in Plaid Dashboard → Products, Relink and keep credit cards selected / share liability data, then Sync again."
+                )
+            } else if creditAccountCount > 0 && report.liabilitiesUpdated == 0 {
+                report.warnings.append(
+                    "\(item.institutionName): liabilities payload didn’t match local credit accounts (account_id mismatch). Full re-sync or Relink may help."
+                )
+            }
         } catch {
             if case PlaidAPIError.http(_, let code, let message) = error {
-                if let code, softProductCodes.contains(code) {
-                    if code == "PRODUCT_NOT_READY" || code == "ITEM_PRODUCT_NOT_READY" {
+                let code = code ?? ""
+                if code == "PRODUCT_NOT_READY" || code == "ITEM_PRODUCT_NOT_READY" {
+                    report.warnings.append(
+                        "\(item.institutionName): credit details still preparing — Sync again in a few minutes."
+                    )
+                } else if code == "PRODUCTS_NOT_SUPPORTED" {
+                    if creditAccountCount > 0 {
                         report.warnings.append(
-                            "\(item.institutionName): credit details still preparing — Sync again in a few minutes."
+                            "\(item.institutionName): Plaid doesn’t support Liabilities for these credit accounts (APR/due date unavailable)."
                         )
-                    } else if code == "PRODUCTS_NOT_SUPPORTED" || code == "NO_LIABILITY_ACCOUNTS" {
-                        // Institution has no credit liabilities data — silent for depository-only Items.
-                    } else if code == "PRODUCT_NOT_ENABLED"
-                                || code == "INVALID_PRODUCT"
-                                || code == "ADDITIONAL_CONSENT_REQUIRED" {
-                        report.warnings.append(
-                            "\(item.institutionName): re-link bank to enable credit details (APR, due date)."
-                        )
-                    } else {
-                        report.warnings.append("\(item.institutionName) liabilities: \(message)")
                     }
+                    // Silent for depository-only Items.
+                } else if code == "NO_LIABILITY_ACCOUNTS" {
+                    if creditAccountCount > 0 {
+                        report.warnings.append(
+                            "\(item.institutionName): no liability data shared — Relink, select your credit cards, and allow liability/details sharing in the bank OAuth screen."
+                        )
+                    }
+                } else if code == "PRODUCT_NOT_ENABLED" || code == "INVALID_PRODUCT" {
+                    report.warnings.append(
+                        "\(item.institutionName): enable **Liabilities** under Plaid Dashboard → Team → Products (then Relink + Sync)."
+                    )
+                } else if code == "ADDITIONAL_CONSENT_REQUIRED" {
+                    report.warnings.append(
+                        "\(item.institutionName): Relink required to consent to credit details (APR, due date)."
+                    )
+                } else if softProductCodes.contains(code) {
+                    report.warnings.append("\(item.institutionName) liabilities: \(message)")
                 } else {
                     report.warnings.append("\(item.institutionName) liabilities: \(error.localizedDescription)")
                 }
@@ -1246,17 +1277,19 @@ enum PlaidSyncEngine {
             account.specialApr = nil
             for apr in liability.aprs ?? [] {
                 guard let pct = apr.apr_percentage else { continue }
-                switch (apr.apr_type ?? "").lowercased() {
-                case "purchase_apr":
+                let t = (apr.apr_type ?? "").lowercased()
+                // Plaid uses purchase_apr / cash_apr / …; accept a few variants.
+                if t.contains("purchase") {
                     account.purchaseApr = pct
-                case "cash_apr":
+                } else if t.contains("cash") {
                     account.cashApr = pct
-                case "balance_transfer_apr":
+                } else if t.contains("balance_transfer") || t.contains("balance transfer") {
                     account.balanceTransferApr = pct
-                case "special":
+                } else if t.contains("special") || t.contains("promo") {
                     account.specialApr = pct
-                default:
-                    break
+                } else if account.purchaseApr == nil {
+                    // Unknown type → first unknown becomes purchase APR so something shows.
+                    account.purchaseApr = pct
                 }
             }
             count += 1

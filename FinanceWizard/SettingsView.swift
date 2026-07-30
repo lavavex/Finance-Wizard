@@ -175,7 +175,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Linked banks")
                 } footer: {
-                    Text("After linking, use Sync on Transactions. Swipe a bank left for Relink if login expires or you want to add accounts. Orange banners mean Plaid needs a Relink.")
+                    Text("After linking, use Sync on Transactions. Swipe left for Relink if login expires, you want more accounts, or APR/due dates are missing (Relink adds the Liabilities product). Orange banners mean Plaid needs a Relink.")
                 }
 
                 // MARK: Sync info
