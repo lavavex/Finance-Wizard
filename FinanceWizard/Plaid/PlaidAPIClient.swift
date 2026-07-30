@@ -61,12 +61,14 @@ enum PlaidAPIClient {
             let language: String
             let country_codes: [String]
             let user: User
-            /// New Link only — omit in update mode.
+            /// New Link: `transactions`. Update mode: omit unless **adding** a product (e.g. liabilities).
             let products: [String]?
-            /// Credit APR / due dates when the institution supports Liabilities (new Link).
+            /// Credit APR / due dates when the institution supports Liabilities.
             let required_if_supported_products: [String]?
+            /// Consent to call product endpoints later (or after Relink) without re-init.
+            let additional_consented_products: [String]?
             let transactions: TransactionsOpts?
-            /// Existing Item access token → update mode (re-auth / add accounts).
+            /// Existing Item access token → update mode (re-auth / add accounts / add products).
             let access_token: String?
             let update: UpdateOpts?
             /// Optional OAuth app-to-app return (https Universal Link preferred in Production).
@@ -108,8 +110,8 @@ enum PlaidAPIClient {
 
             enum CodingKeys: String, CodingKey {
                 case client_id, secret, client_name, language, country_codes
-                case user, products, required_if_supported_products, transactions
-                case access_token, update, redirect_uri, webhook, hosted_link
+                case user, products, required_if_supported_products, additional_consented_products
+                case transactions, access_token, update, redirect_uri, webhook, hosted_link
             }
 
             func encode(to encoder: Encoder) throws {
@@ -124,6 +126,10 @@ enum PlaidAPIClient {
                 try c.encodeIfPresent(
                     required_if_supported_products,
                     forKey: .required_if_supported_products
+                )
+                try c.encodeIfPresent(
+                    additional_consented_products,
+                    forKey: .additional_consented_products
                 )
                 try c.encodeIfPresent(transactions, forKey: .transactions)
                 try c.encodeIfPresent(access_token, forKey: .access_token)
@@ -146,6 +152,10 @@ enum PlaidAPIClient {
         let useMobileAppHostedLink = httpsRedirect != nil
 
         let isUpdate = accessToken.map { !$0.isEmpty } ?? false
+        // Liabilities (APR / due dates) is a separate Plaid product. New Link initializes it
+        // when the institution supports it. Relink (update mode) must *add* it via `products`
+        // — otherwise old Items never gain credit details no matter how many times you Sync.
+        // See: Plaid “How do I add a product to an existing Item?”
         let body = Body(
             client_id: PlaidCredentialsStore.clientID,
             secret: PlaidCredentialsStore.secret,
@@ -153,8 +163,9 @@ enum PlaidAPIClient {
             language: "en",
             country_codes: ["US"],
             user: .init(client_user_id: userID),
-            products: isUpdate ? nil : ["transactions"],
+            products: isUpdate ? ["liabilities"] : ["transactions"],
             required_if_supported_products: isUpdate ? nil : ["liabilities"],
+            additional_consented_products: ["liabilities"],
             transactions: isUpdate ? nil : .init(days_requested: 730),
             access_token: isUpdate ? accessToken : nil,
             update: isUpdate ? .init(account_selection_enabled: true) : nil,
@@ -455,7 +466,7 @@ enum PlaidAPIClient {
         )
     }
 
-    /// Institution id + error status for a linked Item (`/item/get`).
+    /// Institution id + error status + product access for a linked Item (`/item/get`).
     static func itemGet(accessToken: String) async throws -> PlaidItemGetResult {
         try PlaidCredentialsStore.requireConfigured()
 
@@ -471,6 +482,10 @@ enum PlaidAPIClient {
             struct Item: Decodable {
                 let item_id: String?
                 let institution_id: String?
+                let products: [String]?
+                let billed_products: [String]?
+                let available_products: [String]?
+                let consented_products: [String]?
                 let error: ItemError?
 
                 struct ItemError: Decodable {
@@ -494,7 +509,11 @@ enum PlaidAPIClient {
             institutionID: response.item.institution_id,
             errorCode: response.item.error?.error_code,
             errorMessage: response.item.error?.display_message
-                ?? response.item.error?.error_message
+                ?? response.item.error?.error_message,
+            products: response.item.products ?? [],
+            billedProducts: response.item.billed_products ?? [],
+            availableProducts: response.item.available_products ?? [],
+            consentedProducts: response.item.consented_products ?? []
         )
     }
 
@@ -810,6 +829,10 @@ struct PlaidItemGetResult: Sendable {
     let institutionID: String?
     let errorCode: String?
     let errorMessage: String?
+    var products: [String] = []
+    var billedProducts: [String] = []
+    var availableProducts: [String] = []
+    var consentedProducts: [String] = []
 
     var needsRelink: Bool {
         guard let code = errorCode?.uppercased() else { return false }
@@ -818,6 +841,15 @@ struct PlaidItemGetResult: Sendable {
             || code == "ITEM_NOT_SUPPORTED"
             || code == "USER_PERMISSION_REVOKED"
             || code == "PENDING_EXPIRATION"
+    }
+
+    /// True when Liabilities is initialized / billed / consented on this Item.
+    var hasLiabilitiesProduct: Bool {
+        let all = Set(
+            (products + billedProducts + availableProducts + consentedProducts)
+                .map { $0.lowercased() }
+        )
+        return all.contains("liabilities")
     }
 }
 

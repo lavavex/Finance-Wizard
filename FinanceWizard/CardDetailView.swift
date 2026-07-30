@@ -301,7 +301,7 @@ struct CardDetailView: View {
                     Text("Credit details")
                 } footer: {
                     if credit.liabilitiesSyncedAt == nil {
-                        Text("Sync after linking to load APR and due dates when available.")
+                        Text("No APR/due date yet. Enable Liabilities in the Plaid Dashboard, Relink this bank (select the credit card), then Sync. Chase/Amex can take a few minutes after Relink.")
                     }
                 }
             }
