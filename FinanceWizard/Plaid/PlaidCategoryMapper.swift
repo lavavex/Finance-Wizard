@@ -41,16 +41,21 @@ enum PlaidCategoryMapper {
         let subtype = (accountSubtype ?? "").lowercased()
 
         // --- Credit-card payments (highest priority among non-spend) ---
+        // Must run before transfer/income: on credit accounts payments are amount < 0
+        // and otherwise become "Other Income".
         if isCreditCardPayment(primary: primary, detailed: detailed, titleLower: lower, accountType: type, amount: amount) {
             return .creditPayment
         }
 
         // --- Internal / savings transfers ---
-        if isTransfer(primary: primary, detailed: detailed, titleLower: lower, accountSubtype: subtype) {
+        // Do not treat credit-account money-in as a generic transfer (bill pays often
+        // land as TRANSFER_IN without a strong title).
+        if isTransfer(primary: primary, detailed: detailed, titleLower: lower, accountSubtype: subtype),
+           !(type == "credit" && amount < 0) {
             return .transfer
         }
 
-        // Real money out / in
+        // Real money out / in (Plaid: +outflow, −inflow)
         return amount >= 0 ? .spending : .income
     }
 
@@ -67,6 +72,8 @@ enum PlaidCategoryMapper {
         accountType: String,
         amount: Double
     ) -> Bool {
+        let onCredit = accountType == "credit"
+
         // Explicit PFC
         if detailed.contains("CREDIT_CARD_PAYMENT") {
             return true
@@ -76,7 +83,8 @@ enum PlaidCategoryMapper {
             && (detailed.contains("CREDIT_CARD") || detailed.contains("CREDIT_CARD_PAYMENT")) {
             return true
         }
-        if primary == "LOAN_PAYMENTS" && looksLikeCardPaymentTitle(titleLower) {
+        if primary == "LOAN_PAYMENTS" && (looksLikeCardPaymentTitle(titleLower) || onCredit) {
+            // On the card itself, LOAN_PAYMENTS is almost always a bill payment.
             return true
         }
         if (primary == "TRANSFER_OUT" || primary == "TRANSFER_IN")
@@ -89,9 +97,22 @@ enum PlaidCategoryMapper {
             return true
         }
 
-        // On the credit account, only money-in *that looks like a payment* counts.
-        // Refunds / offers / statement credits fall through to income or spending.
-        if accountType == "credit" && amount < 0 && looksLikeCardPaymentTitle(titleLower) {
+        // Credit-account money-in with payment-ish PFC / wording.
+        // Avoid treating merchant refunds (Best Buy, StubHub credit) as bill pays.
+        if onCredit && amount < 0 {
+            if primary == "TRANSFER_IN" || primary == "TRANSFER_OUT" {
+                return !looksLikeMerchantRefundTitle(titleLower)
+            }
+            if detailed.contains("PAYMENT") && !detailed.contains("INTEREST") {
+                return !looksLikeMerchantRefundTitle(titleLower)
+            }
+            if looksLikeSoftCreditPaymentTitle(titleLower) {
+                return true
+            }
+        }
+
+        // Checking/depository outflow that is clearly a card bill pay (ACH to issuer).
+        if !onCredit && amount > 0 && looksLikeIssuerBillPayTitle(titleLower) {
             return true
         }
 
@@ -105,21 +126,21 @@ enum PlaidCategoryMapper {
 
     private static func looksLikeCardPaymentTitle(_ lower: String) -> Bool {
         // Exclude obvious non-payments that mention “credit”
-        if lower.contains("statement credit") { return false }
-        if lower.contains("cash reward") || lower.contains("your cash reward") { return false }
-        if lower.contains("annual fee refund") { return false }
-        if lower.hasPrefix("offer:") { return false }
-        if lower.contains("stubhub credit") { return false }
-        if lower.contains(" store credit") { return false }
+        if looksLikeMerchantRefundTitle(lower) { return false }
 
-        // Explicit bank strings
+        // Explicit bank strings (credit side “thank you” and ACH labels)
         if lower.contains("payment thank you") { return true }
-        if lower.contains("mobile payment") && lower.contains("thank you") { return true }
-        if lower.contains("thank you - web") || lower.contains("thank you-web")
-            || lower.contains("thank you-mobile") || lower.contains("thank you - mobile") {
+        if lower.contains("thank you") && (lower.contains("payment") || lower.contains("pymt")
+            || lower.contains("web") || lower.contains("mobile") || lower.contains("online")) {
             return true
         }
-        if lower.contains("autopay") && (lower.contains("payment") || lower.contains("crd")) {
+        if lower.contains("mobile payment") && lower.contains("thank you") { return true }
+        if lower.contains("thank you - web") || lower.contains("thank you-web")
+            || lower.contains("thank you-mobile") || lower.contains("thank you - mobile")
+            || lower.contains("thankyou") {
+            return true
+        }
+        if lower.contains("autopay") {
             return true
         }
         if lower.contains("automatic payment") { return true }
@@ -127,15 +148,25 @@ enum PlaidCategoryMapper {
         if lower.contains("card payment") { return true }
         if lower.contains("payment to credit") { return true }
         if lower.contains("online payment from chk") { return true }
-        if lower.contains("ach pmt") || lower.contains("ach payment") { return true }
+        if lower.contains("online payment") && (lower.contains("thank") || lower.contains("card")) {
+            return true
+        }
+        if lower.contains("ach pmt") || lower.contains("ach payment") || lower.contains("ach pymt") {
+            return true
+        }
+        if lower.contains("payment received") || lower.contains("pymt received")
+            || lower.contains("payment - thank") || lower.contains("payment-thank") {
+            return true
+        }
         // "Payment to Chase card ending in 1234" / "Payment to Amex"
         if lower.hasPrefix("payment to ") && (lower.contains("card") || lower.contains("amex")
             || lower.contains("chase") || lower.contains("citi") || lower.contains("capital one")
-            || lower.contains("discover") || lower.contains("apple card")) {
+            || lower.contains("discover") || lower.contains("apple card")
+            || lower.contains("american express")) {
             return true
         }
         // "Chase Credit Crd Autopay"
-        if lower.contains("crd") && (lower.contains("autopay") || lower.contains("payment")) {
+        if lower.contains("crd") && (lower.contains("autopay") || lower.contains("payment") || lower.contains("pmt")) {
             return true
         }
         if lower.contains("epayment") || lower.contains("e-payment") {
@@ -151,9 +182,55 @@ enum PlaidCategoryMapper {
             return true
         }
         // Amex ACH from checking
-        if lower.contains("american express") && (lower.contains("ach") || lower.contains("pmt")) {
+        if lower.contains("american express") && (lower.contains("ach") || lower.contains("pmt")
+            || lower.contains("payment") || lower.contains("epay")) {
             return true
         }
+        if looksLikeIssuerBillPayTitle(lower) {
+            return true
+        }
+        return false
+    }
+
+    /// Softer match for money-in on the **credit account** only.
+    private static func looksLikeSoftCreditPaymentTitle(_ lower: String) -> Bool {
+        if looksLikeMerchantRefundTitle(lower) { return false }
+        if lower.contains("payment") || lower.contains("pymt") || lower.contains("pmt") {
+            return true
+        }
+        if lower.contains("thank you") || lower.contains("thankyou") { return true }
+        if lower.contains("autopay") || lower.contains("auto pay") { return true }
+        if lower.contains("online") && lower.contains("pay") { return true }
+        return false
+    }
+
+    /// Checking-side ACH to known card issuers.
+    private static func looksLikeIssuerBillPayTitle(_ lower: String) -> Bool {
+        let issuers = [
+            "american express", "amex", "chase card", "chase credit", "chase sapphire",
+            "chase freedom", "citi card", "citi credit", "capital one", "discover card",
+            "apple card", "bank of america card", "wells fargo card", "us bank card",
+            "barclays", "synchrony"
+        ]
+        let looksPay = lower.contains("payment") || lower.contains("pmt") || lower.contains("pymt")
+            || lower.contains("autopay") || lower.contains("ach") || lower.contains("epay")
+            || lower.hasPrefix("payment to")
+        guard looksPay else { return false }
+        return issuers.contains { lower.contains($0) }
+    }
+
+    /// Merchant refunds / statement credits that must not be treated as bill payments.
+    private static func looksLikeMerchantRefundTitle(_ lower: String) -> Bool {
+        if lower.contains("statement credit") { return true }
+        if lower.contains("cash reward") || lower.contains("your cash reward") { return true }
+        if lower.contains("annual fee refund") { return true }
+        if lower.hasPrefix("offer:") { return true }
+        if lower.contains("stubhub credit") { return true }
+        if lower.contains(" store credit") { return true }
+        if lower.contains("refund") || lower.contains("return") || lower.contains("reversal") {
+            return true
+        }
+        if lower.contains("cashback") || lower.contains("cash back") { return true }
         return false
     }
 

@@ -161,6 +161,17 @@ enum PlaidSyncEngine {
         // Refresh account list after balances upsert so later txs see new cards.
         var accountsCache = allAccounts
 
+        // Seed account types/labels BEFORE the tx loop. Incremental /transactions/sync
+        // pages often omit `accounts`, so without this credit-side payments (amount < 0)
+        // get mis-filed as "Other Income".
+        for account in allAccounts where account.itemId == item.id {
+            accountMeta[account.accountId] = AccountMeta(
+                label: account.plaidDisplayName,
+                type: account.type,
+                subtype: account.subtype ?? ""
+            )
+        }
+
         // Item health (login required → Relink) + product access (liabilities)
         progress?("\(item.institutionName): status…")
         var institutionId: String?
@@ -187,6 +198,33 @@ enum PlaidSyncEngine {
             }
         } catch {
             report.warnings.append("\(item.institutionName) status: \(error.localizedDescription)")
+        }
+
+        // Fresh balances + account types early so classification has credit/depository flags.
+        progress?("\(item.institutionName): balances…")
+        do {
+            let details = try await PlaidAPIClient.accountsGet(accessToken: item.accessToken)
+            report.accountsUpdated = upsertAccounts(
+                details,
+                item: item,
+                institutionId: institutionId,
+                modelContext: modelContext
+            )
+            accountsCache = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? accountsCache
+            for detail in details {
+                let label = {
+                    let name = detail.name ?? detail.official_name ?? item.institutionName
+                    if let mask = detail.mask, !mask.isEmpty { return "\(name) ···\(mask)" }
+                    return name
+                }()
+                accountMeta[detail.account_id] = AccountMeta(
+                    label: label,
+                    type: detail.type ?? "",
+                    subtype: detail.subtype ?? ""
+                )
+            }
+        } catch {
+            report.warnings.append("\(item.institutionName) balances: \(error.localizedDescription)")
         }
 
         // Optional on-demand bank pull before cursor sync
@@ -272,9 +310,9 @@ enum PlaidSyncEngine {
             PlaidItemStore.updateCursor(itemID: item.id, cursor: cursor)
         }
 
-        // Balances / credit limits + institution logo (Plaid metadata, not product card photos)
-        progress?("\(item.institutionName): balances…")
+        // Institution logo (Plaid metadata, not product card photos)
         if let institutionId {
+            progress?("\(item.institutionName): branding…")
             do {
                 let branding = try await PlaidAPIClient.institutionBranding(institutionID: institutionId)
                 InstitutionLogoCache.store(
@@ -297,19 +335,6 @@ enum PlaidSyncEngine {
                     "\(item.institutionName) logo: \(error.localizedDescription)"
                 )
             }
-        }
-
-        do {
-            let details = try await PlaidAPIClient.accountsGet(accessToken: item.accessToken)
-            report.accountsUpdated = upsertAccounts(
-                details,
-                item: item,
-                institutionId: institutionId,
-                modelContext: modelContext
-            )
-            accountsCache = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? accountsCache
-        } catch {
-            report.warnings.append("\(item.institutionName) balances: \(error.localizedDescription)")
         }
 
         // Credit APR / due dates / min payment (Liabilities product)
@@ -424,10 +449,20 @@ enum PlaidSyncEngine {
         // Prefer authorized date for display; keep posted `date` as bank settle day.
         let authorizedDate = tx.authorized_date.flatMap(parseDate)
 
+        // Prefer sync-page meta, then local BankAccount (covers missing accounts[] pages).
+        let bank = allAccounts.first { $0.accountId == tx.account_id }
         let meta = accountMeta[tx.account_id]
-        let paymentMethod = meta?.label ?? item.paymentMethodLabel
-        let accountType = meta?.type
-        let accountSubtype = meta?.subtype
+        let paymentMethod = meta?.label
+            ?? bank?.plaidDisplayName
+            ?? item.paymentMethodLabel
+        let accountType: String? = {
+            if let t = meta?.type, !t.isEmpty { return t }
+            return bank?.type
+        }()
+        let accountSubtype: String? = {
+            if let s = meta?.subtype, !s.isEmpty { return s }
+            return bank?.subtype
+        }()
 
         let kind = PlaidCategoryMapper.classify(
             amount: tx.amount,
@@ -1328,12 +1363,96 @@ enum PlaidSyncEngine {
             }
         }
         if let income = try? modelContext.fetch(FetchDescriptor<Income>()) {
-            for row in income where PlaidCategoryMapper.looksLikeNonSpendTitle(row.source) {
-                modelContext.delete(row)
-                fixed += 1
+            for row in income {
+                let lower = row.source.lowercased()
+                // Bill pays mis-filed as "Other Income" (credit-side amount < 0 without account type).
+                if PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower)
+                    || PlaidCategoryMapper.looksLikeNonSpendTitle(row.source) {
+                    let id = row.transactionId
+                    let title = row.source
+                    let amount = abs(row.amount)
+                    let date = row.date
+                    let method = row.accountDisplay
+                    modelContext.delete(row)
+                    // Promote to credit payment tracking + excluded spend row
+                    ensureCreditPaymentFromParts(
+                        transactionId: id,
+                        title: title,
+                        amount: amount,
+                        date: date,
+                        paymentMethod: method,
+                        modelContext: modelContext
+                    )
+                    fixed += 1
+                }
             }
         }
         return fixed
+    }
+
+    @MainActor
+    private static func ensureCreditPaymentFromParts(
+        transactionId: String,
+        title: String,
+        amount: Double,
+        date: Date,
+        paymentMethod: String,
+        modelContext: ModelContext
+    ) {
+        let targetId = transactionId
+        var payDesc = FetchDescriptor<CreditCardPayment>(
+            predicate: #Predicate<CreditCardPayment> { p in
+                p.transactionId == targetId
+            }
+        )
+        payDesc.fetchLimit = 1
+        if (try? modelContext.fetch(payDesc).first) == nil {
+            modelContext.insert(
+                CreditCardPayment(
+                    transactionId: transactionId,
+                    amount: amount,
+                    date: date,
+                    cardName: paymentMethod,
+                    sourceAccount: paymentMethod,
+                    title: title,
+                    creditAccountId: nil,
+                    institutionName: nil
+                )
+            )
+        }
+
+        var txDesc = FetchDescriptor<Transaction>(
+            predicate: #Predicate<Transaction> { t in
+                t.transactionId == targetId
+            }
+        )
+        txDesc.fetchLimit = 1
+        if let existing = try? modelContext.fetch(txDesc).first {
+            existing.title = title
+            existing.amount = -abs(amount)
+            existing.date = date
+            existing.paymentMethod = paymentMethod
+            existing.category = TransactionAnalytics.creditCardPaymentCategory
+            existing.categoryLocked = true
+            existing.multiplier = 0
+            existing.multiplierLocked = true
+            existing.overrideSource = existing.overrideSource ?? "legacy-credit-payment"
+        } else {
+            modelContext.insert(
+                Transaction(
+                    transactionId: transactionId,
+                    title: title,
+                    amount: -abs(amount),
+                    date: date,
+                    category: TransactionAnalytics.creditCardPaymentCategory,
+                    paymentMethod: paymentMethod,
+                    multiplier: 0,
+                    categoryLocked: true,
+                    multiplierLocked: true,
+                    overrideSource: "legacy-credit-payment"
+                )
+            )
+        }
     }
 
     @MainActor
