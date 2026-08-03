@@ -5,14 +5,30 @@
 //  User’s own Plaid developer credentials (client_id + secret + environment).
 //  Secret is stored in Keychain; client id / env use UserDefaults.
 //
+//  SWIFT TERMS IN THIS FILE:
+//  - computed property (get/set): Looks like a stored field but runs code on read/write.
+//  - UserDefaults: Lightweight key-value prefs (not for secrets).
+//  - static: Belongs to the type itself, not an instance.
+//  - throws: requireConfigured() fails with PlaidAPIError if credentials are missing.
+//  - ?? nil-coalescing: Use left side if non-nil, otherwise the right side default.
+//
 
 import Foundation
 
+/// Reads and writes the developer’s Plaid client_id, secret, environment, and OAuth URLs.
+///
+/// Architecture note: client_id and environment are non-secret prefs → UserDefaults.
+/// The secret is sensitive → PlaidKeychain. Never log or print the secret.
 enum PlaidCredentialsStore {
+    // MARK: - Storage keys
+
     private static let clientIDKey = "plaid.clientID"
     private static let environmentKey = "plaid.environment"
     private static let redirectURIKey = "plaid.redirectURI"
+    /// Keychain “account” name for the API secret (see PlaidKeychain).
     private static let secretAccount = "plaid.secret"
+
+    // MARK: - Defaults (public constants)
 
     /// Default https OAuth redirect (Cloudflare Pages bounce). Must match Plaid Dashboard
     /// → Allowed redirect URIs exactly (including trailing slash if allowlisted that way).
@@ -23,8 +39,12 @@ enum PlaidCredentialsStore {
     /// Passed as `webhook` on `/link/token/create` so new/relinked Items notify this URL.
     static let plaidWebhookURL = "https://plaid-webhooks.lavavex.workers.dev/plaid/webhook"
 
+    // MARK: - Client ID (UserDefaults)
+
+    /// Plaid dashboard client_id. Empty string means “not set yet.”
     static var clientID: String {
         get {
+            // Optional chaining + trim + default to "" if the key is missing.
             UserDefaults.standard.string(forKey: clientIDKey)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         }
@@ -36,27 +56,39 @@ enum PlaidCredentialsStore {
         }
     }
 
+    // MARK: - Secret (Keychain)
+
+    /// Plaid API secret. Stored only in the Keychain, never in UserDefaults.
     static var secret: String {
         get { PlaidKeychain.get(account: secretAccount) ?? "" }
         set {
             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
+                // Clearing the field removes the Keychain item entirely.
                 PlaidKeychain.delete(account: secretAccount)
             } else {
+                // try? means: ignore Keychain write failures (returns nil on throw).
                 try? PlaidKeychain.set(trimmed, account: secretAccount)
             }
         }
     }
 
+    // MARK: - Environment
+
+    /// Which Plaid host to call (sandbox / development / production).
     static var environment: PlaidEnvironment {
         get {
+            // Read raw string, then failable init `PlaidEnvironment(rawValue:)` → optional enum.
             let raw = UserDefaults.standard.string(forKey: environmentKey) ?? PlaidEnvironment.sandbox.rawValue
             return PlaidEnvironment(rawValue: raw) ?? .sandbox
         }
         set {
+            // Store the enum’s raw String so we can rebuild it next launch.
             UserDefaults.standard.set(newValue.rawValue, forKey: environmentKey)
         }
     }
+
+    // MARK: - OAuth redirect URI
 
     /// Effective **https** OAuth redirect for `/link/token/create`.
     /// Uses Settings override when set; otherwise `defaultRedirectURI`.
@@ -89,6 +121,7 @@ enum PlaidCredentialsStore {
     }
 
     /// `redirect_uri` for `/link/token/create` — only an https URL, never a custom scheme.
+    /// Returns nil if the configured value is not https (Plaid OAuth requires https).
     static var httpsRedirectURI: String? {
         let value = redirectURI.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.lowercased().hasPrefix("https://") else { return nil }
@@ -107,11 +140,15 @@ enum PlaidCredentialsStore {
         }
     }
 
+    // MARK: - Configuration checks
+
     /// True when both client id and secret are present.
     static var isConfigured: Bool {
         !clientID.isEmpty && !secret.isEmpty
     }
 
+    /// Throws `PlaidAPIError.notConfigured` if credentials are missing.
+    /// Call before any network request that needs client_id + secret.
     static func requireConfigured() throws {
         guard isConfigured else {
             throw PlaidAPIError.notConfigured

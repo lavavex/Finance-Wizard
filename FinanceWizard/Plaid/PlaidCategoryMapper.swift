@@ -5,12 +5,25 @@
 //  Map Plaid personal_finance_category → app labels + cash-flow classification.
 //  Transfers & credit-card payments must never inflate Total Spend / Income.
 //
+//  Plaid signs amounts as: positive = money out (spend), negative = money in.
+//  personal_finance_category (PFC) has primary + detailed strings like FOOD_AND_DRINK.
+//
+//  SWIFT TERMS IN THIS FILE:
+//  - enum with String raw values: Cases double as stored labels / identifiers.
+//  - static methods on an enum: Namespace for pure functions (no instance state).
+//  - Optional chaining (pfc?.primary): Safe access when pfc might be nil.
+//  - Nested conditions: Order matters — credit payments classified before transfers.
+//
 
 import Foundation
 
+// MARK: - Cash-flow kind
+
 /// How a Plaid row should land in the app.
+///
+/// This is the first decision after download: spend, income, or “not real spend/income.”
 enum PlaidFlowKind: String, Sendable {
-    /// Real expense → Transaction (stored negative)
+    /// Real expense → Transaction (stored negative in the app’s local model)
     case spending
     /// Real income → Income model
     case income
@@ -20,11 +33,18 @@ enum PlaidFlowKind: String, Sendable {
     case creditPayment
 }
 
+// MARK: - Mapper
+
+/// Stateless helpers that classify Plaid rows and map them to app category names.
 enum PlaidCategoryMapper {
     // MARK: - Classification
 
     /// Classify a Plaid transaction for storage / analytics.
+    /// Priority order: credit-card payment → transfer → spend vs income by amount sign.
     /// - Parameters:
+    ///   - amount: Plaid amount (+ outflow, − inflow).
+    ///   - pfc: Plaid personal_finance_category (primary + detailed), if present.
+    ///   - title: Merchant / description string for heuristics when PFC is weak.
     ///   - accountType: Plaid account `type` (credit, depository, …)
     ///   - accountSubtype: e.g. credit card, checking, savings
     static func classify(
@@ -34,6 +54,7 @@ enum PlaidCategoryMapper {
         accountType: String?,
         accountSubtype: String?
     ) -> PlaidFlowKind {
+        // Normalize once so every check is case-insensitive.
         let primary = (pfc?.primary ?? "").uppercased()
         let detailed = (pfc?.detailed ?? "").uppercased()
         let lower = title.lowercased()
@@ -56,6 +77,7 @@ enum PlaidCategoryMapper {
         }
 
         // Real money out / in (Plaid: +outflow, −inflow)
+        // Ternary operator: condition ? valueIfTrue : valueIfFalse
         return amount >= 0 ? .spending : .income
     }
 
@@ -101,6 +123,7 @@ enum PlaidCategoryMapper {
         // Avoid treating merchant refunds (Best Buy, StubHub credit) as bill pays.
         if onCredit && amount < 0 {
             if primary == "TRANSFER_IN" || primary == "TRANSFER_OUT" {
+                // ! means logical NOT — still a payment only if title is NOT a refund.
                 return !looksLikeMerchantRefundTitle(titleLower)
             }
             if detailed.contains("PAYMENT") && !detailed.contains("INTEREST") {
@@ -120,10 +143,12 @@ enum PlaidCategoryMapper {
     }
 
     /// Public wrapper for legacy cleanup / UI.
+    /// “Public” here means other files can call it; the real logic stays private.
     static func looksLikeCardPaymentTitlePublic(_ lower: String) -> Bool {
         looksLikeCardPaymentTitle(lower)
     }
 
+    /// Strong title heuristics that usually mean “this is a card bill payment.”
     private static func looksLikeCardPaymentTitle(_ lower: String) -> Bool {
         // Exclude obvious non-payments that mention “credit”
         if looksLikeMerchantRefundTitle(lower) { return false }
@@ -193,6 +218,7 @@ enum PlaidCategoryMapper {
     }
 
     /// Softer match for money-in on the **credit account** only.
+    /// Used when we already know account type is credit and amount is negative.
     private static func looksLikeSoftCreditPaymentTitle(_ lower: String) -> Bool {
         if looksLikeMerchantRefundTitle(lower) { return false }
         if lower.contains("payment") || lower.contains("pymt") || lower.contains("pmt") {
@@ -206,6 +232,7 @@ enum PlaidCategoryMapper {
 
     /// Checking-side ACH to known card issuers.
     private static func looksLikeIssuerBillPayTitle(_ lower: String) -> Bool {
+        // Array of issuer name fragments to search for inside the title.
         let issuers = [
             "american express", "amex", "chase card", "chase credit", "chase sapphire",
             "chase freedom", "citi card", "citi credit", "capital one", "discover card",
@@ -215,7 +242,9 @@ enum PlaidCategoryMapper {
         let looksPay = lower.contains("payment") || lower.contains("pmt") || lower.contains("pymt")
             || lower.contains("autopay") || lower.contains("ach") || lower.contains("epay")
             || lower.hasPrefix("payment to")
+        // guard else: early exit if the title doesn’t even look like a payment.
         guard looksPay else { return false }
+        // contains(where:): true if any issuer string appears in the title.
         return issuers.contains { lower.contains($0) }
     }
 
@@ -234,6 +263,7 @@ enum PlaidCategoryMapper {
         return false
     }
 
+    /// True when the row looks like moving money between the user’s own accounts.
     private static func isTransfer(
         primary: String,
         detailed: String,
@@ -278,6 +308,8 @@ enum PlaidCategoryMapper {
             return true
         }
 
+        // Intentionally unused for now (kept for future subtype-based rules).
+        // Assigning to `_` silences the “unused parameter” compiler warning.
         _ = accountSubtype
         return false
     }
@@ -286,6 +318,7 @@ enum PlaidCategoryMapper {
 
     /// Human-readable expense category from PFC primary/detailed.
     /// Always returns a `KnownCategory` spend name (or Credit Card Payment).
+    /// Detailed strings are checked first (more specific), then primary buckets.
     static func expenseCategory(from pfc: PlaidPFC?) -> String {
         let primary = (pfc?.primary ?? "").uppercased()
         let detailed = (pfc?.detailed ?? "").uppercased()
@@ -363,7 +396,7 @@ enum PlaidCategoryMapper {
             return KnownCategory.fees.rawValue
         }
 
-        // --- Primary buckets ---
+        // --- Primary buckets (broader PFC groups) ---
         switch primary {
         case "FOOD_AND_DRINK":
             return KnownCategory.dining.rawValue
@@ -383,6 +416,7 @@ enum PlaidCategoryMapper {
         case "PERSONAL_CARE":
             return KnownCategory.personalCare.rawValue
         case "MEDICAL", "HEALTHCARE":
+            // Multiple case labels share one body (comma-separated cases).
             return KnownCategory.health.rawValue
         case "RENT_AND_UTILITIES":
             return KnownCategory.utilities.rawValue

@@ -42,7 +42,7 @@ This site is the project wiki: everything needed to build, run, configure, and e
 
 ## Requirements
 
-- **Xcode** (project targets recent iOS; open the `.xcodeproj` on a Mac)
+- **Xcode 26+** (deployment target **iOS 26**; open the `.xcodeproj` on a Mac)
 - **Apple Developer team** (Personal Team is fine for device/simulator signing)
 - **Plaid developer account** (free Sandbox keys at [dashboard.plaid.com](https://dashboard.plaid.com))
 - Same **App Group** on app + widget: `group.net.roberth.FinanceWizard`

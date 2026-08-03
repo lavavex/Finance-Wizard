@@ -7,7 +7,7 @@ title: Data model
 
 ## SwiftData: `Transaction` (expenses)
 
-Defined in `Shared/Transaction.swift`.
+Defined in `Shared/Models/Transaction.swift`.
 
 | Property | Type | Notes |
 |----------|------|--------|
@@ -29,7 +29,7 @@ Defined in `Shared/Transaction.swift`.
 
 ## SwiftData: `Income`
 
-Defined in `Shared/Income.swift`. **Separate model** so spend analytics never include money-in. Populated when Plaid `amount < 0` (money in).
+Defined in `Shared/Models/Income.swift`. **Separate model** so spend analytics never include money-in. Populated when Plaid `amount < 0` (money in).
 
 | Property | Type | Notes |
 |----------|------|--------|
@@ -56,7 +56,7 @@ Defined in `Shared/Income.swift`. **Separate model** so spend analytics never in
 
 ## JSON DTOs (not persisted as-is)
 
-In `ContentView.swift`:
+In `FinanceWizard/App/ContentView.swift`:
 
 - `ImportedTransaction` / `ExportFile` — expenses (`transactions[]`)
 - `ImportedIncome` / `IncomeExportFile` — income (`income[]`, plus `total`, `categories`, …)
@@ -82,7 +82,7 @@ Re-syncing does **not** duplicate rows when Plaid ids are stable.
 
 ## SwiftData: `BankAccount`
 
-Plaid account snapshot (`Shared/BankAccount.swift`). Used for credit utilization.
+Plaid account snapshot (`Shared/Models/BankAccount.swift`). Used for credit utilization.
 
 | Property | Notes |
 |----------|--------|
@@ -97,7 +97,7 @@ Plaid account snapshot (`Shared/BankAccount.swift`). Used for credit utilization
 
 ## SwiftData: `CreditCardPayment`
 
-Card bill payments only (`Shared/CreditCardPayment.swift`). Never counted in Total Spend.
+Card bill payments only (`Shared/Models/CreditCardPayment.swift`). Never counted in Total Spend.
 
 | Property | Notes |
 |----------|--------|
@@ -108,7 +108,7 @@ Card bill payments only (`Shared/CreditCardPayment.swift`). Never counted in Tot
 
 ## App Group store
 
-`Shared/SharedStore.swift`:
+`Shared/Store/SharedStore.swift`:
 
 ```text
 groupContainer: .identifier("group.net.roberth.FinanceWizard")
@@ -143,4 +143,4 @@ Hiding a card never changes Total Spend.
 
 ## Category SF Symbols
 
-`Shared/CategorySymbol.swift` maps category strings → SF Symbol names (no remote logos).
+`Shared/UI/CategoryStyle.swift` (`CategorySymbol`) maps category strings → SF Symbol names (no remote logos).

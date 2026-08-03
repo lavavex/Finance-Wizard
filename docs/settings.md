@@ -45,7 +45,7 @@ Link completion uses the custom scheme `financewizard://hosted-link-complete` (H
 
 Primary file for review: `debug-snapshot.json` (pretty-printed). Safe for debugging with a trusted helper; still contains real merchant names and balances.
 
-Implementation: `FinanceWizard/DebugDataExport.swift`.
+Implementation: `FinanceWizard/Features/Settings/DebugDataExport.swift`.
 
 ## About / build info
 
@@ -53,7 +53,7 @@ Implementation: `FinanceWizard/DebugDataExport.swift`.
 
 | Field | Source |
 |-------|--------|
-| **Version** | `CFBundleShortVersionString` ← Xcode **MARKETING_VERSION** (e.g. `0.1`) |
+| **Version** | `CFBundleShortVersionString` ← Xcode **MARKETING_VERSION** (e.g. `1.0`) |
 | **Build** | `CFBundleVersion` ← Xcode **CURRENT_PROJECT_VERSION** |
 | Bundle ID | `Bundle.main.bundleIdentifier` |
 | Minimum iOS | Info.plist minimum OS |
@@ -69,7 +69,7 @@ Implementation: `FinanceWizard/DebugDataExport.swift`.
 ./scripts/set-build-number.sh <CI_BUILD_NUMBER>
 ```
 
-Example: if the last Cloud/TestFlight build was **18**, run `./scripts/set-build-number.sh 18` (already applied in-repo when we sync). After a new Cloud build **N**, re-run with **N** (or commit the bump) so local Xcode runs show the same build as Cloud.
+Example: shipping **1.0 (1)** locally uses `MARKETING_VERSION = 1.0` and `./scripts/set-build-number.sh 1`. After a Cloud build **N**, re-run with **N** (or commit the bump) so local Xcode runs show the same build as Cloud.
 
 In App Store Connect → Xcode Cloud → Settings → **Build Number**, you can set the next Cloud counter if you ever need to jump ahead of App Store / local.
 
@@ -80,7 +80,7 @@ In App Store Connect → Xcode Cloud → Settings → **Build Number**, you can 
 | Credentials | `FinanceWizard/Plaid/PlaidCredentialsStore.swift` |
 | Items / cursors | `FinanceWizard/Plaid/PlaidItemStore.swift` |
 | Keychain | `FinanceWizard/Plaid/PlaidKeychain.swift` |
-| UI | `FinanceWizard/SettingsView.swift` (`AboutBuildView`, `AppBuildInfo`) |
-| Debug export | `FinanceWizard/DebugDataExport.swift` |
+| UI | `FinanceWizard/Features/Settings/SettingsView.swift` (`AboutBuildView`, `AppBuildInfo`) |
+| Debug export | `FinanceWizard/Features/Settings/DebugDataExport.swift` |
 
 Credentials are **device-local** (not in the App Group).

@@ -7,10 +7,11 @@ title: Getting started
 
 ## 1. Open the project
 
-1. On a Mac, open **`FinanceWizard.xcodeproj`** (inside the git root).
+1. On a Mac, open **`FinanceWizard.xcodeproj`** (inside the git root) with **Xcode 26+** (iOS 26 SDK).
 2. Wait for indexing to finish.
 3. Select the **FinanceWizard** scheme (the Finance Wizard app; not only the widget extension).
-4. Pick a simulator or a physical device.
+4. Pick a simulator or a physical device running **iOS 26+**.  
+   For Foundation Models / Apple Intelligence later, use a [supported device](https://www.apple.com/apple-intelligence/) with Intelligence enabled.
 
 ## 2. Signing
 
