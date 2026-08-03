@@ -5,11 +5,41 @@
 //  Pulls /transactions/sync + /accounts/get for every linked Item.
 //  Transfers / credit-card payments never enter Total Spend or Income.
 //
+//  HIGH-LEVEL SYNC CONTROL FLOW (syncAll → syncItem):
+//  1. Require Plaid credentials; load all linked Items.
+//  2. Optionally reset cursors (full re-download of history).
+//  3. Clean legacy mis-filed rows + stale BankAccounts.
+//  4. For each Item (syncItem):
+//     a. Seed account type/label map from local BankAccounts.
+//     b. /item/get → Relink status + liabilities product flag.
+//     c. /accounts/get → upsert balances / account types.
+//     d. Optional /transactions/refresh (paid add-on).
+//     e. Loop /transactions/sync pages until has_more is false:
+//        apply added+modified rows; delete removed ids; save cursor.
+//     f. Institution logo branding.
+//     g. /liabilities/get → APR / due dates on credit accounts.
+//     h. /transactions/recurring/get → subscription/payroll streams.
+//  5. modelContext.save() + reload all widgets.
+//
+//  SWIFT TERMS IN THIS FILE:
+//  - @MainActor: Run on the main thread (SwiftData ModelContext is main-actor bound).
+//  - async throws: Network + DB work that can fail; caller awaits and handles errors.
+//  - ModelContext / SwiftData: Apple’s persistence layer; fetch/insert/delete/save models.
+//  - FetchDescriptor + #Predicate: Type-safe queries against SwiftData models.
+//  - inout: Pass-by-reference so a function can mutate the caller’s report counters.
+//  - Set: Unique collection (soft error codes, seen stream ids, account ids to keep).
+//  - Optional closure progress: ((String) -> Void)? for UI status strings.
+//  - WidgetCenter: Tells WidgetKit to rebuild home-screen widget timelines after data changes.
+//
 
 import Foundation
 import SwiftData
 import WidgetKit
 
+// MARK: - Sync report (UI summary)
+
+/// Counts and messages returned after a full or partial sync.
+/// Sendable: safe to pass out of async work to update UI.
 struct PlaidSyncReport: Sendable {
     var itemLines: [String] = []
     var expensesUpserted: Int = 0
@@ -25,6 +55,7 @@ struct PlaidSyncReport: Sendable {
     var refreshedItems: Int = 0
     var warnings: [String] = []
 
+    /// Multi-line human-readable summary for Settings / alerts.
     var summary: String {
         var lines: [String] = []
         lines.append(contentsOf: itemLines)
@@ -47,14 +78,23 @@ struct PlaidSyncReport: Sendable {
     }
 }
 
+// MARK: - Account metadata cache
+
+/// Lightweight per-account info used while classifying transactions.
+/// Dictionary key is Plaid account_id.
 private struct AccountMeta {
     var label: String
     var type: String
     var subtype: String
 }
 
+// MARK: - Sync engine
+
+/// Orchestrates Plaid → local SwiftData sync for all linked banks.
+/// Enum-as-namespace: only static methods.
 enum PlaidSyncEngine {
     /// Soft-fail Plaid product codes (add-on not enabled / not ready / unsupported).
+    /// When these appear, we log a warning and continue instead of aborting the whole sync.
     private static let softProductCodes: Set<String> = [
         "PRODUCTS_NOT_SUPPORTED",
         "PRODUCT_NOT_READY",
@@ -65,9 +105,15 @@ enum PlaidSyncEngine {
         "ITEM_PRODUCT_NOT_READY"
     ]
 
+    // MARK: - Entry point: sync all Items
+
     /// Sync all linked Items. If `resetCursors`, start from full history again.
+    /// - Parameter modelContext: SwiftData context for inserts/updates/deletes.
+    /// - Parameter resetCursors: Empty every Item’s cursor before syncing.
     /// - Parameter forceRefresh: call `/transactions/refresh` before sync (paid add-on; soft-fails).
     /// - Parameter includePending: store pending txs (merged to posted via `pending_transaction_id`).
+    /// - Parameter progress: Optional UI callback with status strings (e.g. "Syncing Chase…").
+    /// - Returns: Aggregated PlaidSyncReport for display.
     @MainActor
     static func syncAll(
         modelContext: ModelContext,
@@ -76,6 +122,7 @@ enum PlaidSyncEngine {
         forceRefresh: Bool = false,
         progress: ((String) -> Void)? = nil
     ) async throws -> PlaidSyncReport {
+        // Fail fast if the user has not entered client_id + secret.
         try PlaidCredentialsStore.requireConfigured()
         var items = PlaidItemStore.loadItems()
         guard !items.isEmpty else {
@@ -86,6 +133,7 @@ enum PlaidSyncEngine {
             )
         }
 
+        // Empty cursors → next /transactions/sync returns full history for each Item.
         if resetCursors {
             for i in items.indices {
                 items[i].transactionsCursor = ""
@@ -100,12 +148,16 @@ enum PlaidSyncEngine {
         VendorRulesStore.removeBillPayMisrules()
         report.cleanedLegacy = cleanLegacyMisclassifiedRows(modelContext: modelContext)
         // Stale BankAccounts from unlinked/replaced Items (e.g. duped X Money after Relink)
+        // `_ =` discards the returned count (we still want the side effects).
         _ = cleanupStaleBankAccounts(modelContext: modelContext)
 
         // Preload accounts once for reward multipliers (avoids N fetches per tx).
+        // try? + ?? []: if the fetch throws, treat as empty list.
         let allAccounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
 
+        // One Item at a time: failures become warnings so other banks still sync.
         for item in items {
+            // progress? : call only if the optional closure is non-nil.
             progress?("Syncing \(item.institutionName)…")
             do {
                 let itemReport = try await syncItem(
@@ -116,6 +168,7 @@ enum PlaidSyncEngine {
                     allAccounts: allAccounts,
                     progress: progress
                 )
+                // Fold per-item counters into the aggregate report.
                 report.expensesUpserted += itemReport.expensesUpserted
                 report.incomeUpserted += itemReport.incomeUpserted
                 report.creditPaymentsUpserted += itemReport.creditPaymentsUpserted
@@ -131,18 +184,23 @@ enum PlaidSyncEngine {
                     "\(item.institutionName): +\(itemReport.expensesUpserted) exp / +\(itemReport.incomeUpserted) inc / \(itemReport.creditPaymentsUpserted) card pmts"
                 )
             } catch {
+                // Per-item failure: record and continue with remaining banks.
                 report.warnings.append("\(item.institutionName): \(error.localizedDescription)")
                 report.itemLines.append("\(item.institutionName): failed")
             }
         }
 
+        // Persist all pending SwiftData changes in one save.
         try modelContext.save()
+        // Tell home-screen widgets to rebuild from SharedStore.
         WidgetCenter.shared.reloadAllTimelines()
         return report
     }
 
-    // MARK: - Per item
+    // MARK: - Per-Item sync
 
+    /// Full pipeline for one linked bank: status → balances → tx pages → logo → liabilities → recurring.
+    /// - Parameter allAccounts: Preloaded BankAccounts (reward multipliers / labels).
     @MainActor
     private static func syncItem(
         _ item: PlaidLinkedItem,
@@ -153,9 +211,12 @@ enum PlaidSyncEngine {
         progress: ((String) -> Void)?
     ) async throws -> PlaidSyncReport {
         var report = PlaidSyncReport()
+        // nil cursor means “start from the beginning” on Plaid’s side.
         var cursor: String? = item.transactionsCursor.isEmpty ? nil : item.transactionsCursor
+        // pageStartCursor: if Plaid mutates mid-pagination, restart from this safe point.
         var pageStartCursor = cursor
         var hasMore = true
+        // account_id → label/type/subtype for classify()
         var accountMeta: [String: AccountMeta] = [:]
         var safety = 0
         // Refresh account list after balances upsert so later txs see new cards.
@@ -172,7 +233,7 @@ enum PlaidSyncEngine {
             )
         }
 
-        // Item health (login required → Relink) + product access (liabilities)
+        // --- Step A: Item health (login required → Relink) + product access (liabilities) ---
         progress?("\(item.institutionName): status…")
         var institutionId: String?
         var itemHasLiabilitiesProduct = false
@@ -200,7 +261,7 @@ enum PlaidSyncEngine {
             report.warnings.append("\(item.institutionName) status: \(error.localizedDescription)")
         }
 
-        // Fresh balances + account types early so classification has credit/depository flags.
+        // --- Step B: Fresh balances + account types early so classification has credit/depository flags ---
         progress?("\(item.institutionName): balances…")
         do {
             let details = try await PlaidAPIClient.accountsGet(accessToken: item.accessToken)
@@ -212,6 +273,7 @@ enum PlaidSyncEngine {
             )
             accountsCache = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? accountsCache
             for detail in details {
+                // Immediately-invoked closure builds the display label once.
                 let label = {
                     let name = detail.name ?? detail.official_name ?? item.institutionName
                     if let mask = detail.mask, !mask.isEmpty { return "\(name) ···\(mask)" }
@@ -227,13 +289,14 @@ enum PlaidSyncEngine {
             report.warnings.append("\(item.institutionName) balances: \(error.localizedDescription)")
         }
 
-        // Optional on-demand bank pull before cursor sync
+        // --- Step C: Optional on-demand bank pull before cursor sync ---
         if forceRefresh {
             progress?("\(item.institutionName): force refresh…")
             do {
                 _ = try await PlaidAPIClient.transactionsRefresh(accessToken: item.accessToken)
                 report.refreshedItems = 1
             } catch {
+                // Pattern match http errors; soft product codes become warnings only.
                 if case PlaidAPIError.http(_, let code, _) = error,
                    let code, softProductCodes.contains(code) {
                     report.warnings.append(
@@ -247,8 +310,11 @@ enum PlaidSyncEngine {
             }
         }
 
+        // --- Step D: Cursor pagination loop for /transactions/sync ---
+        // While has_more, request next page; apply added/modified; delete removed.
         while hasMore {
             safety += 1
+            // Guard against infinite loops if Plaid keeps saying has_more forever.
             if safety > 200 {
                 throw PlaidAPIError.http(status: 0, code: nil, message: "Sync pagination safety limit hit.")
             }
@@ -262,6 +328,7 @@ enum PlaidSyncEngine {
                     cursor: cursor
                 )
             } catch {
+                // Plaid race: data changed mid-pagination → restart from pageStartCursor.
                 if case PlaidAPIError.http(_, let code, _) = error,
                    code == "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION" {
                     cursor = pageStartCursor
@@ -270,6 +337,7 @@ enum PlaidSyncEngine {
                 throw error
             }
 
+            // Some pages include accounts[]; merge into our meta map.
             if let accounts = page.accounts {
                 for account in accounts {
                     let label = accountDisplayName(account: account, institution: item.institutionName)
@@ -281,8 +349,10 @@ enum PlaidSyncEngine {
                 }
             }
 
+            // Concatenate added + modified; treat both as upserts.
             for tx in page.added + page.modified {
                 if tx.pending == true && !includePending { continue }
+                // &report is inout — applyTransaction mutates counters on the same struct.
                 applyTransaction(
                     tx,
                     item: item,
@@ -302,15 +372,17 @@ enum PlaidSyncEngine {
             hasMore = page.has_more
             cursor = page.next_cursor
             if !hasMore {
+                // Successful full pass — next mutation restart can use this cursor.
                 pageStartCursor = cursor
             }
         }
 
+        // Persist opaque cursor so the next sync only gets deltas.
         if let cursor, !cursor.isEmpty {
             PlaidItemStore.updateCursor(itemID: item.id, cursor: cursor)
         }
 
-        // Institution logo (Plaid metadata, not product card photos)
+        // --- Step E: Institution logo (Plaid metadata, not product card photos) ---
         if let institutionId {
             progress?("\(item.institutionName): branding…")
             do {
@@ -337,7 +409,7 @@ enum PlaidSyncEngine {
             }
         }
 
-        // Credit APR / due dates / min payment (Liabilities product)
+        // --- Step F: Credit APR / due dates / min payment (Liabilities product) ---
         progress?("\(item.institutionName): credit details…")
         let creditAccountCount = ((try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? [])
             .filter { $0.itemId == item.id && $0.isCredit }
@@ -358,6 +430,7 @@ enum PlaidSyncEngine {
                 )
             }
         } catch {
+            // Branch on Plaid error codes so users get actionable Relink / Dashboard hints.
             if case PlaidAPIError.http(_, let code, let message) = error {
                 let code = code ?? ""
                 if code == "PRODUCT_NOT_READY" || code == "ITEM_PRODUCT_NOT_READY" {
@@ -395,7 +468,7 @@ enum PlaidSyncEngine {
             }
         }
 
-        // Recurring streams (subscriptions / payroll) — optional add-on
+        // --- Step G: Recurring streams (subscriptions / payroll) — optional add-on ---
         progress?("\(item.institutionName): recurring…")
         do {
             report.recurringStreams = try await syncRecurringStreams(
@@ -423,6 +496,10 @@ enum PlaidSyncEngine {
 
     // MARK: - Apply one Plaid transaction
 
+    /// Classify a single Plaid row and upsert/delete the matching local models.
+    ///
+    /// Flow: merge pending twin → resolve title/date/account → classify → switch on kind.
+    /// `report` is `inout` so counters update the caller’s PlaidSyncReport in place.
     @MainActor
     private static func applyTransaction(
         _ tx: PlaidTransaction,
@@ -441,11 +518,14 @@ enum PlaidSyncEngine {
             }
         }
 
+        // Prefer merchant_name, then name, then original_description.
         let title = (tx.merchant_name?.isEmpty == false ? tx.merchant_name : tx.name)
             ?? tx.original_description
             ?? "Transaction"
 
+        // Skip rows whose date string does not parse (guard early-returns).
         guard let date = parseDate(tx.date) else { return }
+        // flatMap on Optional: parseDate only runs when authorized_date is non-nil.
         // Prefer authorized date for display; keep posted `date` as bank settle day.
         let authorizedDate = tx.authorized_date.flatMap(parseDate)
 
@@ -464,6 +544,7 @@ enum PlaidSyncEngine {
             return bank?.subtype
         }()
 
+        // First big decision: spend vs income vs transfer vs credit payment.
         let kind = PlaidCategoryMapper.classify(
             amount: tx.amount,
             pfc: tx.personal_finance_category,
@@ -532,8 +613,12 @@ enum PlaidSyncEngine {
         }
     }
 
-    // MARK: - Upserts
+    // MARK: - Upserts (expense / income / credit payment)
 
+    /// Insert or update a local expense Transaction from a Plaid spend row.
+    /// Respects user locks (category / multiplier / payment rail) when present.
+    ///
+    /// #Predicate + FetchDescriptor: SwiftData query for an existing row by transactionId.
     @MainActor
     private static func upsertExpense(
         tx: PlaidTransaction,
@@ -545,15 +630,19 @@ enum PlaidSyncEngine {
         allAccounts: [BankAccount],
         modelContext: ModelContext
     ) {
+        // Local constant required by #Predicate (cannot capture function parameters directly).
         let targetId = tx.transaction_id
+        // FetchDescriptor describes what to load; #Predicate is a compile-time checked filter.
         var descriptor = FetchDescriptor<Transaction>(
             predicate: #Predicate<Transaction> { row in
                 row.transactionId == targetId
             }
         )
+        // Only need at most one match (transaction ids are unique).
         descriptor.fetchLimit = 1
 
         let defaultCategory = PlaidCategoryMapper.expenseCategory(from: tx.personal_finance_category)
+        // Vendor learn-rule may override category and multiplier.
         let rule = VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod)
         let mappedCategory = rule?.category ?? defaultCategory
         let channel = tx.payment_channel
@@ -580,16 +669,19 @@ enum PlaidSyncEngine {
             if let railMultiplier { return railMultiplier }
             return benefitsRate
         }()
+        // App stores expenses as negative amounts; abs then negate for a consistent sign.
         let amount = -abs(tx.amount)
         let pending = tx.pending ?? false
 
         if let existing = try? modelContext.fetch(descriptor).first {
+            // UPDATE path: mutate fields on the existing SwiftData model.
             existing.title = title
             existing.amount = amount
             existing.date = date
             existing.paymentMethod = paymentMethod
             existing.plaidPaymentChannel = channel
             applyEnrichment(to: existing, from: tx, authorizedDate: authorizedDate, isPending: pending)
+            // Locks: user edits win over automatic re-classification on later syncs.
             if !existing.isPaymentRailLocked {
                 existing.paymentRail = inferredRail.rawValue
             }
@@ -619,6 +711,7 @@ enum PlaidSyncEngine {
                 }
             }
         } else {
+            // INSERT path: brand-new Transaction model, then modelContext.insert.
             let row = Transaction(
                 transactionId: targetId,
                 title: title,
@@ -647,7 +740,7 @@ enum PlaidSyncEngine {
         }
     }
 
-    /// Map Plaid enrichment fields onto a local expense row.
+    /// Map Plaid enrichment fields onto a local expense row (logo, website, pending, etc.).
     private static func applyEnrichment(
         to row: Transaction,
         from tx: PlaidTransaction,
@@ -671,6 +764,7 @@ enum PlaidSyncEngine {
         row.isPending = isPending
     }
 
+    /// Look up one BankAccount by Plaid account_id (fallback if not in the preloaded array).
     @MainActor
     private static func fetchBankAccount(
         accountId: String,
@@ -686,6 +780,8 @@ enum PlaidSyncEngine {
         return try? modelContext.fetch(descriptor).first
     }
 
+    /// Insert or update an Income model for a Plaid money-in row.
+    /// Income amounts are stored positive (abs of Plaid’s negative inflow).
     @MainActor
     private static func upsertIncome(
         tx: PlaidTransaction,
@@ -745,6 +841,7 @@ enum PlaidSyncEngine {
         }
     }
 
+    /// Insert or update a CreditCardPayment tracking row (payoff UI, not Total Spend).
     @MainActor
     private static func upsertCreditPayment(
         tx: PlaidTransaction,
@@ -820,7 +917,8 @@ enum PlaidSyncEngine {
         }
     }
 
-    /// List-visible row for a bill payment; category is excluded from Total Spend.
+    /// List-visible expense row for a bill payment; category is excluded from Total Spend.
+    /// Locks category + multiplier so learn-rules cannot reclassify EPAY as Shopping.
     @MainActor
     private static func upsertCreditPaymentExpense(
         tx: PlaidTransaction,
@@ -894,6 +992,8 @@ enum PlaidSyncEngine {
     // MARK: - Recurring streams
 
     /// Pull `/transactions/recurring/get` and upsert local `RecurringStream` rows for this Item.
+    /// Nested function `upsert` handles both inflow and outflow arrays.
+    /// Streams no longer returned by Plaid for this Item are deleted locally.
     @MainActor
     @discardableResult
     private static func syncRecurringStreams(
@@ -904,9 +1004,11 @@ enum PlaidSyncEngine {
             accessToken: item.accessToken
         )
         let now = Date()
+        // Track stream ids seen in this response so we can prune missing ones.
         var seen = Set<String>()
         var count = 0
 
+        // Nested function: captures outer locals (item, modelContext, seen, count, now).
         func upsert(_ stream: PlaidRecurringStream, direction: String) {
             let id = stream.stream_id
             seen.insert(id)
@@ -982,13 +1084,14 @@ enum PlaidSyncEngine {
         return count
     }
 
+    /// True for ACH bill-pay codes that should use PaymentRail.ach.
     private static func looksLikeACHBillPay(_ title: String) -> Bool {
         let lower = title.lowercased()
         return lower == "epay" || lower.contains("epay") || lower.contains("ach pmt")
             || lower.contains("ach payment") || lower.contains("e-pay")
     }
 
-    /// Best-effort card label from a payment description.
+    /// Best-effort card label from a payment description (tuple array of needle → display name).
     private static func inferCardName(from title: String) -> String? {
         let lower = title.lowercased()
         let brands = [
@@ -1008,6 +1111,10 @@ enum PlaidSyncEngine {
         return nil
     }
 
+    // MARK: - Accounts upsert / prune / dedupe
+
+    /// Create or update BankAccount rows from `/accounts/get`, prune deselected accounts,
+    /// and seed known card benefits profiles.
     @MainActor
     private static func upsertAccounts(
         _ details: [PlaidAccountDetail],
@@ -1081,6 +1188,7 @@ enum PlaidSyncEngine {
     }
 
     /// Remove `BankAccount`s on this Item that are no longer linked at Plaid.
+    /// `keepingAccountIds` is a Set for O(1) membership checks.
     @MainActor
     static func pruneAccounts(
         forItemId itemId: String,
@@ -1112,6 +1220,7 @@ enum PlaidSyncEngine {
 
     /// Collapse obvious duplicates (same institution + mask + type) left after Relink created a new account_id.
     /// Keeps the row on a currently linked Item with the newest `lastSyncedAt`.
+    /// Dictionary grouping: fingerprint string → array of matching accounts.
     @MainActor
     @discardableResult
     static func dedupeBankAccounts(modelContext: ModelContext) -> Int {
@@ -1127,6 +1236,7 @@ enum PlaidSyncEngine {
                 (account.subtype ?? "").lowercased(),
                 account.name.lowercased()
             ].joined(separator: "|")
+            // default: [] creates an empty array if the key is new, then appends.
             groups[key, default: []].append(account)
         }
 
@@ -1140,6 +1250,7 @@ enum PlaidSyncEngine {
                 return a.lastSyncedAt > b.lastSyncedAt
             }
             let keep = rows[0]
+            // dropFirst(): all rows after the kept one are candidates for deletion.
             for orphan in rows.dropFirst() {
                 // Only drop when we have a clear duplicate of the kept row
                 let sameMask = (keep.mask ?? "") == (orphan.mask ?? "")
@@ -1165,7 +1276,10 @@ enum PlaidSyncEngine {
         return a + b + c + d
     }
 
+    // MARK: - Transaction / income content dedupe
+
     /// Same calendar day + amount + title + soft payment method → keep one expense row.
+    /// Uses a fingerprint key string and scores which duplicate to keep (locks win).
     @MainActor
     @discardableResult
     static func dedupeTransactions(modelContext: ModelContext) -> Int {
@@ -1232,6 +1346,7 @@ enum PlaidSyncEngine {
         return removed
     }
 
+    /// Higher score = keep this duplicate when content-deduping expenses.
     private static func transactionKeepScore(_ tx: Transaction, accounts: [BankAccount]) -> Int {
         var score = 0
         if tx.isCategoryLocked { score += 4 }
@@ -1244,6 +1359,8 @@ enum PlaidSyncEngine {
         return score
     }
 
+    /// Lowercase + collapse whitespace for fingerprint keys.
+    /// #"\s+"# is a Swift raw string used as a regular expression.
     private static func normalizeDedupeText(_ text: String) -> String {
         text
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1261,6 +1378,7 @@ enum PlaidSyncEngine {
     }
 
     /// After Relink / Link, refresh balances and drop accounts removed in Link.
+    /// Public helper called from the Link UI path (not only full sync).
     @MainActor
     static func reconcileItemAccounts(
         item: PlaidLinkedItem,
@@ -1276,6 +1394,8 @@ enum PlaidSyncEngine {
         _ = cleanupStaleBankAccounts(modelContext: modelContext)
         return n
     }
+
+    // MARK: - Liabilities → BankAccount
 
     /// Merge `/liabilities/get` credit rows onto existing `BankAccount`s by account_id.
     @MainActor
@@ -1335,6 +1455,7 @@ enum PlaidSyncEngine {
     // MARK: - Cleanup / delete helpers
 
     /// Re-home mis-filed spend/income that look like transfers or card payments.
+    /// Runs at the start of syncAll so older imports get corrected before new pages apply.
     @MainActor
     private static func cleanLegacyMisclassifiedRows(modelContext: ModelContext) -> Int {
         var fixed = 0
@@ -1390,6 +1511,7 @@ enum PlaidSyncEngine {
         return fixed
     }
 
+    /// Create CreditCardPayment + excluded-spend Transaction from loose fields (legacy income cleanup).
     @MainActor
     private static func ensureCreditPaymentFromParts(
         transactionId: String,
@@ -1455,6 +1577,7 @@ enum PlaidSyncEngine {
         }
     }
 
+    /// Ensure a CreditCardPayment exists for an expense row already marked as bill pay.
     @MainActor
     private static func ensureCreditPaymentFromTransaction(
         _ row: Transaction,
@@ -1482,6 +1605,8 @@ enum PlaidSyncEngine {
         )
     }
 
+    /// Delete expense + income + credit-payment local rows for one Plaid transaction_id.
+    /// Returns true if anything was deleted.
     @MainActor
     private static func deleteLocal(transactionID: String, modelContext: ModelContext) -> Bool {
         var any = false
@@ -1491,6 +1616,7 @@ enum PlaidSyncEngine {
         return any
     }
 
+    /// Delete only expense and income rows (leave CreditCardPayment if present).
     @MainActor
     private static func deleteLocalExpenseOrIncomeOnly(
         transactionID: String,
@@ -1502,6 +1628,7 @@ enum PlaidSyncEngine {
         return any
     }
 
+    /// Delete one Transaction by Plaid transaction_id if it exists.
     @MainActor
     @discardableResult
     private static func deleteExpenseOnly(transactionID: String, modelContext: ModelContext) -> Bool {
@@ -1520,6 +1647,7 @@ enum PlaidSyncEngine {
         return false
     }
 
+    /// Delete one Income by Plaid transaction_id if it exists.
     @MainActor
     @discardableResult
     private static func deleteIncomeOnly(transactionID: String, modelContext: ModelContext) -> Bool {
@@ -1537,6 +1665,7 @@ enum PlaidSyncEngine {
         return false
     }
 
+    /// Delete one CreditCardPayment by Plaid transaction_id if it exists.
     @MainActor
     @discardableResult
     private static func deleteCreditPaymentOnly(transactionID: String, modelContext: ModelContext) -> Bool {
@@ -1554,6 +1683,9 @@ enum PlaidSyncEngine {
         return false
     }
 
+    // MARK: - Small helpers
+
+    /// "Chase Checking ···1234" style label for sync-page account stubs.
     private static func accountDisplayName(account: PlaidAccount, institution: String) -> String {
         let name = account.name ?? account.official_name ?? institution
         if let mask = account.mask, !mask.isEmpty {
@@ -1563,6 +1695,8 @@ enum PlaidSyncEngine {
     }
 
     /// Shared yyyy-MM-dd parser (DateFormatter creation is relatively expensive).
+    /// Static let + closure: built once, reused for every parseDate call.
+    /// en_US_POSIX + GMT: stable parsing of Plaid’s date strings regardless of device locale.
     private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -1572,6 +1706,7 @@ enum PlaidSyncEngine {
         return formatter
     }()
 
+    /// Parse Plaid’s "yyyy-MM-dd" date string into a Date (nil if malformed).
     private static func parseDate(_ string: String) -> Date? {
         dayFormatter.date(from: string)
     }

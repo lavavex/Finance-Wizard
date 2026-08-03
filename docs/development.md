@@ -7,16 +7,38 @@ title: Development
 
 ## Prerequisites
 
-- macOS + Xcode  
+- macOS + **Xcode 26+** (iOS 26 SDK; Xcode 27 beta is fine)  
+- **iOS 26** deployment target (app + widget)  
 - Git  
 - Optional: Plaid Sandbox keys for Sync testing  
 - Optional: GitHub CLI / SSH keys for remote  
+
+### Foundation Models (on-device AI)
+
+The main app links Apple’s **`FoundationModels`** system framework (no extra entitlement or capability). Use it when you add AI features; nothing else is required in the project file beyond the link + iOS 26 target.
+
+| Requirement | Notes |
+|-------------|--------|
+| **SDK / Xcode** | Xcode 26+ with iOS 26 (or newer) SDK |
+| **Deployment target** | iOS **26.0** (both targets) |
+| **Device** | [Apple Intelligence–compatible](https://www.apple.com/apple-intelligence/) hardware (e.g. iPhone 15 Pro+, recent M-series iPads) |
+| **Settings** | **Apple Intelligence** enabled on the device/simulator that supports it |
+| **Language / region** | Model availability can vary by language and region |
+| **Runtime check** | Always read `SystemLanguageModel.default.availability` before using a session |
+
+Docs: [Foundation Models](https://developer.apple.com/documentation/foundationmodels)
+
+**Not wired yet:** no app feature code imports or calls the model. When you implement, start from the main target only (`import FoundationModels`); keep widget free of AI unless you deliberately need it there.
+
+Simulator: Apple Intelligence / Foundation Models support depends on host Mac + OS; prefer a supported physical device if the model reports unavailable.
 
 ## Opening & building
 
 ```bash
 # From git root
-open FinanceWizard.xcodeproj
+# Prefer Xcode that ships the iOS 26+ SDK (beta is OK)
+open -a Xcode-beta FinanceWizard.xcodeproj
+# or: open FinanceWizard.xcodeproj
 ```
 
 In Xcode: scheme **FinanceWizard** (Finance Wizard app) → Run (⌘R).
@@ -25,7 +47,7 @@ In Xcode: scheme **FinanceWizard** (Finance Wizard app) → Run (⌘R).
 
 | Setting | Meaning |
 |---------|---------|
-| **MARKETING_VERSION** | User-facing version (e.g. `0.1`) → About **Version** |
+| **MARKETING_VERSION** | User-facing version (e.g. `1.0`) → About **Version** |
 | **CURRENT_PROJECT_VERSION** | Integer build → About **Build** / TestFlight |
 
 **Xcode Cloud** runs `ci_scripts/ci_pre_xcodebuild.sh`, which sets:
@@ -80,19 +102,36 @@ App Store Connect → your app → **Xcode Cloud** → workflow → **Environmen
 
 | Change | Put it in |
 |--------|-----------|
-| Screens / Sync / Settings | `FinanceWizard/` |
-| Model, store, filters, symbols | `Shared/` (both targets) |
-| Widget UI / intents | `Widget/` |
+| App entry, root tabs, splash | `FinanceWizard/App/` |
+| Feature UI (transactions, accounts, budget, settings, import) | `FinanceWizard/Features/<Area>/` |
+| App-only services (logo fetch, local helpers) | `FinanceWizard/Services/` |
+| Plaid Link / sync / credentials | `FinanceWizard/Plaid/` |
+| SwiftData models + domain enums | `Shared/Models/` (both targets) |
+| ModelContainer / SharedStore | `Shared/Store/` |
+| Analytics, search, period helpers | `Shared/Analytics/` |
+| Card catalog / benefits / nicknames | `Shared/Cards/` |
+| Category charts, icons, privacy UI | `Shared/UI/` |
+| Institution logos | `Shared/Branding/` |
+| Widget UI | `Widget/Widgets/` |
+| Widget bundle + config intents | `Widget/` (root) |
 | Docs wiki | `docs/` |
 
-When adding a new file under `Shared/`, ensure **Target Membership** includes **FinanceWizard** and **WidgetExtension** (folder sync usually handles this).
+Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synced** — new `.swift` files join the target automatically. Keep shared types in `Shared/` so app and widget stay aligned.
 
 ## Conventions used in this project
 
-- **Plain-English comments** on non-obvious lines (learning-friendly).  
+- **Learning-friendly comments** throughout Swift sources: file headers, `///` on types/functions, and `//` inline notes that explain **what the code does** and **what Swift terms mean** (`@State`, `@Query`, optionals, `async`/`await`, etc.). Dense loops get group comments rather than a line-by-line wall.  
 - Expenses from API are **negated** when saved.  
 - Upsert by `transactionId`, never blind replace of the whole DB on Sync.  
 - Widget and app share **analytics** helpers so filters stay consistent.  
+
+### Suggested reading order (if you’re learning the app)
+
+1. `FinanceWizard/App/FinanceWizardApp.swift` — how the app starts  
+2. `Shared/Models/Transaction.swift` + `Shared/Store/SharedStore.swift` — data + totals  
+3. `FinanceWizard/App/ContentView.swift` — tabs and main list  
+4. `FinanceWizard/Plaid/PlaidSyncEngine.swift` — how bank data lands on disk  
+5. Any feature screen under `FinanceWizard/Features/`  
 
 ## Git
 

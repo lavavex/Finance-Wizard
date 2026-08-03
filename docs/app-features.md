@@ -111,10 +111,10 @@ Transaction detail shows **general category → reward category** mapping and a 
 
 | System | File | Used for |
 |--------|------|----------|
-| **General** | `Shared/KnownCategory.swift` | Transactions list, charts, Plaid classify (`Dining`, `Gas (Car)`, `Personal Care`, …) |
-| **Reward** | `Shared/RewardCategory.swift` | Benefits earn rates (`Drugstores`, `Travel (Portal)`, `Online Grocery`, …) |
+| **General** | `Shared/Models/KnownCategory.swift` | Transactions list, charts, Plaid classify (`Dining`, `Gas (Car)`, `Personal Care`, …) |
+| **Reward** | `Shared/Models/RewardCategory.swift` | Benefits earn rates (`Drugstores`, `Travel (Portal)`, `Online Grocery`, …) |
 
-Rates & product presets: `Shared/CardProductCatalog.swift` + `Shared/CardBenefitsStore.swift` (per-card overrides in UserDefaults).
+Rates & product presets: `Shared/Cards/CardProductCatalog.swift` + `Shared/Cards/CardBenefitsStore.swift` (per-card overrides in UserDefaults).
 
 A purchase’s **general** category + title map into a **reward** category (e.g. CVS under Personal Care → **Drugstores**). Cash back is entered as a **percent** (e.g. `3` = 3%).
 
@@ -124,7 +124,7 @@ See [Settings](settings.md).
 
 ## Filters & sort (shared logic)
 
-Implemented in `Shared/SharedStore.swift` as `TransactionAnalytics` + `SnapshotPeriod` + `TransactionSort`.
+Implemented in `Shared/Store/SharedStore.swift` as `TransactionAnalytics` + `SnapshotPeriod` + `TransactionSort`.
 
 | Period | Meaning |
 |--------|---------|
@@ -141,7 +141,7 @@ Implemented in `Shared/SharedStore.swift` as `TransactionAnalytics` + `SnapshotP
 ## Icons
 
 ### Categories (transactions)
-Maps **category** → SF Symbol in `Shared/CategorySymbol.swift`.
+Maps **category** → SF Symbol in `Shared/UI/CategoryStyle.swift` (`CategorySymbol`).
 
 ### Cards / banks
 - **One row per linked account** (Plaid `account_id` / last four) so multiple Chase cards stay separate.  

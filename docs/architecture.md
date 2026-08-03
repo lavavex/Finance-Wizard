@@ -20,13 +20,46 @@ App Group (shared store): `group.net.roberth.FinanceWizard`
 
 ## Source folders
 
+Xcode uses **folder-synced** groups for `FinanceWizard/`, `Shared/`, and `Widget/` — new files under those trees join the target automatically.
+
 ```text
-FinanceWizard/          Main app (SwiftUI + Plaid client)
-  Plaid/                Credentials, Link, /transactions/sync
-Shared/                 Model + store + filters (BOTH targets)
-Widget/                 WidgetKit UI + configuration intents
-docs/                   This documentation (GitHub Pages)
+FinanceWizard/                 Main app (SwiftUI + Plaid client)
+  App/                         @main, root ContentView, splash, app settings
+  Features/
+    Transactions/              List tools, detail, period filter, review, subs
+    Accounts/                  Cards hub, card detail, accounts board model
+    Budget/                    Monthly budget UI
+    Settings/                  Settings + debug export
+    Import/                    Apple Card CSV
+  Services/                    App-only helpers (classify API stub, logo fetch)
+  Plaid/                       Credentials, Link, /transactions/sync
+
+Shared/                        Compiled into APP + WIDGET (must stay in sync)
+  Models/                      SwiftData @Model + domain enums
+  Store/                       SharedStore / ModelContainer
+  Analytics/                   Spend, review queue, subscriptions, search
+  Cards/                       Product catalog, benefits, nicknames
+  Branding/                    Institution logo cache
+  UI/                          Category style/charts, bank icons, privacy
+
+Widget/                        WidgetKit extension
+  WidgetBundle.swift           Entry + registered widgets
+  AppIntent.swift              Configuration intents
+  Widgets/                     Total Spend, Balances, Category Spend
+
+docs/                          GitHub Pages documentation
 ```
+
+### On-device AI (Foundation Models)
+
+| | |
+|---|---|
+| **Framework** | `FoundationModels` (linked on **FinanceWizard** only) |
+| **Min OS** | iOS **26** |
+| **Where data stays** | Inference is on-device (Apple Intelligence); still prefer minimal transaction context in prompts |
+| **Capability / entitlement** | None beyond what the system already requires for Apple Intelligence |
+
+Feature code is not required for the app to build; use the framework when you add AI UI.
 
 ### Why `Shared/`?
 

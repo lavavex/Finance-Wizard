@@ -1,0 +1,380 @@
+//
+//  CardsView.swift
+//  Finance Wizard
+//
+//  Accounts hub: credit cards + checking/savings, Plaid logos, credit
+//  liabilities, and collapsible bill payments under spend.
+//  Teaches: NavigationStack, @Query sort, @State board rebuild, .task(id:), refreshable, @ViewBuilder.
+//
+
+import SwiftUI
+import SwiftData
+
+// MARK: - Accounts tab (formerly Cards)
+
+/// Root Accounts tab: overview totals, upcoming bills, and navigable account rows.
+struct CardsView: View {
+    // Multiple @Query sources feed the board. sort: orders bank accounts by name.
+    @Query private var transactions: [Transaction]
+    @Query(sort: \BankAccount.name) private var accounts: [BankAccount]
+    // Newest payments first (order: .reverse on the date key path).
+    @Query(sort: \CreditCardPayment.date, order: .reverse) private var payments: [CreditCardPayment]
+    @Environment(\.modelContext) private var modelContext
+
+    // Filters / sort shared with detail screens via NavigationLink parameters.
+    @State private var period: SnapshotPeriod = .month
+    @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
+    @State private var sort: TransactionSort = .dateNewest
+    // nicknameEpoch is a “bump counter”: incrementing it forces dependent views to refresh
+    // after the user renames a card (queries alone might not notice label-store changes).
+    @State private var nicknameEpoch = 0
+    @State private var isSyncing = false
+    @State private var syncBanner: String?
+
+    /// Prebuilt board — body only reads this, never re-walks all transactions per section.
+    @State private var board = AccountsBoard()
+    @State private var isBuildingBoard = true
+
+    private var periodLabel: String {
+        period.filterLabel(referenceDate: referenceDate)
+    }
+
+    // Credit accounts only; reading nicknameEpoch ties refresh to rename events.
+    private var creditAccounts: [BankAccount] {
+        _ = nicknameEpoch // intentional read so body re-evaluates after renames
+        return accounts.filter(\.isCredit)
+    }
+
+    /// Dependency string for .task(id:): when any piece changes, rebuild the board.
+    private var refreshToken: String {
+        "\(period.rawValue)|\(referenceDate.timeIntervalSince1970)|\(transactions.count)|\(accounts.count)|\(payments.count)|\(nicknameEpoch)"
+    }
+
+    var body: some View {
+        // NavigationStack owns the navigation bar and push/pop stack for this tab.
+        NavigationStack {
+            List {
+                // MARK: Overview
+                Section {
+                    // NavigationLink destination builds CategorySpendView with current filters.
+                    NavigationLink {
+                        CategorySpendView(period: period, referenceDate: referenceDate)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Total Spend")
+                                    .font(.headline)
+                                Text(periodLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("Tap for category chart")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            // Spinner while the first board build has no rows yet.
+                            if isBuildingBoard && board.creditRows.isEmpty && board.depositoryRows.isEmpty {
+                                ProgressView()
+                            } else {
+                                MoneyText(board.periodTotalSpend)
+                                    .font(.title3.bold())
+                            }
+                        }
+                    }
+
+                    TotalPaidDisclosure(
+                        total: board.totalPaidInPeriod,
+                        payments: board.periodPayments,
+                        periodLabel: periodLabel,
+                        institutionId: nil,
+                        // Trailing closure as a function value for per-payment logo resolution.
+                        resolveInstitutionId: { institutionId(for: $0) }
+                    )
+
+                    if !creditAccounts.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Credit balance")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    MoneyText(board.totalOwed)
+                                        .font(.title3.weight(.semibold))
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("Limit")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    MoneyText(board.totalLimit > 0 ? board.totalLimit : 0)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            // if let util unwraps optional utilization for the bar.
+                            if let util = board.totalUtilization {
+                                UtilizationBar(value: util, label: "Overall utilization")
+                            }
+
+                            if board.totalMinimumDue > 0 || board.soonestDueDate != nil {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Min payments")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if board.totalMinimumDue > 0 {
+                                            MoneyText(board.totalMinimumDue)
+                                                .font(.subheadline.weight(.semibold))
+                                        } else {
+                                            Text("—")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text(board.anyOverdue ? "Overdue" : "Next due")
+                                            .font(.caption)
+                                            .foregroundStyle(board.anyOverdue ? .red : .secondary)
+                                        if let due = board.soonestDueDate {
+                                            Text(due, style: .date)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(board.anyOverdue ? .red : .primary)
+                                        } else {
+                                            Text("—")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Text("Overview")
+                }
+
+                // Sync status banner (pull-to-refresh result).
+                if let syncBanner {
+                    Section {
+                        Text(syncBanner)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // MARK: Upcoming bills (next 30 days)
+                if !board.upcomingBills.isEmpty {
+                    Section {
+                        // id: \.accountId because BankAccount may use accountId as identity here.
+                        ForEach(board.upcomingBills, id: \.accountId) { account in
+                            UpcomingBillRow(account: account)
+                        }
+                    } header: {
+                        Text("Upcoming bills")
+                    }
+                }
+
+                // MARK: Credit cards
+                Section {
+                    if isBuildingBoard && board.creditRows.isEmpty {
+                        HStack {
+                            ProgressView()
+                            Text("Loading accounts…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if board.creditRows.isEmpty {
+                        ContentUnavailableView(
+                            "No credit cards",
+                            systemImage: "creditcard",
+                            description: Text("Link a bank in Settings, then Sync on Transactions.")
+                        )
+                        .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(board.creditRows) { row in
+                            accountNavigationLink(row: row)
+                        }
+                    }
+                } header: {
+                    Text("Credit cards")
+                }
+
+                // MARK: Checking / savings
+                Section {
+                    if board.depositoryRows.isEmpty {
+                        Text("No checking or savings accounts linked yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(board.depositoryRows) { row in
+                            accountNavigationLink(row: row)
+                        }
+                    }
+                } header: {
+                    Text("Checking & savings")
+                }
+
+                // Orphan methods section only appears when there are unmatched spend methods.
+                if !board.otherSpendRows.isEmpty {
+                    Section {
+                        ForEach(board.otherSpendRows) { row in
+                            accountNavigationLink(row: row)
+                        }
+                    } header: {
+                        Text("Other spend")
+                    }
+                }
+            }
+            .navigationTitle("Accounts")
+            // .refreshable wires pull-to-refresh; the closure is async.
+            .refreshable {
+                await syncFromPlaid()
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    // Menu wrapping a Picker is a common “sort options” pattern.
+                    Menu {
+                        Picker("Sort", selection: $sort) {
+                            ForEach(TransactionSort.allCases) { option in
+                                Text(option.displayName).tag(option)
+                            }
+                        }
+                    } label: {
+                        Label("Sort", systemImage: "arrow.up.arrow.down")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    PeriodFilterMenu(
+                        period: $period,
+                        referenceDate: $referenceDate,
+                        transactions: transactions,
+                        // Additional dates keep the month list useful even with few purchases.
+                        additionalDates: payments.map(\.date),
+                        showTitle: true
+                    )
+                }
+            }
+            // Re-run when refreshToken changes (period, counts, nickname, etc.).
+            .task(id: refreshToken) {
+                AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
+                // Clear orphan/duplicate deposit accounts (e.g. X Money after Relink)
+                if PlaidSyncEngine.cleanupStaleBankAccounts(modelContext: modelContext) > 0 {
+                    try? modelContext.save()
+                }
+                InstitutionLogoCache.prefetch(accounts: accounts)
+                rebuildBoard()
+            }
+        }
+    }
+
+    // MARK: - Board rebuild
+
+    /// Snapshot inputs, yield to the run loop, then assign a new AccountsBoard on the main actor.
+    @MainActor
+    private func rebuildBoard() {
+        isBuildingBoard = board.creditRows.isEmpty && board.depositoryRows.isEmpty
+        // Copy @State/@Query values into locals so the Task closure captures stable snapshots.
+        let period = self.period
+        let referenceDate = self.referenceDate
+        let accounts = self.accounts
+        let transactions = self.transactions
+        let payments = self.payments
+        _ = nicknameEpoch
+
+        // Task { @MainActor in } schedules work on the main actor asynchronously.
+        Task { @MainActor in
+            // Task.yield() lets SwiftUI paint once before the potentially heavy build.
+            await Task.yield()
+            board = AccountsBoard.build(
+                accounts: accounts,
+                transactions: transactions,
+                payments: payments,
+                period: period,
+                referenceDate: referenceDate
+            )
+            isBuildingBoard = false
+        }
+    }
+
+    /// Pull latest accounts/transactions from Plaid and show a short banner.
+    private func syncFromPlaid() async {
+        // guard prevents overlapping syncs if the user pulls twice quickly.
+        guard !isSyncing else { return }
+        // MainActor.run hops to the main thread to touch UI state safely.
+        await MainActor.run {
+            isSyncing = true
+            syncBanner = "Syncing with Plaid…"
+        }
+        do {
+            let report = try await PlaidSyncEngine.syncAll(
+                modelContext: modelContext,
+                resetCursors: false,
+                includePending: true,
+                forceRefresh: false
+            )
+            await MainActor.run {
+                syncBanner = report.summary
+                isSyncing = false
+                nicknameEpoch += 1 // force board rebuild via refreshToken
+            }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run { syncBanner = nil }
+        } catch {
+            await MainActor.run {
+                syncBanner = error.localizedDescription
+                isSyncing = false
+            }
+        }
+    }
+
+    // @ViewBuilder lets a function return different View types (or one link) as content.
+    @ViewBuilder
+    private func accountNavigationLink(row: UnifiedCardRow) -> some View {
+        NavigationLink {
+            CardDetailView(
+                displayName: row.displayName,
+                rawPaymentMethod: row.rawPaymentMethod,
+                matchingPaymentMethods: row.matchingPaymentMethods,
+                period: period,
+                referenceDate: referenceDate,
+                sort: sort,
+                creditAccount: row.creditAccount,
+                bankAccount: row.bankAccount ?? row.creditAccount,
+                periodPayments: AccountsBoard.paymentsMatching(
+                    credit: row.creditAccount,
+                    paymentMethods: row.matchingPaymentMethods,
+                    in: board.periodPayments
+                ),
+                // Closure callback: child notifies parent that a nickname changed.
+                onNicknameChanged: { nicknameEpoch += 1 }
+            )
+        } label: {
+            UnifiedCardLabel(row: row)
+        }
+    }
+
+    /// Resolve a Plaid institution id for logos on bill-payment rows.
+    private func institutionId(for payment: CreditCardPayment) -> String? {
+        if let id = payment.creditAccountId,
+           let account = accounts.first(where: { $0.accountId == id }) {
+            return account.institutionId
+        }
+        // first(where:) returns the first element matching the closure, or nil.
+        if let maskMatch = creditAccounts.first(where: { account in
+            guard let mask = account.mask, !mask.isEmpty else { return false }
+            return payment.cardName.contains(mask)
+        }) {
+            return maskMatch.institutionId
+        }
+        return accounts.first { $0.institutionName == payment.institutionName }?.institutionId
+    }
+}
+
+#Preview {
+    CardsView()
+        .modelContainer(
+            for: [Transaction.self, BankAccount.self, CreditCardPayment.self],
+            inMemory: true
+        )
+}
