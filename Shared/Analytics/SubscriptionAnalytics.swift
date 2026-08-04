@@ -24,9 +24,10 @@ enum SubscriptionCadence: String, CaseIterable, Identifiable, Sendable {
     case monthly
     case yearly
 
-    var id: String { rawValue }
+    nonisolated var id: String { rawValue }
 
-    var displayName: String {
+    /// nonisolated: safe to read from background subscription math.
+    nonisolated var displayName: String {
         switch self {
         case .weekly: return "Weekly"
         case .monthly: return "Monthly"
@@ -57,6 +58,8 @@ struct SubscriptionCandidate: Identifiable, Sendable {
 
 /// Lightweight Sendable row for subscription detection off the main actor.
 /// Copies plain values from a Transaction so background tasks never touch SwiftData models.
+/// Stored properties are plain Sendable values; computed helpers are `nonisolated`
+/// so `Task.detached` subscription detect can use them under default MainActor isolation.
 struct SubscriptionTxSnapshot: Sendable, Hashable {
     let transactionId: String
     let title: String
@@ -66,7 +69,7 @@ struct SubscriptionTxSnapshot: Sendable, Hashable {
     let paymentMethod: String
     let subscriptionCadenceOverride: String?
 
-    /// Memberwise-style init from the live model.
+    /// Memberwise-style init from the live model (call on main where Transaction lives).
     init(transaction: Transaction) {
         transactionId = transaction.transactionId
         title = transaction.title
@@ -78,7 +81,7 @@ struct SubscriptionTxSnapshot: Sendable, Hashable {
     }
 
     /// User-picked cadence if the override string is weekly/monthly/yearly.
-    var declaredSubscriptionCadence: SubscriptionCadence? {
+    nonisolated var declaredSubscriptionCadence: SubscriptionCadence? {
         // Optional chaining: ? steps through nil safely; guard stops if anything is missing
         guard let raw = subscriptionCadenceOverride?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -91,29 +94,33 @@ struct SubscriptionTxSnapshot: Sendable, Hashable {
     }
 
     /// User explicitly said “this is not a subscription.”
-    var isDeclaredNotSubscription: Bool {
+    nonisolated var isDeclaredNotSubscription: Bool {
         let raw = subscriptionCadenceOverride?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         return raw == "none"
     }
 
-    var cardName: String {
+    nonisolated var cardName: String {
         paymentMethod.isEmpty ? "Unknown" : paymentMethod
     }
 }
 
 /// Subscription detection and rollup math.
+///
+/// Pure snapshot-based methods are `nonisolated` so they can run inside
+/// `Task.detached` (background) under SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor.
 enum SubscriptionAnalytics {
     /// Months without a charge before we treat a monthly/weekly sub as cancelled.
-    static let monthlyCancelAfterMonths = 3
+    /// nonisolated: readable from background detect helpers.
+    nonisolated static let monthlyCancelAfterMonths = 3
     /// Months without a charge before a yearly sub is treated as cancelled (~1 year + grace).
-    static let yearlyCancelAfterMonths = 15
+    nonisolated static let yearlyCancelAfterMonths = 15
 
     /// Snapshot SwiftData models on the main actor, then call `detect(snapshots:)`.
-    /// map(SubscriptionTxSnapshot.init) is shorthand for map { SubscriptionTxSnapshot(transaction: $0) }.
+    /// Use an explicit closure (not `map(SubscriptionTxSnapshot.init)`) so isolation matches.
     static func snapshots(from transactions: [Transaction]) -> [SubscriptionTxSnapshot] {
-        transactions.map(SubscriptionTxSnapshot.init)
+        transactions.map { SubscriptionTxSnapshot(transaction: $0) }
     }
 
     /// Active subscriptions only (cancelled / stale monthly excluded).
@@ -131,7 +138,7 @@ enum SubscriptionAnalytics {
 
     /// Preferred for background work — pure value types, no SwiftData.
     /// detectAll → filter isActive keeps only still-charging candidates.
-    static func detect(
+    nonisolated static func detect(
         snapshots: [SubscriptionTxSnapshot],
         now: Date = Date(),
         lookbackDays: Int = 400
@@ -154,7 +161,7 @@ enum SubscriptionAnalytics {
     }
 
     /// Core pipeline: filter spend → declared subs → vendor clusters → amount clusters → cadence.
-    static func detectAll(
+    nonisolated static func detectAll(
         snapshots: [SubscriptionTxSnapshot],
         now: Date = Date(),
         lookbackDays: Int = 400
@@ -249,7 +256,7 @@ enum SubscriptionAnalytics {
 
     /// Monthly/weekly: no charge in 3+ months → cancelled.
     /// Yearly: no charge in 15+ months → cancelled.
-    static func isActive(_ candidate: SubscriptionCandidate, now: Date = Date()) -> Bool {
+    nonisolated static func isActive(_ candidate: SubscriptionCandidate, now: Date = Date()) -> Bool {
         let cal = Calendar.current
         // Nested switch assigned to months via a closure
         let months: Int = {
@@ -265,14 +272,14 @@ enum SubscriptionAnalytics {
     }
 
     /// Sum of estimated monthly costs across candidates.
-    static func totalMonthlyBurn(_ items: [SubscriptionCandidate]) -> Double {
+    nonisolated static func totalMonthlyBurn(_ items: [SubscriptionCandidate]) -> Double {
         items.reduce(0) { $0 + $1.estimatedMonthly }
     }
 
     // MARK: - User declarations
 
     /// Build candidates from transactions the user marked as weekly/monthly/yearly.
-    private static func collectDeclaredCandidates(
+    nonisolated private static func collectDeclaredCandidates(
         from spend: [SubscriptionTxSnapshot],
         now: Date
     ) -> [SubscriptionCandidate] {
@@ -322,7 +329,7 @@ enum SubscriptionAnalytics {
     }
 
     /// Shared builder for auto-detected and user-declared candidates.
-    private static func makeCandidate(
+    nonisolated private static func makeCandidate(
         key: String,
         cluster: [SubscriptionTxSnapshot],
         typical: Double,
@@ -365,14 +372,14 @@ enum SubscriptionAnalytics {
         )
     }
 
-    private static func candidateKey(_ c: SubscriptionCandidate) -> String {
+    nonisolated private static func candidateKey(_ c: SubscriptionCandidate) -> String {
         "\(c.normalizedVendor)|\(String(format: "%.2f", c.typicalAmount))|\(c.cadence.rawValue)"
     }
 
     // MARK: - Exclude retail habits
 
     /// Categories that are usually “I shop here often,” not a fixed subscription bill.
-    private static func isHabitCategory(_ category: String) -> Bool {
+    nonisolated private static func isHabitCategory(_ category: String) -> Bool {
         let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let blocked = [
             "dining", "groceries", "grocery", "gas (car)", "gas", "transit",
@@ -385,7 +392,7 @@ enum SubscriptionAnalytics {
 
     /// Title keywords for grocery/coffee/gas/etc. habits to exclude from auto-detect.
     /// Dense list: one place to maintain retail false-positives.
-    private static func looksLikeRetailHabit(title: String) -> Bool {
+    nonisolated private static func looksLikeRetailHabit(title: String) -> Bool {
         let t = title.lowercased()
         let retail = [
             "walmart", "target", "costco", "sams club", "sam's club", "trader joe",
@@ -411,7 +418,7 @@ enum SubscriptionAnalytics {
     }
 
     /// Title keywords that strongly suggest a membership / streaming / SaaS charge.
-    private static func looksLikeSubscriptionName(_ title: String) -> Bool {
+    nonisolated private static func looksLikeSubscriptionName(_ title: String) -> Bool {
         let t = title.lowercased()
         let needles = [
             "subscription", "subscrip", "membership", "member fee", "premium",
@@ -436,7 +443,7 @@ enum SubscriptionAnalytics {
     // MARK: - Amount clustering
 
     /// Group transactions whose absolute amounts sit within a small tolerance of each other.
-    private static func exactAmountClusters(_ rows: [SubscriptionTxSnapshot]) -> [[SubscriptionTxSnapshot]] {
+    nonisolated private static func exactAmountClusters(_ rows: [SubscriptionTxSnapshot]) -> [[SubscriptionTxSnapshot]] {
         var remaining = rows.sorted { abs($0.amount) < abs($1.amount) }
         var clusters: [[SubscriptionTxSnapshot]] = []
 
@@ -462,7 +469,7 @@ enum SubscriptionAnalytics {
     }
 
     /// True when every amount is close to the typical (median) value.
-    private static func amountSpreadOK(_ amounts: [Double], typical: Double) -> Bool {
+    nonisolated private static func amountSpreadOK(_ amounts: [Double], typical: Double) -> Bool {
         guard !amounts.isEmpty, typical > 0 else { return false }
         let maxDev = amounts.map { abs($0 - typical) }.max() ?? 0
         return maxDev <= max(0.25, typical * 0.01)
@@ -471,7 +478,7 @@ enum SubscriptionAnalytics {
     // MARK: - Cadence
 
     /// Infer weekly / monthly / yearly from gaps between charge dates.
-    private static func inferCadence(dates: [Date], allowWeekly: Bool) -> SubscriptionCadence? {
+    nonisolated private static func inferCadence(dates: [Date], allowWeekly: Bool) -> SubscriptionCadence? {
         guard dates.count >= 2 else { return nil }
         var gaps: [Double] = []
         // Stride consecutive dates; convert seconds to days (86_400 seconds in a day)
@@ -500,7 +507,7 @@ enum SubscriptionAnalytics {
 
     /// Collapse a noisy bank title into a short vendor key for grouping.
     /// Uses regularExpression options to strip POS/card numbers and punctuation.
-    static func normalizeVendor(_ title: String) -> String {
+    nonisolated static func normalizeVendor(_ title: String) -> String {
         var s = title.lowercased()
         let junk = [
             #"\bpos\b"#, #"\bpurchase\b"#, #"\bdebit\b"#, #"\bcard\b"#,
@@ -518,14 +525,14 @@ enum SubscriptionAnalytics {
     }
 
     /// Truncate long titles for list display (… is a single unicode ellipsis character).
-    private static func prettyVendor(_ title: String) -> String {
+    nonisolated private static func prettyVendor(_ title: String) -> String {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.count <= 40 { return t }
         return String(t.prefix(37)) + "…"
     }
 
     /// Classic median: middle value of a sorted list (average of two middles if even count).
-    private static func median(_ values: [Double]) -> Double {
+    nonisolated private static func median(_ values: [Double]) -> Double {
         guard !values.isEmpty else { return 0 }
         let s = values.sorted()
         let mid = s.count / 2

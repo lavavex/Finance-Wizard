@@ -122,7 +122,7 @@ struct ExpectedIncomeStream: Identifiable, Codable, Hashable, Sendable {
             return calendar.date(byAdding: .day, value: delta, to: start)
         case .monthly:
             guard let targetDay = dayOfMonth, targetDay >= 1 else { return nil }
-            var comps = calendar.dateComponents([.year, .month], from: start)
+            let comps = calendar.dateComponents([.year, .month], from: start)
             guard let year = comps.year, let month = comps.month else { return nil }
 
             func dateIn(year: Int, month: Int) -> Date? {

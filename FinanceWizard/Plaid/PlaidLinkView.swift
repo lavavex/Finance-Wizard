@@ -428,7 +428,22 @@ final class HostedLinkSessionController: NSObject, ASWebAuthenticationPresentati
         if let window = scenes.flatMap(\.windows).first {
             return window
         }
-        // Fallback empty anchor (should be rare).
-        return ASPresentationAnchor()
+        // iOS 26+: UIWindow() is deprecated — always create with a windowScene.
+        if let scene = scenes.first {
+            return UIWindow(windowScene: scene)
+        }
+        // No scene yet (extremely rare during Link). Use any connected scene if available.
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            return UIWindow(windowScene: scene)
+        }
+        // Last resort: first key window from shared application (should still have a scene).
+        if let window = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows)
+            .first {
+            return window
+        }
+        // Type requires a UIWindow; construct from the first window scene or a placeholder scene lookup.
+        preconditionFailure("ASWebAuthenticationSession needs a window scene for presentationAnchor")
     }
 }

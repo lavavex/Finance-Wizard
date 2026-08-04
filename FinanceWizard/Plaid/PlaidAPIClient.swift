@@ -235,7 +235,8 @@ enum PlaidAPIClient {
             // Surface a clear fix when Plaid wants an https redirect (OAuth / update mode).
             // Pattern match the http case to inspect code/message.
             if case .http(_, let code, let message) = err {
-                let blob = "\(code ?? "") \(message ?? "")".lowercased()
+                // code is optional; message is always a String (no ?? needed).
+                let blob = "\(code ?? "") \(message)".lowercased()
                 if blob.contains("redirect_uri") && httpsRedirect == nil {
                     throw PlaidAPIError.http(
                         status: 0,
