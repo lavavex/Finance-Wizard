@@ -240,7 +240,8 @@ struct FinanceSnapshot {
 /// Filter, sort, and aggregate expense transactions for charts and widgets.
 enum TransactionAnalytics {
     /// Canonical label for credit-card bill payments (not real spend).
-    static let creditCardPaymentCategory = "Credit Card Payment"
+    /// nonisolated so background subscription heuristics can call exclusion helpers.
+    nonisolated static let creditCardPaymentCategory = "Credit Card Payment"
 
     /// Categories excluded from Total Spend, charts, and card spend rollups.
     static func isExcludedFromSpend(_ transaction: Transaction) -> Bool {
@@ -248,7 +249,8 @@ enum TransactionAnalytics {
     }
 
     /// String form so callers without a full Transaction can still check.
-    static func isExcludedFromSpendCategory(_ category: String) -> Bool {
+    /// nonisolated: pure string check safe off the main actor (subscription detect).
+    nonisolated static func isExcludedFromSpendCategory(_ category: String) -> Bool {
         let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return c == creditCardPaymentCategory.lowercased()
             || c == "credit card payments"
@@ -634,7 +636,8 @@ enum TransactionAnalytics {
 /// Opens the shared App Group SwiftData store and loads widget/app snapshots.
 enum SharedStore {
     // Must match App Groups entitlement on BOTH app and widget targets
-    static let appGroupID = "group.net.roberth.FinanceWizard"
+    /// nonisolated: logo cache / disk helpers may read this off the main actor.
+    nonisolated static let appGroupID = "group.net.roberth.FinanceWizard"
 
     // File name for the SwiftData store inside the App Group container
     static let storeName = "FinanceTransactions"

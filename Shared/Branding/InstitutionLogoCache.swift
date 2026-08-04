@@ -36,41 +36,46 @@ extension Notification.Name {
 
 /// Central logo/color cache for bank institution marks.
 /// Call memoryLogo on the main thread while scrolling; use loadLogo / ensureLogo for disk + network.
+///
+/// Storage is intentionally `nonisolated(unsafe)`: NSCache is thread-safe, and mutable
+/// flags/sets are always accessed under `lock` (NSLock). That lets disk decode run in
+/// `Task.detached` under SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor without actor warnings.
 enum InstitutionLogoCache {
     /// UserDefaults key prefixes for brand color and institution display name.
-    private static let colorPrefix = "plaid.color."
-    private static let namePrefix = "plaid.instName."
+    nonisolated private static let colorPrefix = "plaid.color."
+    nonisolated private static let namePrefix = "plaid.instName."
     /// Hot path: decoded UIImages keyed by institution id or "name:…".
     /// Closure-initialized static: runs once when first accessed.
-    private static let memoryLogos: NSCache<NSString, UIImage> = {
+    nonisolated(unsafe) private static let memoryLogos: NSCache<NSString, UIImage> = {
         let c = NSCache<NSString, UIImage>()
         c.countLimit = 256
         return c
     }()
     /// Keys that already miss on disk — skip repeated FileManager / inflate work while scrolling.
-    private static let missingLogoKeys: NSCache<NSString, NSNumber> = {
+    nonisolated(unsafe) private static let missingLogoKeys: NSCache<NSString, NSNumber> = {
         let c = NSCache<NSString, NSNumber>()
         c.countLimit = 512
         return c
     }()
     /// Sampled tile hex / full-bleed flag — never re-rasterize the same logo every list row.
-    private static let sampleHexCache = NSCache<NSString, NSString>()
-    private static let opaqueCanvasCache = NSCache<NSString, NSNumber>()
-    private static let aliasListCache = NSCache<NSString, NSArray>()
+    nonisolated(unsafe) private static let sampleHexCache = NSCache<NSString, NSString>()
+    nonisolated(unsafe) private static let opaqueCanvasCache = NSCache<NSString, NSNumber>()
+    nonisolated(unsafe) private static let aliasListCache = NSCache<NSString, NSArray>()
     /// Institution ids currently waiting on a network fetch (dedupe parallel requests).
-    private static var inFlight = Set<String>()
-    private static let lock = NSLock()
-    private static var didSeedBundled = false
+    nonisolated(unsafe) private static var inFlight = Set<String>()
+    // NSLock is Sendable; no nonisolated(unsafe) needed.
+    nonisolated private static let lock = NSLock()
+    nonisolated(unsafe) private static var didSeedBundled = false
     /// Resolved once — logoDirectory() used to create dirs + stat group container on every tile.
-    private static var cachedLogoDirectory: URL?
-    private static var didResolveLogoDirectory = false
+    nonisolated(unsafe) private static var cachedLogoDirectory: URL?
+    nonisolated(unsafe) private static var didResolveLogoDirectory = false
 
     // MARK: - Bundled logos (screenshot-cleaned assets)
     // Some brands (Apple Card) ship in the app asset catalog instead of Plaid.
 
     /// Seed known brand marks shipped in the app bundle (e.g. Apple Card).
     /// Safe to call often — runs once per process.
-    static func seedBundledLogos() {
+    nonisolated static func seedBundledLogos() {
         // Double-checked lock pattern: avoid seeding twice under concurrency
         lock.lock()
         if didSeedBundled {
@@ -88,7 +93,7 @@ enum InstitutionLogoCache {
         seedAppleCardLogo(force: true)
     }
 
-    private static func seedAppleCardLogo(force: Bool = false) {
+    nonisolated private static func seedAppleCardLogo(force: Bool = false) {
         let id = "local:apple-card"
         if !force, logoImage(institutionID: id) != nil { return }
 
@@ -115,7 +120,7 @@ enum InstitutionLogoCache {
 
     /// Store raw image bytes (PNG/JPEG) as the institution logo.
     /// Also writes name aliases so lookups by “Chase” or “chase bank” can find the same file.
-    static func storeImageData(
+    nonisolated static func storeImageData(
         _ data: Data,
         institutionID: String,
         name: String?,
@@ -524,7 +529,7 @@ enum InstitutionLogoCache {
     }
 
     /// Synchronous lookup by Plaid institution id (may hit disk — avoid on main while scrolling).
-    static func logoImage(institutionID: String?) -> UIImage? {
+    nonisolated static func logoImage(institutionID: String?) -> UIImage? {
         guard let institutionID, !institutionID.isEmpty else { return nil }
         // Lazy seed so first Apple Card tile works even before app start hook runs.
         if institutionID == "local:apple-card" {
@@ -552,7 +557,7 @@ enum InstitutionLogoCache {
     }
 
     /// Synchronous lookup by institution display name (aliases + id map).
-    static func logoImage(institutionName: String?) -> UIImage? {
+    nonisolated static func logoImage(institutionName: String?) -> UIImage? {
         guard let institutionName, !institutionName.isEmpty else { return nil }
         let lower = institutionName.lowercased()
         let nameKey = "name:" + lower
@@ -604,18 +609,18 @@ enum InstitutionLogoCache {
     }
 
     /// Put image in memory under each key and clear any “missing” flags for those keys.
-    private static func remember(_ image: UIImage, keys: [String]) {
+    nonisolated private static func remember(_ image: UIImage, keys: [String]) {
         for key in keys where !key.isEmpty {
             memoryLogos.setObject(image, forKey: key as NSString)
             missingLogoKeys.removeObject(forKey: key as NSString)
         }
     }
 
-    private static func isMissing(_ key: String) -> Bool {
+    nonisolated private static func isMissing(_ key: String) -> Bool {
         missingLogoKeys.object(forKey: key as NSString) != nil
     }
 
-    private static func markMissing(_ key: String) {
+    nonisolated private static func markMissing(_ key: String) {
         missingLogoKeys.setObject(true as NSNumber, forKey: key as NSString)
     }
 
@@ -773,7 +778,7 @@ enum InstitutionLogoCache {
     // MARK: - Decode helpers
 
     /// Accepts raw base64, data-URL, or whitespace-padded Plaid payloads.
-    private static func decodeImageData(_ logoBase64: String?) -> Data? {
+    nonisolated private static func decodeImageData(_ logoBase64: String?) -> Data? {
         guard var s = logoBase64?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else {
             return nil
         }
@@ -794,14 +799,14 @@ enum InstitutionLogoCache {
         return Data(base64Encoded: urlSafe, options: .ignoreUnknownCharacters)
     }
 
-    private static func normalizedHex(_ hex: String) -> String {
+    nonisolated private static func normalizedHex(_ hex: String) -> String {
         var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         if !s.hasPrefix("#") { s = "#" + s }
         return s
     }
 
     /// Brand hex when Plaid omits `primary_color` / `logo` (see Plaid docs: logos optional).
-    private static func brandFallbackHex(for name: String) -> String? {
+    nonisolated private static func brandFallbackHex(for name: String) -> String? {
         let n = name.lowercased()
         if n.contains("chase") { return "#114B7D" } // Chase blue
         if n.contains("american express") || n.contains("amex") { return "#006FBF" }
@@ -816,7 +821,7 @@ enum InstitutionLogoCache {
         return nil
     }
 
-    private static func brandFallbackHex(forInstitutionID id: String) -> String? {
+    nonisolated private static func brandFallbackHex(forInstitutionID id: String) -> String? {
         switch id {
         case "ins_56": return "#114B7D" // Chase
         default: return nil
@@ -828,7 +833,7 @@ enum InstitutionLogoCache {
     // per-app caches fallback. Keys are sanitized for safe file names.
 
     /// Directory for logo files; resolved and cached once per process.
-    private static func logoDirectory() -> URL? {
+    nonisolated private static func logoDirectory() -> URL? {
         if didResolveLogoDirectory { return cachedLogoDirectory }
         lock.lock()
         defer { lock.unlock() }
@@ -852,21 +857,20 @@ enum InstitutionLogoCache {
         return resolved
     }
 
-    private static func logoFileURL(key: String) -> URL? {
+    nonisolated private static func logoFileURL(key: String) -> URL? {
         let safe = sanitizedFileKey(key)
         return logoDirectory()?.appendingPathComponent(safe + ".img")
     }
 
     /// Replace path-illegal characters so keys like "account:abc" become file-safe.
-    private static func sanitizedFileKey(_ key: String) -> String {
+    nonisolated private static func sanitizedFileKey(_ key: String) -> String {
         key
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
     }
 
     /// Also check legacy .png filenames from earlier builds.
-    private static func readLogoData(key: String) -> Data? {
-        let fm = FileManager.default
+    nonisolated private static func readLogoData(key: String) -> Data? {
         let safe = sanitizedFileKey(key)
         if let url = logoFileURL(key: key),
            let data = try? Data(contentsOf: url), !data.isEmpty {
@@ -894,7 +898,7 @@ enum InstitutionLogoCache {
 
     /// Write logo bytes to App Group (widget) and app caches (reliability).
     /// .atomic means write to a temp file then rename (safer if the app crashes mid-write).
-    private static func writeLogoData(_ data: Data, key: String) {
+    nonisolated private static func writeLogoData(_ data: Data, key: String) {
         let safe = sanitizedFileKey(key)
         missingLogoKeys.removeObject(forKey: key as NSString)
         // Write App Group (widget) + app caches (reliability)
@@ -911,7 +915,7 @@ enum InstitutionLogoCache {
 
     /// Related lowercase names for the same bank (Chase ↔ JPMorgan Chase, Amex ↔ American Express).
     /// Cached so scrolling does not rebuild the set every row.
-    private static func nameAliases(for name: String) -> [String] {
+    nonisolated private static func nameAliases(for name: String) -> [String] {
         let lower = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if let cached = aliasListCache.object(forKey: lower as NSString) as? [String] {
             return cached
