@@ -22,6 +22,48 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+
+	<!-- Open .fwbackup from Files / iCloud Drive / other apps -->
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>net.roberth.FinanceWizard.backup</string>
+			<key>UTTypeDescription</key>
+			<string>Finance Wizard Backup</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>fwbackup</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Finance Wizard Backup</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>net.roberth.FinanceWizard.backup</string>
+			</array>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>fwbackup</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
-

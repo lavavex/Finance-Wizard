@@ -10,6 +10,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import UniformTypeIdentifiers
 
 /// Main Settings screen for Plaid keys, bank links, privacy, and About.
 ///
@@ -40,6 +41,19 @@ struct SettingsView: View {
     @State private var debugExportURL: URL?
     @State private var showDebugShare = false
     @State private var showDebugExportConfirm = false
+
+    // Full encrypted app backup / restore.
+    @State private var showBackupPasswordSheet = false
+    @State private var showRestorePasswordSheet = false
+    @State private var showRestoreFilePicker = false
+    @State private var showRestoreConfirm = false
+    @State private var isWorkingPlaidBackup = false
+    @State private var plaidBackupShareURL: URL?
+    @State private var showPlaidBackupShare = false
+    @State private var pendingRestoreURL: URL?
+    @State private var pendingRestorePayload: PlaidConnectionBackup.Payload?
+    @State private var showRestorePlanSheet = false
+    @State private var restorePolicy: PlaidConnectionBackup.RestorePolicy = .safeMerge
 
     // @AppStorage ties a Bool to UserDefaults under a key — persists across launches.
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
@@ -230,6 +244,34 @@ struct SettingsView: View {
                     Text("Status")
                 }
 
+                // MARK: Full backup
+                Section {
+                    Button {
+                        showBackupPasswordSheet = true
+                    } label: {
+                        if isWorkingPlaidBackup {
+                            HStack {
+                                ProgressView()
+                                Text("Working…")
+                            }
+                        } else {
+                            Label("Back up everything", systemImage: "lock.shield")
+                        }
+                    }
+                    .disabled(isWorkingPlaidBackup)
+
+                    Button {
+                        showRestoreConfirm = true
+                    } label: {
+                        Label("Restore from backup", systemImage: "arrow.counterclockwise.circle")
+                    }
+                    .disabled(isWorkingPlaidBackup)
+                } header: {
+                    Text("Backup & restore")
+                } footer: {
+                    Text("Password-encrypted full backup: Plaid keys, bank access tokens, transactions, income, accounts, budget, nicknames, and learned rules. Default restore is Safe merge — it never overwrites access tokens or API keys already on this phone. Store the file somewhere safe; anyone with the file and password can access your linked accounts.")
+                }
+
                 // if let unwraps an optional: only shows this section when statusMessage is non-nil.
                 if let statusMessage {
                     Section {
@@ -274,7 +316,13 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             // onAppear runs once when the view appears (good place to load stored values).
-            .onAppear(perform: reload)
+            .onAppear {
+                reload()
+                consumeIncomingBackupIfNeeded()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: PlaidConnectionBackup.openFileNotification)) { _ in
+                consumeIncomingBackupIfNeeded()
+            }
             // sheet(item:) presents when linkSheetRequest becomes non-nil; onDismiss runs after close.
             .sheet(item: $linkSheetRequest, onDismiss: reload) { request in
                 PlaidLinkSheet(mode: request.mode) { result in
@@ -347,6 +395,18 @@ struct SettingsView: View {
             } message: {
                 Text("Shares a local copy of your data for troubleshooting. Secrets and bank login tokens are not included.")
             }
+            .confirmationDialog(
+                "Restore from backup?",
+                isPresented: $showRestoreConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Choose backup file…") {
+                    showRestoreFilePicker = true
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You’ll enter the backup password, then review a Safe merge plan. Existing bank access tokens on this phone are not overwritten unless you choose Replace connections.")
+            }
             .sheet(isPresented: $showDebugShare, onDismiss: {
                 debugExportURL = nil
             }) {
@@ -356,7 +416,94 @@ struct SettingsView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showPlaidBackupShare, onDismiss: {
+                plaidBackupShareURL = nil
+            }) {
+                if let plaidBackupShareURL {
+                    ShareSheet(items: [plaidBackupShareURL]) {
+                        showPlaidBackupShare = false
+                    }
+                }
+            }
+            .sheet(isPresented: $showBackupPasswordSheet) {
+                PlaidBackupPasswordSheet(
+                    mode: .createBackup,
+                    isWorking: $isWorkingPlaidBackup
+                ) { password in
+                    try await runPlaidBackup(password: password)
+                }
+            }
+            .sheet(isPresented: $showRestorePasswordSheet, onDismiss: {
+                // Drop the security-scoped file if the user cancelled without decrypting.
+                if !isWorkingPlaidBackup && pendingRestorePayload == nil {
+                    pendingRestoreURL = nil
+                }
+            }) {
+                PlaidBackupPasswordSheet(
+                    mode: .restore,
+                    isWorking: $isWorkingPlaidBackup
+                ) { password in
+                    try await decryptRestorePayload(password: password)
+                }
+            }
+            .sheet(isPresented: $showRestorePlanSheet, onDismiss: {
+                if !isWorkingPlaidBackup {
+                    pendingRestorePayload = nil
+                    pendingRestoreURL = nil
+                    restorePolicy = .safeMerge
+                }
+            }) {
+                if let payload = pendingRestorePayload {
+                    PlaidRestorePlanSheet(
+                        payload: payload,
+                        policy: $restorePolicy,
+                        isWorking: $isWorkingPlaidBackup
+                    ) {
+                        try await applyRestorePayload()
+                    }
+                }
+            }
+            .fileImporter(
+                isPresented: $showRestoreFilePicker,
+                allowedContentTypes: Self.plaidBackupContentTypes,
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    pendingRestoreURL = url
+                    pendingRestorePayload = nil
+                    restorePolicy = .safeMerge
+                    showRestorePasswordSheet = true
+                case .failure(let error):
+                    statusIsError = true
+                    statusMessage = error.localizedDescription
+                }
+            }
         }
+    }
+
+    /// UTTypes accepted by the restore file picker.
+    private static var plaidBackupContentTypes: [UTType] {
+        PlaidConnectionBackup.importContentTypes
+    }
+
+    /// Start restore when a `.fwbackup` was opened from Files / another app.
+    private func consumeIncomingBackupIfNeeded() {
+        if let error = AppBackupOpenBridge.pendingError {
+            AppBackupOpenBridge.pendingError = nil
+            statusIsError = true
+            statusMessage = error
+            return
+        }
+        guard let url = AppBackupOpenBridge.pendingURL else { return }
+        AppBackupOpenBridge.pendingURL = nil
+        pendingRestoreURL = url
+        pendingRestorePayload = nil
+        restorePolicy = .safeMerge
+        showRestorePasswordSheet = true
+        statusIsError = false
+        statusMessage = "Opened \(url.lastPathComponent). Enter the backup password to continue."
     }
 
     // @MainActor means this async function must run on the main thread (required for UI state).
@@ -376,6 +523,99 @@ struct SettingsView: View {
             statusIsError = true
             statusMessage = error.localizedDescription
         }
+    }
+
+    /// Encrypt full app state and present the system share sheet.
+    @MainActor
+    private func runPlaidBackup(password: String) async throws {
+        isWorkingPlaidBackup = true
+        defer { isWorkingPlaidBackup = false }
+        // Yield once so the sheet can paint the ProgressView before PBKDF2 runs.
+        await Task.yield()
+        let url = try PlaidConnectionBackup.exportEncryptedFile(
+            password: password,
+            modelContext: modelContext
+        )
+        plaidBackupShareURL = url
+        showPlaidBackupShare = true
+        statusIsError = false
+        let banks = PlaidItemStore.loadItems().count
+        statusMessage = "Encrypted full backup ready (\(banks) bank connection\(banks == 1 ? "" : "s") + local data). Save it somewhere safe."
+        reload()
+    }
+
+    /// Decrypt only — shows the Safe merge plan before any writes.
+    @MainActor
+    private func decryptRestorePayload(password: String) async throws {
+        guard let url = pendingRestoreURL else {
+            throw PlaidConnectionBackup.BackupError.invalidFile
+        }
+        isWorkingPlaidBackup = true
+        defer { isWorkingPlaidBackup = false }
+        await Task.yield()
+        let payload = try PlaidConnectionBackup.decryptPayload(from: url, password: password)
+        pendingRestorePayload = payload
+        restorePolicy = .safeMerge
+        showRestorePlanSheet = true
+    }
+
+    /// Apply the decrypted payload with the chosen policy.
+    @MainActor
+    private func applyRestorePayload() async throws {
+        guard let payload = pendingRestorePayload else {
+            throw PlaidConnectionBackup.BackupError.invalidFile
+        }
+        isWorkingPlaidBackup = true
+        defer {
+            isWorkingPlaidBackup = false
+            pendingRestorePayload = nil
+            pendingRestoreURL = nil
+        }
+        await Task.yield()
+        let summary = try PlaidConnectionBackup.apply(
+            payload: payload,
+            policy: restorePolicy,
+            modelContext: modelContext
+        )
+        reload()
+        clientID = PlaidCredentialsStore.clientID
+        secret = PlaidCredentialsStore.secret
+        environment = PlaidCredentialsStore.environment
+        redirectURI = PlaidCredentialsStore.redirectURI
+        statusIsError = false
+        statusMessage = restoreStatusMessage(summary)
+    }
+
+    private func restoreStatusMessage(_ summary: PlaidConnectionBackup.RestoreSummary) -> String {
+        var parts: [String] = []
+        if summary.itemsAdded > 0 {
+            let names = summary.institutionNamesAdded.isEmpty
+                ? "\(summary.itemsAdded) bank(s)"
+                : summary.institutionNamesAdded.joined(separator: ", ")
+            parts.append("added \(names)")
+        }
+        if summary.itemsPreserved > 0 {
+            parts.append("kept \(summary.itemsPreserved) existing token(s)")
+        }
+        if summary.itemsTokenReplaced > 0 {
+            parts.append("replaced \(summary.itemsTokenReplaced) token(s)")
+        }
+        if summary.credentialsWritten {
+            parts.append("API keys written")
+        } else if summary.credentialsSkipped {
+            parts.append("API keys left unchanged")
+        }
+        if summary.transactionsUpserted > 0 {
+            parts.append("\(summary.transactionsUpserted) transactions")
+        }
+        if summary.incomeUpserted > 0 {
+            parts.append("\(summary.incomeUpserted) income")
+        }
+        if summary.bankAccountsUpserted > 0 {
+            parts.append("\(summary.bankAccountsUpserted) accounts")
+        }
+        let detail = parts.isEmpty ? "nothing new to apply" : parts.joined(separator: " · ")
+        return "Restore complete (\(summary.policy == .safeMerge ? "safe merge" : "replace")): \(detail). \(summary.environment). Tap Sync if needed."
     }
 
     /// Reloads credentials and linked banks from stores into local @State for the form.
@@ -480,6 +720,273 @@ private struct LinkSheetRequest: Identifiable {
     // UUID() creates a unique id each time a request is made (new sheet presentation).
     let id = UUID()
     let mode: PlaidLinkMode
+}
+
+// MARK: - Plaid backup password sheet
+
+/// Collects a password for encrypting or decrypting a full app backup.
+private struct PlaidBackupPasswordSheet: View {
+    enum Mode {
+        case createBackup
+        case restore
+    }
+
+    let mode: Mode
+    @Binding var isWorking: Bool
+    /// Async work that throws; sheet dismisses only on success.
+    let onSubmit: (String) async throws -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var password = ""
+    @State private var confirmPassword = ""
+    @State private var errorMessage: String?
+    @State private var showPassword = false
+
+    private var title: String {
+        switch mode {
+        case .createBackup: return "Back up everything"
+        case .restore: return "Unlock backup"
+        }
+    }
+
+    private var canSubmit: Bool {
+        let min = PlaidConnectionBackup.minimumPasswordLength
+        guard password.count >= min else { return false }
+        if mode == .createBackup {
+            return password == confirmPassword
+        }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Group {
+                        if showPassword {
+                            TextField("Password", text: $password)
+                        } else {
+                            SecureField("Password", text: $password)
+                        }
+                    }
+                    .textContentType(mode == .createBackup ? .newPassword : .password)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                    if mode == .createBackup {
+                        Group {
+                            if showPassword {
+                                TextField("Confirm password", text: $confirmPassword)
+                            } else {
+                                SecureField("Confirm password", text: $confirmPassword)
+                            }
+                        }
+                        .textContentType(.newPassword)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    }
+
+                    Toggle("Show password", isOn: $showPassword)
+                } header: {
+                    Text("Password")
+                } footer: {
+                    switch mode {
+                    case .createBackup:
+                        Text("Choose a password of at least \(PlaidConnectionBackup.minimumPasswordLength) characters. You’ll need the same password to restore after a factory reset. This is separate from your Apple ID or bank logins. The backup includes bank tokens and all local finance data.")
+                    case .restore:
+                        Text("Enter the password you used when creating this backup. Next you’ll review exactly what will change — existing tokens stay put under Safe merge.")
+                    }
+                }
+
+                if mode == .createBackup, !confirmPassword.isEmpty, password != confirmPassword {
+                    Section {
+                        Text("Passwords do not match.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(isWorking)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isWorking {
+                        ProgressView()
+                    } else {
+                        Button(mode == .createBackup ? "Create" : "Continue") {
+                            Task { await submit() }
+                        }
+                        .disabled(!canSubmit)
+                    }
+                }
+            }
+            .interactiveDismissDisabled(isWorking)
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    @MainActor
+    private func submit() async {
+        errorMessage = nil
+        guard canSubmit else { return }
+        do {
+            try await onSubmit(password)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - Restore plan (review before writes)
+
+/// Shows a dry-run of restore impact and policy before any Keychain / data writes.
+private struct PlaidRestorePlanSheet: View {
+    let payload: PlaidConnectionBackup.Payload
+    @Binding var policy: PlaidConnectionBackup.RestorePolicy
+    @Binding var isWorking: Bool
+    let onConfirm: () async throws -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var errorMessage: String?
+
+    private var plan: PlaidConnectionBackup.RestorePlan {
+        PlaidConnectionBackup.planRestore(payload: payload, policy: policy)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Policy", selection: $policy) {
+                        ForEach(PlaidConnectionBackup.RestorePolicy.allCases) { p in
+                            Text(p.title).tag(p)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    Text(policy.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("How to restore")
+                }
+
+                Section {
+                    LabeledContent("API keys") {
+                        Text(plan.credentialsAction)
+                            .font(.caption)
+                            .multilineTextAlignment(.trailing)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !plan.itemsToAdd.isEmpty {
+                        LabeledContent("Banks to add") {
+                            Text(plan.itemsToAdd.joined(separator: ", "))
+                                .font(.caption)
+                                .multilineTextAlignment(.trailing)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    if !plan.itemsPreserved.isEmpty {
+                        LabeledContent("Tokens kept (untouched)") {
+                            Text(plan.itemsPreserved.joined(separator: ", "))
+                                .font(.caption)
+                                .multilineTextAlignment(.trailing)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if !plan.itemsTokenReplaced.isEmpty {
+                        LabeledContent("Tokens to replace") {
+                            Text(plan.itemsTokenReplaced.joined(separator: ", "))
+                                .font(.caption)
+                                .multilineTextAlignment(.trailing)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    if plan.itemsToAdd.isEmpty && plan.itemsPreserved.isEmpty && plan.itemsTokenReplaced.isEmpty {
+                        Text("No bank connections in this backup.")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Connections")
+                } footer: {
+                    Text("Safe merge never overwrites an access token that already exists on this device. Local-only banks are never deleted.")
+                }
+
+                if !plan.isConnectionsOnly {
+                    Section {
+                        LabeledContent("Transactions", value: "\(plan.transactionCount)")
+                        LabeledContent("Income", value: "\(plan.incomeCount)")
+                        LabeledContent("Accounts", value: "\(plan.bankAccountCount)")
+                        LabeledContent("Card payments", value: "\(plan.paymentCount)")
+                        LabeledContent("Recurring", value: "\(plan.recurringCount)")
+                        LabeledContent("Budget plans", value: "\(plan.budgetPlanCount)")
+                        LabeledContent("Nicknames", value: "\(plan.cardLabelCount)")
+                        LabeledContent("Vendor rules", value: "\(plan.vendorRuleCount)")
+                        LabeledContent("Card benefits", value: "\(plan.benefitsProfileCount)")
+                    } header: {
+                        Text("App data (upsert)")
+                    } footer: {
+                        Text("Rows are merged by id. Your category/multiplier locks on this phone are preserved. Missing local nicknames and learn-rules are filled in.")
+                    }
+                } else {
+                    Section {
+                        Text("This is an older connections-only backup (no transactions).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Review restore")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(isWorking)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isWorking {
+                        ProgressView()
+                    } else {
+                        Button("Restore") {
+                            Task { await confirm() }
+                        }
+                    }
+                }
+            }
+            .interactiveDismissDisabled(isWorking)
+        }
+    }
+
+    @MainActor
+    private func confirm() async {
+        errorMessage = nil
+        do {
+            try await onConfirm()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 }
 
 // MARK: - Build info (from Info.plist / Xcode versions)
