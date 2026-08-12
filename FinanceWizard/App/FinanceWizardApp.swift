@@ -45,9 +45,40 @@ struct FinanceWizardApp: App {
         WindowGroup {
             // Root view: shows splash once, then ContentView (the tab bar).
             RootWithSplash()
+                // Files / iCloud / “Open in Finance Wizard” for .fwbackup documents.
+                .onOpenURL { url in
+                    handleIncomingBackupURL(url)
+                }
         }
         // .modelContainer attaches the database so every child view can use
         // @Query and @Environment(\.modelContext) without passing the store by hand.
         .modelContainer(container)
     }
+
+    /// Materialize a security-scoped document and hand it to Settings restore flow.
+    private func handleIncomingBackupURL(_ url: URL) {
+        guard PlaidConnectionBackup.isBackupFileURL(url) else { return }
+        do {
+            let local = try PlaidConnectionBackup.materializeIncomingFile(url)
+            AppBackupOpenBridge.pendingURL = local
+            AppBackupOpenBridge.pendingError = nil
+            NotificationCenter.default.post(
+                name: PlaidConnectionBackup.openFileNotification,
+                object: local
+            )
+        } catch {
+            AppBackupOpenBridge.pendingURL = nil
+            AppBackupOpenBridge.pendingError = error.localizedDescription
+            NotificationCenter.default.post(
+                name: PlaidConnectionBackup.openFileNotification,
+                object: nil
+            )
+        }
+    }
+}
+
+/// Hands a file opened from Files / cloud storage to Settings (lazy tab may not exist yet).
+enum AppBackupOpenBridge {
+    static var pendingURL: URL?
+    static var pendingError: String?
 }

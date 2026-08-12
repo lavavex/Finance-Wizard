@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  Finance Wizard
 //
-//  Main app UI after splash: tab bar (Transactions, Accounts, Budget, Settings),
+//  Main app UI after splash: tab bar (Transactions, Accounts, Budget, Subscriptions, Settings),
 //  the full Transactions tab (filters, import, Plaid sync), and income row/detail views.
 //  This file is large; MARK comments split it into logical sections.
 //
@@ -84,6 +84,7 @@ private enum AppTab: Hashable {
     case transactions
     case accounts
     case budget
+    case subscriptions
     case settings
 }
 
@@ -132,6 +133,12 @@ struct ContentView: View {
             .tabItem { Label("Budget", systemImage: "chart.pie.fill") }
             .tag(AppTab.budget)
 
+            lazyTab(.subscriptions) {
+                SubscriptionsView()
+            }
+            .tabItem { Label("Subscriptions", systemImage: "repeat.circle") }
+            .tag(AppTab.subscriptions)
+
             lazyTab(.settings) {
                 SettingsView()
             }
@@ -141,6 +148,11 @@ struct ContentView: View {
         // .environment injects a value into the SwiftUI environment so deep child views
         // can read it with @Environment(\.screenshotPrivacy) without prop-drilling.
         .environment(\.screenshotPrivacy, screenshotPrivacy)
+        // Opening a .fwbackup from Files jumps to Settings (where restore UI lives).
+        .onReceive(NotificationCenter.default.publisher(for: PlaidConnectionBackup.openFileNotification)) { _ in
+            loadedTabs.insert(.settings)
+            selectedTab = .settings
+        }
     }
 
     // @ViewBuilder lets a function build views with if/else (like body does).
@@ -196,9 +208,8 @@ struct AllTransactionsView: View {
     @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
     @State private var sort: TransactionSort = .dateNewest
     @State private var searchText: String = ""
-    /// Heavy scans (review queue / subscriptions) — not computed every body pass.
+    /// Heavy scan (review queue) — not computed every body pass.
     @State private var reviewCount: Int = 0
-    @State private var subscriptionMonthly: Double = 0
 
     // Computed properties: recalculated when body needs them (no stored storage).
     // Rows for the list: period + sort + search
@@ -351,7 +362,7 @@ struct AllTransactionsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // Tools: review queue + detected subscriptions
+                // Tools: review queue
                 Section {
                     NavigationLink {
                         ReviewQueueView()
@@ -365,19 +376,6 @@ struct AllTransactionsView: View {
                                     .foregroundStyle(.orange)
                             } else {
                                 Text("Clear")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    NavigationLink {
-                        SubscriptionsView()
-                    } label: {
-                        HStack {
-                            Label("Subscriptions", systemImage: "repeat.circle")
-                            Spacer()
-                            if subscriptionMonthly > 0 {
-                                MoneyText(subscriptionMonthly, prefix: "~", suffix: "/mo")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -748,27 +746,13 @@ struct AllTransactionsView: View {
         }
     }
 
-    /// Review queue + subscription totals are expensive; never run them in `body`.
-    /// Snapshot on the main actor, compute off-main, then publish results.
+    /// Review queue count is expensive; never run it in `body`.
     @MainActor
     private func refreshToolStats() {
-        // Snapshot data on the main actor so the background task does not touch live @Query arrays unsafely.
-        let txSnapshot = SubscriptionAnalytics.snapshots(from: transactions)
         let txModels = transactions
         let accounts = bankAccounts
 
-        // Task.detached: work not tied to this view’s lifetime; priority .utility = background-ish.
-        Task.detached(priority: .utility) {
-            let burn = SubscriptionAnalytics.totalMonthlyBurn(
-                SubscriptionAnalytics.detect(snapshots: txSnapshot)
-            )
-            // Publish result back on the main actor (UI state).
-            await MainActor.run {
-                subscriptionMonthly = burn
-            }
-        }
-
-        // Review queue still needs live models (reasons attach to Transaction rows).
+        // Review queue needs live models (reasons attach to Transaction rows).
         // Yield first so the current scroll frame can finish.
         Task(priority: .utility) { @MainActor in
             await Task.yield()
