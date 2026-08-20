@@ -642,20 +642,35 @@ enum SharedStore {
     // File name for the SwiftData store inside the App Group container
     static let storeName = "FinanceTransactions"
 
+    /// Every SwiftData `@Model` in the App Group store.
+    /// Adding a type here also wipes it on “Wipe then restore.”
+    static let schema = Schema([
+        Transaction.self,
+        Income.self,
+        BankAccount.self,
+        CreditCardPayment.self,
+        BudgetPlan.self,
+        RecurringStream.self
+    ])
+
+    /// Deletes every row of every schema type. Used by wipe-then-restore so
+    /// models added after an old backup was taken do not linger.
+    static func wipeAllModels(in context: ModelContext) throws {
+        try context.delete(model: Transaction.self)
+        try context.delete(model: Income.self)
+        try context.delete(model: BankAccount.self)
+        try context.delete(model: CreditCardPayment.self)
+        try context.delete(model: BudgetPlan.self)
+        try context.delete(model: RecurringStream.self)
+    }
+
     /// Build a ModelContainer both app and widget can open.
     /// throws: callers use try / do-catch because opening disk can fail.
     /// inMemory: true uses RAM only (great for previews and tests — nothing on disk).
     static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
         // Expenses + income share one App Group store; keep them as separate models
         // so spend analytics never accidentally include income.
-        let schema = Schema([
-            Transaction.self,
-            Income.self,
-            BankAccount.self,
-            CreditCardPayment.self,
-            BudgetPlan.self,
-            RecurringStream.self
-        ])
+        let schema = Self.schema
 
         if inMemory {
             let configuration = ModelConfiguration(

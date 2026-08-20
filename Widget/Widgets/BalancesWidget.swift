@@ -193,7 +193,7 @@ struct BalancesWidgetView: View {
                         kindChip(
                             title: "Checking",
                             amount: entry.snapshot.checkingTotal,
-                            color: .blue
+                            color: .mint
                         )
                     }
                     if entry.snapshot.savingsTotal != 0 {
@@ -292,7 +292,7 @@ struct BalancesWidgetView: View {
 
     private func kindColor(_ kind: DepositoryKind) -> Color {
         switch kind {
-        case .checking: return .blue
+        case .checking: return .mint
         case .savings: return .green
         case .other: return .orange
         }

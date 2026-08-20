@@ -81,6 +81,15 @@ enum PlaidKeychain {
     }
 
     /// Remove a secret if present. Ignores “not found” (safe to call repeatedly).
+    /// Deletes every Finance Wizard Plaid Keychain item (API secret + access tokens).
+    static func deleteAll() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
     static func delete(account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

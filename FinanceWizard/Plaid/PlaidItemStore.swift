@@ -176,6 +176,12 @@ enum PlaidItemStore {
     }
 
     /// Delete Keychain token and metadata for one Item.
+    /// Drops every linked Item: Keychain tokens + metadata.
+    static func removeAll() {
+        PlaidKeychain.deleteAll()
+        UserDefaults.standard.removeObject(forKey: metadataKey)
+    }
+
     static func remove(itemID: String) {
         PlaidKeychain.delete(account: accessTokenPrefix + itemID)
         // filter keeps only items whose id is NOT the one being removed.

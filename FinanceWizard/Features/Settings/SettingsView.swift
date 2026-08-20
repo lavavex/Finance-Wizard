@@ -199,7 +199,7 @@ struct SettingsView: View {
                                 } label: {
                                     Label("Relink", systemImage: "arrow.triangle.2.circlepath")
                                 }
-                                .tint(.blue)
+                                .tint(.gray)
                                 .disabled(!PlaidCredentialsStore.isConfigured)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -269,7 +269,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Backup & restore")
                 } footer: {
-                    Text("Password-encrypted full backup: Plaid keys, bank access tokens, transactions, income, accounts, budget, nicknames, and learned rules. Default restore is Safe merge — it never overwrites access tokens or API keys already on this phone. Store the file somewhere safe; anyone with the file and password can access your linked accounts.")
+                    Text("Password-encrypted full backup: Plaid keys, bank access tokens, transactions, income, accounts, budget, nicknames, learned rules, and app prefs (anything under plaid./card./settings. plus cached logos). Default restore is Safe merge. Choose Wipe device, then restore to delete local data first — including things added after an older backup was made.")
                 }
 
                 // if let unwraps an optional: only shows this section when statusMessage is non-nil.
@@ -405,7 +405,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("You’ll enter the backup password, then review a Safe merge plan. Existing bank access tokens on this phone are not overwritten unless you choose Replace connections.")
+                Text("You’ll enter the backup password, then review a restore plan. Safe merge never overwrites access tokens already on this phone. Wipe device, then restore deletes local data first so the backup is the only copy.")
             }
             .sheet(isPresented: $showDebugShare, onDismiss: {
                 debugExportURL = nil
@@ -615,7 +615,14 @@ struct SettingsView: View {
             parts.append("\(summary.bankAccountsUpserted) accounts")
         }
         let detail = parts.isEmpty ? "nothing new to apply" : parts.joined(separator: " · ")
-        return "Restore complete (\(summary.policy == .safeMerge ? "safe merge" : "replace")): \(detail). \(summary.environment). Tap Sync if needed."
+        let policyLabel: String = {
+            switch summary.policy {
+            case .safeMerge: return "safe merge"
+            case .replaceConnections: return "replace"
+            case .wipeThenRestore: return "wipe then restore"
+            }
+        }()
+        return "Restore complete (\(policyLabel)): \(detail). \(summary.environment). Tap Sync if needed."
     }
 
     /// Reloads credentials and linked banks from stores into local @State for the form.
@@ -878,7 +885,7 @@ private struct PlaidRestorePlanSheet: View {
                     .pickerStyle(.inline)
                     Text(policy.detail)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(policy.wipesLocalData ? .orange : .secondary)
                 } header: {
                     Text("How to restore")
                 }
@@ -921,7 +928,11 @@ private struct PlaidRestorePlanSheet: View {
                 } header: {
                     Text("Connections")
                 } footer: {
-                    Text("Safe merge never overwrites an access token that already exists on this device. Local-only banks are never deleted.")
+                    if policy.wipesLocalData {
+                        Text("Wipe deletes every bank token, SwiftData row, nickname, learn-rule, and cached logo on this phone, then writes the backup. Local-only data that is not in the backup is gone.")
+                    } else {
+                        Text("Safe merge never overwrites an access token that already exists on this device. Local-only banks are never deleted.")
+                    }
                 }
 
                 if !plan.isConnectionsOnly {
@@ -936,9 +947,13 @@ private struct PlaidRestorePlanSheet: View {
                         LabeledContent("Vendor rules", value: "\(plan.vendorRuleCount)")
                         LabeledContent("Card benefits", value: "\(plan.benefitsProfileCount)")
                     } header: {
-                        Text("App data (upsert)")
+                        Text(policy.wipesLocalData ? "App data (replace)" : "App data (upsert)")
                     } footer: {
-                        Text("Rows are merged by id. Your category/multiplier locks on this phone are preserved. Missing local nicknames and learn-rules are filled in.")
+                        if policy.wipesLocalData {
+                            Text("Local transactions and prefs are deleted first, then the backup is written. Anything not in this file will not come back.")
+                        } else {
+                            Text("Rows are merged by id. Your category/multiplier locks on this phone are preserved. Missing local nicknames and learn-rules are filled in.")
+                        }
                     }
                 } else {
                     Section {
@@ -967,9 +982,10 @@ private struct PlaidRestorePlanSheet: View {
                     if isWorking {
                         ProgressView()
                     } else {
-                        Button("Restore") {
+                        Button(policy.wipesLocalData ? "Wipe & Restore" : "Restore") {
                             Task { await confirm() }
                         }
+                        .foregroundStyle(policy.wipesLocalData ? .red : .accentColor)
                     }
                 }
             }

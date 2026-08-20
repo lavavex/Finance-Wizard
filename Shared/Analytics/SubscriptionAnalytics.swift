@@ -365,8 +365,7 @@ enum SubscriptionAnalytics {
             occurrenceCount: cluster.count,
             lastDate: dates.last ?? now,
             paymentMethods: methods,
-            // suffix(8) = up to the last 8 sample ids for deep links
-            sampleTransactionIds: cluster.suffix(8).map(\.transactionId),
+            sampleTransactionIds: cluster.map(\.transactionId),
             confidenceNote: note,
             isUserDeclared: isUserDeclared
         )

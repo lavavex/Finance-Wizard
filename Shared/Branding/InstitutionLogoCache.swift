@@ -898,6 +898,48 @@ enum InstitutionLogoCache {
 
     /// Write logo bytes to App Group (widget) and app caches (reliability).
     /// .atomic means write to a temp file then rename (safer if the app crashes mid-write).
+    /// All logo files in the App Group cache (filename → bytes) for backup.
+    nonisolated static func exportAllLogoFiles() -> [String: Data] {
+        guard let dir = logoDirectory() else { return [:] }
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        var out: [String: Data] = [:]
+        for url in urls {
+            guard let data = try? Data(contentsOf: url), !data.isEmpty else { continue }
+            out[url.lastPathComponent] = data
+        }
+        return out
+    }
+
+    /// Deletes cached logo files (wipe-then-restore).
+    nonisolated static func wipeAllLogoFiles() {
+        lock.lock()
+        memoryLogos.removeAllObjects()
+        missingLogoKeys.removeAllObjects()
+        lock.unlock()
+        guard let dir = logoDirectory() else { return }
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        for url in urls {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Writes backup logo files into the cache directory.
+    nonisolated static func importLogoFiles(_ files: [String: Data]) {
+        guard let dir = logoDirectory() else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (name, data) in files {
+            guard !name.contains("/"), !name.contains(".."), !data.isEmpty else { continue }
+            let url = dir.appendingPathComponent(name)
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
     nonisolated private static func writeLogoData(_ data: Data, key: String) {
         let safe = sanitizedFileKey(key)
         missingLogoKeys.removeObject(forKey: key as NSString)
