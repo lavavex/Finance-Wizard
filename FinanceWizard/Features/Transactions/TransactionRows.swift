@@ -111,7 +111,7 @@ struct TransactionRowView: View {
     // Color for debit vs ACH vs other rails (helps depository account rows).
     private var railColor: Color {
         switch transaction.effectivePaymentRail {
-        case .debit: return .blue
+        case .debit: return .mint
         case .ach: return .orange
         case .other: return .secondary
         }

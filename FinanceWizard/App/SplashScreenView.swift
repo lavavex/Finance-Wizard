@@ -19,18 +19,16 @@ struct SplashScreenView: View {
     @State private var titleOpacity: Double = 0
     @State private var glow = false
 
-    /// Brand colors matching Mika.icon fill (extended sRGB blue).
-    private let brandBlue = Color(red: 0.0, green: 0.533, blue: 1.0)
-    private let brandBlueDeep = Color(red: 0.0, green: 0.32, blue: 0.78)
+    /// Brand canvas (matches LaunchBackground / icon fill).
+    private let brandCanvas = Color(red: 0.1, green: 0.1, blue: 0.1)
 
     // body describes the UI. some View is an opaque return type:
     // “this returns some concrete View type” without writing the full nested type.
     var body: some View {
         // ZStack layers views on top of each other (back → front).
         ZStack {
-            // Background gradient from lighter blue (top-left) to deeper blue (bottom-right).
             LinearGradient(
-                colors: [brandBlue, brandBlueDeep],
+                colors: [brandCanvas, brandCanvas],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -43,12 +41,12 @@ struct SplashScreenView: View {
                     RadialGradient(
                         colors: [
                             // Ternary: condition ? valueIfTrue : valueIfFalse
-                            Color.white.opacity(glow ? 0.28 : 0.12),
+                            Color.white.opacity(glow ? 0.16 : 0.08),
                             Color.clear
                         ],
                         center: .center,
                         startRadius: 10,
-                        endRadius: 180
+                        endRadius: 256
                     )
                 )
                 .frame(width: 360, height: 360)
@@ -60,8 +58,8 @@ struct SplashScreenView: View {
                 Image("SplashLogo")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 132, height: 132)
-                    .shadow(color: .black.opacity(0.25), radius: 18, y: 10)
+                    .frame(width: 256, height: 256)
+                    .shadow(color: .black.opacity(0.25), radius: 24, y: 10)
                     // scaleEffect / opacity driven by @State so they can animate.
                     .scaleEffect(logoScale)
                     .opacity(logoOpacity)
@@ -70,9 +68,6 @@ struct SplashScreenView: View {
                     Text("Finance Wizard")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("Your money, sorted")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.85))
                 }
                 .opacity(titleOpacity)
             }

@@ -136,7 +136,7 @@ struct ContentView: View {
             lazyTab(.subscriptions) {
                 SubscriptionsView()
             }
-            .tabItem { Label("Subscriptions", systemImage: "repeat.circle") }
+            .tabItem { Label("Recurring", systemImage: "repeat.circle") }
             .tag(AppTab.subscriptions)
 
             lazyTab(.settings) {

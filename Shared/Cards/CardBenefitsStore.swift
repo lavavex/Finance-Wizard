@@ -1118,6 +1118,13 @@ enum CardBenefitsStore {
     // MARK: - Private disk I/O
     // JSONDecoder/Encoder + UserDefaults. try? turns throws into optional failures.
 
+    /// Drop the in-memory profile cache (call after replacing UserDefaults wholesale).
+    static func resetMemoryCache() {
+        memoryLock.lock()
+        memoryProfiles = nil
+        memoryLock.unlock()
+    }
+
     /// Decode the profile map from UserDefaults, or empty if missing/corrupt.
     private static func load() -> [String: CardBenefitsProfile] {
         guard let data = UserDefaults.standard.data(forKey: key),

@@ -84,7 +84,7 @@ struct ReviewQueueView: View {
                                 Button("Lock rate") {
                                     lockCurrentRate(item.transaction)
                                 }
-                                .tint(.blue)
+                                .tint(.gray)
                             }
                         }
                         // Leading edge = swipe the other direction (separate action set).

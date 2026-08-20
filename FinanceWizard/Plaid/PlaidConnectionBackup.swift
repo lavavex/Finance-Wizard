@@ -9,6 +9,7 @@
 //  • Linked bank Items (access tokens + cursors + metadata)
 //  • SwiftData: transactions, income, bank accounts, card payments, budget, recurring
 //  • Prefs: card nicknames, vendor learn-rules, card benefits profiles, screenshot privacy
+//  • Auto bags: UserDefaults under plaid./card./settings. + App Group logo files
 //
 //  Crypto (backup format v1 — portable, password-based):
 //  • Random 256-bit data key (DEK) encrypts the payload with AES-256-GCM
@@ -23,8 +24,9 @@
 //  • Upserts app data by unique ids; preserves local category/multiplier/rail locks
 //  • Never deletes local-only banks or rows that are absent from the backup
 //
-//  Use replaceConnections only when you intentionally want the backup’s tokens
-//  and credentials to win (e.g. recovering a device whose tokens you know are stale).
+//  Use replaceConnections when the backup’s tokens/keys should win.
+//  Use wipeThenRestore to delete local SwiftData + prefs + logos + tokens first,
+//  so data added after an older backup (or after new models shipped) is gone.
 //
 
 import Foundation
@@ -81,6 +83,8 @@ enum PlaidConnectionBackup {
         case safeMerge
         /// Backup wins for credentials + every Item token (still never deletes local-only Items).
         case replaceConnections
+        /// Deletes local SwiftData, prefs, logos, and bank tokens, then restores the backup.
+        case wipeThenRestore
 
         var id: String { rawValue }
 
@@ -88,6 +92,7 @@ enum PlaidConnectionBackup {
             switch self {
             case .safeMerge: return "Safe merge (recommended)"
             case .replaceConnections: return "Replace connections from backup"
+            case .wipeThenRestore: return "Wipe device, then restore"
             }
         }
 
@@ -97,8 +102,12 @@ enum PlaidConnectionBackup {
                 return "Adds missing banks and data only. Will not change access tokens or API keys already on this phone."
             case .replaceConnections:
                 return "Overwrites Plaid API keys and access tokens with the backup’s copies. Use only if you want the backup to win."
+            case .wipeThenRestore:
+                return "Deletes everything on this phone first (including data added after this backup was made), then restores the backup as the only copy."
             }
         }
+
+        var wipesLocalData: Bool { self == .wipeThenRestore }
     }
 
     // MARK: Payload
@@ -119,6 +128,11 @@ enum PlaidConnectionBackup {
         var vendorRules: [VendorRule]?
         var cardBenefitsProfiles: [CardBenefitsProfile]?
         var screenshotPrivacy: Bool?
+        /// All UserDefaults keys with app prefixes (`plaid.`, `card.`, `settings.`).
+        /// New prefs under those prefixes are included automatically.
+        var preferenceDefaults: [String: Data]?
+        /// Institution logo files (filename → bytes) from the App Group cache.
+        var logoFiles: [String: Data]?
     }
 
     struct CredentialsSnapshot: Codable, Equatable, Sendable {
@@ -351,7 +365,9 @@ enum PlaidConnectionBackup {
             cardLabels: CardLabelStore.debugExportMap(),
             vendorRules: VendorRulesStore.load(),
             cardBenefitsProfiles: CardBenefitsStore.allProfiles(),
-            screenshotPrivacy: UserDefaults.standard.bool(forKey: ScreenshotPrivacy.storageKey)
+            screenshotPrivacy: UserDefaults.standard.bool(forKey: ScreenshotPrivacy.storageKey),
+            preferenceDefaults: AppPreferenceBackup.capture(),
+            logoFiles: InstitutionLogoCache.exportAllLogoFiles()
         )
     }
 
@@ -403,6 +419,8 @@ enum PlaidConnectionBackup {
                     preserved.append(name)
                 case .replaceConnections:
                     replaced.append(name)
+                case .wipeThenRestore:
+                    replaced.append(name)
                 }
             } else {
                 toAdd.append(name)
@@ -419,7 +437,7 @@ enum PlaidConnectionBackup {
                 return PlaidCredentialsStore.clientID.isEmpty && PlaidCredentialsStore.secret.isEmpty
                     ? "Write API keys from backup (device has none)"
                     : "Fill only empty key fields from backup"
-            case .replaceConnections:
+            case .replaceConnections, .wipeThenRestore:
                 return "Overwrite API keys from backup"
             }
         }()
@@ -459,6 +477,10 @@ enum PlaidConnectionBackup {
     ) throws -> RestoreSummary {
         guard payload.version == formatVersion else {
             throw BackupError.unsupportedVersion(payload.version)
+        }
+
+        if policy.wipesLocalData {
+            try wipeLocalAppData(modelContext: modelContext)
         }
 
         let credResult = applyCredentials(payload.credentials, policy: policy)
@@ -504,6 +526,16 @@ enum PlaidConnectionBackup {
         if let privacy = payload.screenshotPrivacy {
             // Only set if true in backup or local never customized — always restore the value for full restore feel.
             UserDefaults.standard.set(privacy, forKey: ScreenshotPrivacy.storageKey)
+        }
+
+        if policy.wipesLocalData {
+            if let prefs = payload.preferenceDefaults, !prefs.isEmpty {
+                AppPreferenceBackup.restore(prefs)
+                CardBenefitsStore.resetMemoryCache()
+            }
+            if let logos = payload.logoFiles, !logos.isEmpty {
+                InstitutionLogoCache.importLogoFiles(logos)
+            }
         }
 
         try modelContext.save()
@@ -597,7 +629,7 @@ private extension PlaidConnectionBackup {
             let skipped = PlaidCredentialsStore.isConfigured && !wrote
             return CredApplyResult(written: wrote, skipped: skipped || (!wrote && PlaidCredentialsStore.isConfigured))
 
-        case .replaceConnections:
+        case .replaceConnections, .wipeThenRestore:
             if !creds.clientID.isEmpty {
                 PlaidCredentialsStore.clientID = creds.clientID
             }
@@ -631,7 +663,7 @@ private extension PlaidConnectionBackup {
                     // Hard guarantee: do not touch live token / cursor / metadata.
                     preserved += 1
                     continue
-                case .replaceConnections:
+                case .replaceConnections, .wipeThenRestore:
                     let item = makeLinkedItem(from: snap, token: token)
                     PlaidItemStore.upsert(item)
                     replaced += 1
@@ -650,6 +682,15 @@ private extension PlaidConnectionBackup {
             replaced: replaced,
             addedNames: addedNames
         )
+    }
+
+    static func wipeLocalAppData(modelContext: ModelContext) throws {
+        try SharedStore.wipeAllModels(in: modelContext)
+        try modelContext.save()
+        PlaidItemStore.removeAll()
+        AppPreferenceBackup.wipe()
+        CardBenefitsStore.resetMemoryCache()
+        InstitutionLogoCache.wipeAllLogoFiles()
     }
 
     static func makeLinkedItem(from snap: ItemSnapshot, token: String) -> PlaidLinkedItem {
@@ -1134,6 +1175,51 @@ private extension PlaidConnectionBackup {
             expectedIncome: p.expectedIncomeStreams,
             updatedAt: p.updatedAt
         )
+    }
+}
+
+// MARK: - Auto-included UserDefaults (prefix-based)
+
+/// Captures/restores every UserDefaults key under app prefixes so new prefs
+/// ride along in backups without editing Payload fields.
+private enum AppPreferenceBackup {
+    static let prefixes = ["plaid.", "card.", "settings."]
+
+    static func isAppKey(_ key: String) -> Bool {
+        prefixes.contains { key.hasPrefix($0) }
+    }
+
+    static func capture() -> [String: Data] {
+        var out: [String: Data] = [:]
+        let dict = UserDefaults.standard.dictionaryRepresentation()
+        for (key, value) in dict where isAppKey(key) {
+            guard let data = try? PropertyListSerialization.data(
+                fromPropertyList: value,
+                format: .binary,
+                options: 0
+            ) else { continue }
+            out[key] = data
+        }
+        return out
+    }
+
+    static func wipe() {
+        let defaults = UserDefaults.standard
+        for (key, _) in defaults.dictionaryRepresentation() where isAppKey(key) {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    static func restore(_ blob: [String: Data]) {
+        for (key, data) in blob {
+            guard isAppKey(key),
+                  let value = try? PropertyListSerialization.propertyList(
+                    from: data,
+                    options: [],
+                    format: nil
+                  ) else { continue }
+            UserDefaults.standard.set(value, forKey: key)
+        }
     }
 }
 

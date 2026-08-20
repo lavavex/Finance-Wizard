@@ -316,10 +316,9 @@ struct TransactionDetailView: View {
                     }
                 }
             } header: {
-                Text("Subscriptions")
+                Text("Recurring")
             } footer: {
-                // Footer text under a Section explains the control (settings-app style).
-                Text("Mark yearly bills so they appear under Subscriptions.")
+                Text("Mark bills so they appear under Recurring.")
             }
 
             Section {
