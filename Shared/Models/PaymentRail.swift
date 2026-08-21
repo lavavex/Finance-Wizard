@@ -12,9 +12,7 @@
 import Foundation
 
 /// How money left a depository (checking) account for a purchase.
-///
-/// Raw-value enum: each case’s String is "debit", "ach", or "other".
-/// That string is what we store on Transaction.paymentRail for SwiftData simplicity.
+/// Stored on Transaction.paymentRail as "debit" / "ach" / "other".
 enum PaymentRail: String, CaseIterable, Identifiable, Codable, Sendable {
     case debit
     case ach
@@ -47,7 +45,6 @@ enum PaymentRail: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 
     /// Infer from Plaid `payment_channel` + merchant/title heuristics.
-    /// static factory-style method: PaymentRail.infer(plaidChannel:title:)
     static func infer(plaidChannel: String?, title: String) -> PaymentRail {
         let lower = title.lowercased()
         let channel = (plaidChannel ?? "").lowercased()
@@ -69,8 +66,6 @@ enum PaymentRail: String, CaseIterable, Identifiable, Codable, Sendable {
         return .other
     }
 
-    // private static helpers keep the public API small; only infer uses them.
-
     /// Keyword scan for ACH / transfer language in a lowercased title.
     private static func looksLikeACH(_ lower: String) -> Bool {
         let needles = [
@@ -88,7 +83,6 @@ enum PaymentRail: String, CaseIterable, Identifiable, Codable, Sendable {
             // Fintech ACH bill-pay labels (X Money EPAY → credit card)
             "epay", "e-pay", "epmt"
         ]
-        // for-in where: only enter the body when the condition is true
         for n in needles where lower.contains(n) { return true }
         if lower.hasPrefix("ach") { return true }
         if lower == "epay" || lower == "e-pay" || lower == "epmt" { return true }
@@ -114,14 +108,9 @@ enum PaymentRail: String, CaseIterable, Identifiable, Codable, Sendable {
 }
 
 // MARK: - Extension on Transaction
-//
-// extension adds methods/properties to an existing type without editing its file
-// (or without bloating the main model). Here we add rail helpers that belong
-// with PaymentRail’s logic but live on each Transaction instance.
 
 extension Transaction {
     /// User override if locked; otherwise stored rail (from Plaid infer).
-    /// PaymentRail(rawValue:) returns optional — unknown strings fall through to infer.
     var effectivePaymentRail: PaymentRail {
         if let raw = paymentRail, let rail = PaymentRail(rawValue: raw) {
             return rail
@@ -129,6 +118,5 @@ extension Transaction {
         return PaymentRail.infer(plaidChannel: plaidPaymentChannel, title: title)
     }
 
-    /// Treats nil lock flag as unlocked (same pattern as categoryLocked).
     var isPaymentRailLocked: Bool { paymentRailLocked ?? false }
 }

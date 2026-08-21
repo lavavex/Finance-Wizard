@@ -12,7 +12,7 @@ Two separate products share one Xcode project and the same App Group store:
 | Target | Product | Bundle ID | Responsibility |
 |--------|---------|-----------|----------------|
 | **FinanceWizard** | Finance Wizard (iOS app) | `net.roberth.FinanceWizard` | UI, Plaid Link, sync, settings |
-| **WidgetExtension** | Widget extension (`.appex`) | `net.roberth.FinanceWizard.Widget` | Home Screen **Total Spend** (and category) widgets |
+| **WidgetExtension** | Widget extension (`.appex`) | `net.roberth.FinanceWizard.Widget` | Total Spend, Category Spend, Balances widgets |
 
 The app embeds the widget extension (Embed Foundation Extensions build phase). They ship together but are signed and built as separate targets.
 
@@ -24,15 +24,17 @@ Xcode uses **folder-synced** groups for `FinanceWizard/`, `Shared/`, and `Widget
 
 ```text
 FinanceWizard/                 Main app (SwiftUI + Plaid client)
-  App/                         @main, root ContentView, splash, app settings
+  App/                         @main, splash, RootWithSplash → OnboardingGate
   Features/
-    Transactions/              List tools, detail, period filter, review, subs
-    Accounts/                  Cards hub, card detail, accounts board model
+    Onboarding/                Welcome, gate, completed-flag store
+    Transactions/              List tools, detail, period filter, review, Recurring
+    Accounts/                  Accounts hub, card detail, accounts board model
     Budget/                    Monthly budget UI
-    Settings/                  Settings + debug export
+    Settings/                  Settings, backup, debug export, Debug menu
     Import/                    Apple Card CSV
+    AI/                        On-device Foundation Models (skeleton; not in Settings)
   Services/                    App-only helpers (classify API stub, logo fetch)
-  Plaid/                       Credentials, Link, /transactions/sync
+  Plaid/                       Credentials, Link, /transactions/sync, backup wipe
 
 Shared/                        Compiled into APP + WIDGET (must stay in sync)
   Models/                      SwiftData @Model + domain enums
@@ -59,7 +61,7 @@ docs/                          GitHub Pages documentation
 | **Where data stays** | Inference is on-device (Apple Intelligence); still prefer minimal transaction context in prompts |
 | **Capability / entitlement** | None beyond what the system already requires for Apple Intelligence |
 
-Feature code is not required for the app to build; use the framework when you add AI UI.
+`Features/AI/` is a skeleton (`OnDeviceAI`, status view). It is **not** hooked into Settings yet. The rest of the app builds and runs without it.
 
 ### Why `Shared/`?
 
@@ -97,15 +99,19 @@ Widget reads SharedStore.loadSnapshot(...)
 ## UI structure (app)
 
 ```text
-TabView
-├── Transactions   (AllTransactionsView)
-│     filters: period, sort, hide cards (list only)
-│     toolbar: Sync (Plaid), Import, filters
-├── Cards          (CardsView → CardDetailView)
-│     period spend by card, credit utilization, payments
-└── Settings       (SettingsView)
-      Plaid keys, environment, linked banks
+RootWithSplash
+├── SplashScreenView          (cold start overlay; matches Welcome icon)
+└── OnboardingGate
+      ├── OnboardingView      (Welcome, if settings.onboardingCompleted is false)
+      └── ContentView TabView
+            ├── Transactions  (AllTransactionsView)
+            ├── Accounts      (CardsView → CardDetailView)
+            ├── Budget        (BudgetView)
+            ├── Recurring     (SubscriptionsView)
+            └── Settings      (SettingsView → DebugMenuView)
 ```
+
+See [Onboarding](onboarding.md).
 
 ## Persistence
 
@@ -113,7 +119,7 @@ TabView
 |---------|------------|
 | Transactions / income | **SwiftData** `@Model` in App Group |
 | Plaid secret + access tokens | **Keychain** |
-| Client id, env, cursors, vendor rules | **UserDefaults** |
+| Client id, env, cursors, vendor rules, onboarding | **UserDefaults** (`plaid.` / `card.` / `settings.` prefixes) |
 | Widget config (period, hide cards) | **Widget configuration intent** |
 
 See [Data model](data-model.md).

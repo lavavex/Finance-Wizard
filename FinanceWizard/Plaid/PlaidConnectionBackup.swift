@@ -75,6 +75,18 @@ enum PlaidConnectionBackup {
         url.pathExtension.lowercased() == fileExtension
     }
 
+    /// Delete SwiftData, linked banks, prefs, and logos on this device.
+    /// Public for wipe-then-restore and the Debug menu. Does not touch the Plaid Dashboard.
+    @MainActor
+    static func wipeLocalAppData(modelContext: ModelContext) throws {
+        try SharedStore.wipeAllModels(in: modelContext)
+        try modelContext.save()
+        PlaidItemStore.removeAll()
+        AppPreferenceBackup.wipe()
+        CardBenefitsStore.resetMemoryCache()
+        InstitutionLogoCache.wipeAllLogoFiles()
+    }
+
     // MARK: Restore policy
 
     /// How restore treats credentials and access tokens already on the device.
@@ -682,15 +694,6 @@ private extension PlaidConnectionBackup {
             replaced: replaced,
             addedNames: addedNames
         )
-    }
-
-    static func wipeLocalAppData(modelContext: ModelContext) throws {
-        try SharedStore.wipeAllModels(in: modelContext)
-        try modelContext.save()
-        PlaidItemStore.removeAll()
-        AppPreferenceBackup.wipe()
-        CardBenefitsStore.resetMemoryCache()
-        InstitutionLogoCache.wipeAllLogoFiles()
     }
 
     static func makeLinkedItem(from snap: ItemSnapshot, token: String) -> PlaidLinkedItem {

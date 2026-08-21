@@ -4,20 +4,7 @@
 //
 //  Thin REST client for the user’s Plaid developer account.
 //  Calls use client_id + secret from PlaidCredentialsStore.
-//
-//  Architecture: every public method builds a small Encodable body, POSTs JSON
-//  to Plaid, and Decodes the response. Shared networking lives in private post(...).
-//
-//  SWIFT TERMS IN THIS FILE:
-//  - async throws: Suspends for network I/O; can fail with Error.
-//  - URLSession: Apple’s HTTP client (URLSession.shared is the shared singleton).
-//  - Codable / Encodable / Decodable: Convert Swift types ↔ JSON.
-//  - Generics (post<Body, Response>): One function works for many request/response types.
-//  - CodingKeys: Map Swift property names to JSON keys when they differ or need control.
-//  - encodeIfPresent: Skip nil optionals so JSON omits those keys (important for Plaid).
-//  - @discardableResult: Caller may ignore the return value without a compiler warning.
-//  - LocalizedError: User-facing errorDescription for alerts.
-//  - Task.sleep: Async delay (used when polling for Link success).
+//  Shared networking lives in private post(...).
 //
 
 import Foundation
@@ -25,7 +12,6 @@ import Foundation
 // MARK: - Errors
 
 /// Failures from Plaid configuration, HTTP, or JSON decoding.
-/// Associated values (e.g. http(status:code:message)) carry extra detail.
 enum PlaidAPIError: LocalizedError {
     /// client_id or secret missing from Settings.
     case notConfigured
@@ -45,7 +31,6 @@ enum PlaidAPIError: LocalizedError {
         case .badURL:
             return "Invalid Plaid API URL."
         case .http(_, let code, let message):
-            // Bind associated values with `let` inside the case pattern.
             if let code, !code.isEmpty {
                 return "Plaid (\(code)): \(message)"
             }
@@ -61,12 +46,10 @@ enum PlaidAPIError: LocalizedError {
 // MARK: - API client
 
 /// Stateless helpers that talk to Plaid over HTTPS.
-/// Enum-as-namespace: only static methods, never instantiated.
 enum PlaidAPIClient {
     // MARK: - Public API — Hosted Link
 
     /// Hosted Link session for native mobile (`ASWebAuthenticationSession`).
-    /// Sendable: safe to pass into concurrent tasks.
     struct HostedLinkSession: Sendable {
         /// Opaque token identifying this Link session (used for polling).
         let linkToken: String
@@ -85,8 +68,6 @@ enum PlaidAPIClient {
     ) async throws -> HostedLinkSession {
         try PlaidCredentialsStore.requireConfigured()
 
-        // Nested Encodable structs define the exact JSON shape Plaid expects.
-        // Nested types keep this request’s model private to this function.
         struct Body: Encodable {
             let client_id: String
             let secret: String
@@ -129,13 +110,11 @@ enum PlaidAPIClient {
                 let completion_redirect_uri: String?
                 let url_lifetime_seconds: Int
 
-                // CodingKeys: explicit list of JSON field names for this type.
                 enum CodingKeys: String, CodingKey {
                     case is_mobile_app, completion_redirect_uri, url_lifetime_seconds
                 }
 
-                // Custom encode: use encodeIfPresent so nil completion URI is omitted
-                // (Plaid is picky about unexpected nulls).
+                // Omit nil completion URI — Plaid is picky about unexpected nulls.
                 func encode(to encoder: Encoder) throws {
                     var c = encoder.container(keyedBy: CodingKeys.self)
                     try c.encode(is_mobile_app, forKey: .is_mobile_app)
@@ -158,7 +137,6 @@ enum PlaidAPIClient {
                 try c.encode(language, forKey: .language)
                 try c.encode(country_codes, forKey: .country_codes)
                 try c.encode(user, forKey: .user)
-                // encodeIfPresent: if the Optional is nil, the key is left out of JSON.
                 try c.encodeIfPresent(products, forKey: .products)
                 try c.encodeIfPresent(
                     required_if_supported_products,
@@ -188,7 +166,6 @@ enum PlaidAPIClient {
         // entirely (sending financewizard:// was the Relink failure).
         let useMobileAppHostedLink = httpsRedirect != nil
 
-        // map + ?? : if accessToken is non-nil, check non-empty; else false.
         let isUpdate = accessToken.map { !$0.isEmpty } ?? false
         // Liabilities (APR / due dates) needs explicit end-user consent (Data Transparency).
         // Calling /liabilities/get without it → ADDITIONAL_CONSENT_REQUIRED / PRODUCT_LIABILITIES.
@@ -229,13 +206,10 @@ enum PlaidAPIClient {
 
         let response: Response
         do {
-            // Generic post: Body is Encodable, Response is Decodable.
             response = try await post(path: "/link/token/create", body: body)
         } catch let err as PlaidAPIError {
             // Surface a clear fix when Plaid wants an https redirect (OAuth / update mode).
-            // Pattern match the http case to inspect code/message.
             if case .http(_, let code, let message) = err {
-                // code is optional; message is always a String (no ?? needed).
                 let blob = "\(code ?? "") \(message)".lowercased()
                 if blob.contains("redirect_uri") && httpsRedirect == nil {
                     throw PlaidAPIError.http(
@@ -280,10 +254,8 @@ enum PlaidAPIClient {
         try PlaidCredentialsStore.requireConfigured()
 
         var lastError: Error?
-        // for attempt in 0..<maxAttempts: half-open range → 0, 1, …, maxAttempts-1
         for attempt in 0..<maxAttempts {
             if attempt > 0 {
-                // Task.sleep: non-blocking delay (does not freeze the main thread).
                 try await Task.sleep(nanoseconds: delayNanoseconds)
             }
             do {
@@ -294,7 +266,6 @@ enum PlaidAPIClient {
                 lastError = error
             }
         }
-        // ?? : use lastError if set, otherwise a generic timeout message.
         throw lastError
             ?? PlaidAPIError.http(
                 status: 0,
@@ -312,7 +283,6 @@ enum PlaidAPIClient {
             let link_token: String
         }
 
-        // Deep nested Decodable mirrors Plaid’s JSON tree for link sessions.
         struct Response: Decodable {
             let link_sessions: [LinkSession]?
 
@@ -367,7 +337,6 @@ enum PlaidAPIClient {
             )
         )
 
-        // Nested function: only visible inside fetchLinkSuccess.
         func labels(from accounts: [Response.LinkSession.Account]?) -> [String] {
             guard let accounts else { return [] }
             return accounts.compactMap { acc in
@@ -404,7 +373,6 @@ enum PlaidAPIClient {
     // MARK: - Public API — Tokens & Items
 
     /// Exchange Link’s public_token for a long-lived access_token + item_id.
-    /// Named tuple return: (accessToken:itemID:) labels the two strings.
     static func exchangePublicToken(_ publicToken: String) async throws -> (accessToken: String, itemID: String) {
         try PlaidCredentialsStore.requireConfigured()
 
@@ -456,7 +424,6 @@ enum PlaidAPIClient {
         }
 
         // Omit empty cursor so Plaid returns full history from the start.
-        // Immediately-invoked closure expression: compute cursorValue in a scoped block.
         let cursorValue: String? = {
             guard let cursor, !cursor.isEmpty else { return nil }
             return cursor
@@ -477,7 +444,6 @@ enum PlaidAPIClient {
 
     /// On-demand bank pull (`/transactions/refresh`). Optional paid add-on; soft-fail if not enabled.
     /// After success, call `/transactions/sync` to pull the new cursor updates.
-    /// @discardableResult: callers may ignore the request_id string.
     @discardableResult
     static func transactionsRefresh(accessToken: String) async throws -> String? {
         try PlaidCredentialsStore.requireConfigured()
@@ -687,7 +653,6 @@ enum PlaidAPIClient {
                 access_token: accessToken
             )
         )
-        // Optional chaining + ?? : empty array if liabilities or credit is missing.
         return response.liabilities?.credit ?? []
     }
 
@@ -705,7 +670,6 @@ enum PlaidAPIClient {
             let request_id: String?
         }
 
-        // let _: Response = … discards the decoded body (we only care that it succeeded).
         let _: Response = try await post(
             path: "/item/remove",
             body: Body(
@@ -719,17 +683,11 @@ enum PlaidAPIClient {
     // MARK: - Networking
 
     /// Shared POST helper: encode body → URLSession → decode Response or throw PlaidAPIError.
-    ///
-    /// Generics explained:
-    /// - Body: Encodable — any type we can turn into JSON
-    /// - Response: Decodable — any type we can rebuild from JSON
-    /// Call sites get type inference from the return annotation / usage.
     private static func post<Body: Encodable, Response: Decodable>(
         path: String,
         body: Body
     ) async throws -> Response {
         let base = PlaidCredentialsStore.environment.baseURL
-        // relativeTo: resolve "/link/token/create" against https://sandbox.plaid.com
         guard let url = URL(string: path, relativeTo: base)?.absoluteURL else {
             throw PlaidAPIError.badURL
         }
@@ -738,17 +696,12 @@ enum PlaidAPIClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        // JSONEncoder turns the Encodable body into Data (bytes).
         request.httpBody = try JSONEncoder().encode(body)
 
-        // URLSession.shared.data(for:): async network call returning (Data, URLResponse).
         let (data, response) = try await URLSession.shared.data(for: request)
-        // as? conditional cast: URLResponse may or may not be HTTPURLResponse.
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
 
-        // Closed range 200...299: all successful HTTP statuses.
         if !(200...299).contains(status) {
-            // Plaid error envelope
             if let err = try? JSONDecoder().decode(PlaidErrorBody.self, from: data) {
                 throw PlaidAPIError.http(
                     status: status,
@@ -854,7 +807,7 @@ struct PlaidAPR: Decodable, Sendable {
     let interest_charge_amount: Double?
 }
 
-/// One bank transaction from Plaid (snake_case JSON fields match Decodable names).
+/// One bank transaction from Plaid.
 struct PlaidTransaction: Decodable {
     let account_id: String
     /// Plaid sign: positive = money out, negative = money in.
@@ -935,7 +888,6 @@ struct PlaidItemGetResult: Sendable {
 
     /// True when Liabilities is initialized / billed / consented on this Item.
     var hasLiabilitiesProduct: Bool {
-        // Set: unique lowercased product names from all product lists.
         let all = Set(
             (products + billedProducts + availableProducts + consentedProducts)
                 .map { $0.lowercased() }

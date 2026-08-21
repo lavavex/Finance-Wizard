@@ -49,7 +49,6 @@ final class CreditCardPayment {
 }
 
 // MARK: - Analytics helpers
-// Namespace enum: only static methods; groups payment math for widgets and UI.
 
 /// Filter, sum, and dedupe credit-card payments for a calendar period.
 enum CreditAnalytics {
@@ -74,8 +73,6 @@ enum CreditAnalytics {
         deduplicated(rows).reduce(0) { $0 + max(0, $1.amount) }
     }
 
-    /// Totals keyed by card display name — dictionary [String: Double].
-    /// map[key, default: 0] += x creates the key with 0 if missing, then adds.
     static func paidByCard(in rows: [CreditCardPayment]) -> [String: Double] {
         var map: [String: Double] = [:]
         for row in deduplicated(rows) {
@@ -87,9 +84,6 @@ enum CreditAnalytics {
 
     /// Banks post the same payment twice (ACH out of checking + “Payment Thank You” on the card).
     /// Keep one row per day/amount/mask, preferring the side with `creditAccountId`.
-    ///
-    /// Builds a dictionary keyed by "day|amount|mask"; the value is the best row seen.
-    /// Closure preferNew is a nested function that decides whether to replace the stored row.
     static func deduplicated(_ rows: [CreditCardPayment]) -> [CreditCardPayment] {
         let cal = Calendar.current
         var best: [String: CreditCardPayment] = [:]
@@ -98,7 +92,6 @@ enum CreditAnalytics {
             let day = cal.startOfDay(for: row.date)
             let dayKey = ISO8601DateFormatter().string(from: day)
             let amountKey = String(format: "%.2f", max(0, row.amount))
-            // ?? chains: first non-nil mask wins.
             let mask = extractMask(from: row.cardName)
                 ?? extractMask(from: row.title)
                 ?? extractMask(from: row.sourceAccount ?? "")
@@ -106,7 +99,6 @@ enum CreditAnalytics {
             let key = "\(dayKey)|\(amountKey)|\(mask.lowercased())"
 
             if let existing = best[key] {
-                // Prefer linked credit account id; then more specific card name
                 let preferNew: Bool = {
                     if existing.creditAccountId == nil, row.creditAccountId != nil { return true }
                     if existing.creditAccountId != nil, row.creditAccountId == nil { return false }
@@ -119,12 +111,10 @@ enum CreditAnalytics {
             }
         }
 
-        // Dictionary .values is unordered; sort newest first for stable UI lists.
         return best.values.sorted { $0.date > $1.date }
     }
 
     /// Last 4 digits from “···0820”, “ending in 0820”, etc.
-    /// Uses String.range(of:options: .regularExpression) for simple pattern matching.
     static func extractMask(from text: String?) -> String? {
         guard let text, !text.isEmpty else { return nil }
         // ···1234 or ...1234
@@ -137,7 +127,6 @@ enum CreditAnalytics {
             return String(s.suffix(4))
         }
         if let r = text.range(of: #"\b(\d{4})\b"#, options: .regularExpression) {
-            // only if string is short / card-like
             let digits = String(text[r])
             if text.count <= 40 { return digits }
         }

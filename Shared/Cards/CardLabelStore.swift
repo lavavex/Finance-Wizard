@@ -5,12 +5,6 @@
 //  User-chosen display names for cards / payment methods.
 //  Keys: "account:<plaid account_id>" or "method:<raw payment method string>".
 //
-//  Learning notes:
-//  - UserDefaults is a simple key-value store for small settings (persists between launches).
-//  - enum with only static members = namespace; no need to create a CardLabelStore() instance.
-//  - private static hides helpers from other files.
-//  - Optional String? means “maybe a name, maybe clear the label.”
-//
 
 import Foundation
 
@@ -26,7 +20,6 @@ enum CardLabelStore {
         accountId: String,
         fallback: String
     ) -> String {
-        // Custom nickname wins; otherwise show whatever the caller passed as fallback
         if let custom = getLabel(key: accountKey(accountId)), !custom.isEmpty {
             return custom
         }
@@ -46,7 +39,6 @@ enum CardLabelStore {
         if let custom = getLabel(key: methodKey(paymentMethod)), !custom.isEmpty {
             return custom
         }
-        // ?? means “use paymentMethod when fallback is nil”
         return fallback ?? paymentMethod
     }
 
@@ -87,8 +79,6 @@ enum CardLabelStore {
     private static func accountKey(_ id: String) -> String { "account:\(id)" }
     private static func methodKey(_ method: String) -> String { "method:\(method)" }
 
-    /// Load the full nickname dictionary (or empty if never saved / wrong type).
-    /// `as?` is a conditional cast: succeeds only when the value really is [String: String].
     private static func labelMap() -> [String: String] {
         UserDefaults.standard.dictionary(forKey: labelsKey) as? [String: String] ?? [:]
     }
@@ -107,5 +97,10 @@ enum CardLabelStore {
         var map = labelMap()
         map.removeValue(forKey: key)
         UserDefaults.standard.set(map, forKey: labelsKey)
+    }
+
+    /// Drop every nickname (Debug menu).
+    static func removeAll() {
+        UserDefaults.standard.removeObject(forKey: labelsKey)
     }
 }

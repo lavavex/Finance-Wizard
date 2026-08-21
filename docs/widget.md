@@ -3,66 +3,50 @@ layout: default
 title: Widget
 ---
 
-# Widget (Total Spend)
+# Widgets
 
-## Overview
+The extension registers **three** Home Screen widgets (`Widget/WidgetBundle.swift`). All read SwiftData through the App Group (`SharedStore`).
 
-Two Home Screen widgets are registered:
+| Widget | Kind | Config | What it shows |
+|--------|------|--------|----------------|
+| **Total Spend** | `FinanceHomeWidget` | Time range, hide cards | Period total + spend **by card** |
+| **Spend by Category** | `CategorySpendWidget` | Time range, chart style | Period total + **category** chart |
+| **Balances** | (static, no Edit Widget) | — | Checking & savings balances after Sync |
 
-| Widget | Kind | Default view |
-|--------|------|----------------|
-| **Total Spend** | `FinanceHomeWidget` | Total + spend by **card** |
-| **Spend by Category** | `CategorySpendWidget` | Total + **category** chart (horizontal bars) |
-
-Both read SwiftData via the App Group (`SharedStore`).
-
-## What it shows
+## Total Spend
 
 | Element | Behavior |
 |---------|----------|
-| Title | **Total Spend** |
-| Subtitle | Period label (This week / This month) |
+| Title | Total Spend |
+| Subtitle | This week / This month |
 | Big number | **Full period total** (all cards) |
 | Card list | Per-card spend; respects **Hide cards** |
 | Footer (medium+) | Transaction count in period |
 
 Hiding cards only affects the **breakdown**, not the big total.
 
-## Configuration (Edit Widget)
+**Edit Widget:** Time range (week/month), Hide cards (multi-select). Config is **per instance** (`FinanceWizardConfigIntent` in `Widget/AppIntent.swift`).
 
-Long-press widget → **Edit Widget**:
+## Spend by Category
 
-| Parameter | Options |
-|-----------|---------|
-| **Time range** | This week / This month |
-| **Hide cards** | Multi-select of payment methods from the store |
+**Edit Widget:** Time range + chart style (horizontal bars / vertical bars / pie). Default: horizontal bars. Uses `CategorySpendChartView` in `Shared/`.
 
-Configuration is stored **per widget instance** (you can add two widgets with different settings).
+## Balances
 
-Implemented as `FinanceWizardConfigIntent` in `Widget/AppIntent.swift`.
+Checking/savings from Plaid depository accounts (`SharedStore` deposit snapshot). No Edit Widget intent. Empty until the app has synced.
 
 ## Timeline
 
-- Provider: `AppIntentTimelineProvider`
-- Policy: refresh about every **15 minutes**, and immediately after app Sync (`reloadAllTimelines()`).
+- Total Spend / Category: `AppIntentTimelineProvider`
+- Balances: classic `TimelineProvider`
+- Refresh about every **15 minutes**, and immediately after app Sync (`WidgetCenter.reloadAllTimelines()`)
 
-## Adding the widget
+## Adding a widget
 
-1. Run the app and **Sync** so data exists.  
-2. Home Screen → long-press → **+**  
-3. Find **Finance Wizard** / **Total Spend**  
-4. Place small/medium/large  
-5. Edit to set week/month and hide cards  
-
-## Spend by Category widget
-
-- Edit Widget: **Time range** (week/month) + **Chart style** (horizontal bars / vertical bars / pie)
-- Default chart style: **Horizontal bars**
-- Uses `CategorySpendChartView` from `Shared/`
-
-## Template files not registered
-
-`WidgetControl.swift` and `WidgetLiveActivity.swift` may still exist from the Xcode template but are **not** registered in `WidgetBundle`.
+1. Run the app and **Sync**.  
+2. Home Screen → long-press → **+** → **Finance Wizard**.  
+3. Place small/medium/large.  
+4. Edit (where available) for week/month.
 
 ## Empty states
 
@@ -72,8 +56,8 @@ Implemented as `FinanceWizardConfigIntent` in `Widget/AppIntent.swift`.
 | No spend in this week/month | Period filter empty |
 | Store error | App Group / container failure |
 
-## Development tips
+## Development
 
-- After model changes, delete the app from simulator if the store schema migrates poorly during early development.
-- Widget and app **must** use the same App Group id.
-- `Shared/` must be in the WidgetExtension target membership.
+- After model changes, delete the app from the simulator if migration fails.  
+- App and widget **must** use `group.net.roberth.FinanceWizard`.  
+- `Shared/` is in both targets (folder-synced).

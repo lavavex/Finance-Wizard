@@ -8,12 +8,6 @@
 //  Example: user sets “STARBUCKS” on Chase Sapphire → Dining with 3x rewards.
 //  Next sync of that merchant reuses the learned category/multiplier.
 //
-//  SWIFT TERMS IN THIS FILE:
-//  - struct: Simple value model for one rule.
-//  - Codable + JSONEncoder/Decoder: Persist the array as JSON in UserDefaults.
-//  - Optional map: paymentMethod.map { ... } transforms a non-nil value, stays nil if nil.
-//  - first(where:): Find the first array element matching a condition.
-//
 
 import Foundation
 
@@ -57,13 +51,11 @@ enum VendorRulesStore {
     ///   - multiplier: Rewards multiplier to apply.
     static func upsert(vendor: String, paymentMethod: String?, category: String, multiplier: Double) {
         let vKey = normalize(vendor)
-        // map on Optional: if paymentMethod is non-nil, normalize it; else use "".
         let pKey = paymentMethod.map { normalize($0) } ?? ""
         var rules = load()
         if let idx = rules.firstIndex(where: {
             $0.vendorKey == vKey && $0.paymentMethodKey == pKey
         }) {
-            // Update existing rule in place.
             rules[idx].category = category
             rules[idx].multiplier = multiplier
         } else {
@@ -87,17 +79,14 @@ enum VendorRulesStore {
         if isBillPayVendorKey(vKey) { return nil }
         let pKey = normalize(paymentMethod)
         let rules = load()
-        // Exact match: same vendor AND same card.
         if let exact = rules.first(where: { $0.vendorKey == vKey && $0.paymentMethodKey == pKey }) {
             return exact
         }
-        // Fallback: vendor rule that applies to any card (empty paymentMethodKey).
         return rules.first(where: { $0.vendorKey == vKey && $0.paymentMethodKey.isEmpty })
     }
 
     /// Drop learn rules that reclassified bill pays as spend (e.g. epay → Shopping).
     static func removeBillPayMisrules() {
-        // filter keeps only rules whose vendorKey is NOT a bill-pay key.
         let cleaned = load().filter { !isBillPayVendorKey($0.vendorKey) }
         save(cleaned)
     }

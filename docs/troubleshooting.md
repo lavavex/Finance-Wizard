@@ -93,6 +93,16 @@ Edit the transaction → **Save** with **learn** on. Future syncs respect locks 
 
 Should not happen if upsert by `transactionId` works. If you reset Plaid Items and re-link, new transaction ids can appear as new rows.
 
+## Onboarding / Welcome
+
+### Welcome never appears
+
+The completed flag is `settings.onboardingCompleted`. **Settings → Developer → Debug → Replay onboarding** (or turn **Onboarding completed** off). The live app uses `OnboardingGate` under splash, so Welcome should replace the tabs immediately.
+
+### Splash logo does not match Welcome
+
+Splash and Welcome both use **`AppIconImage`**, not `SplashLogo` and not `Image("AppIcon")` (app-icon sets are not loadable images).
+
 ## Widget empty
 
 1. Run the **app**, Sync, then add the widget.  

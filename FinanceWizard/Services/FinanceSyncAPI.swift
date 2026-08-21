@@ -12,11 +12,8 @@ import Foundation
 /// Named “API” historically; today these are just local static functions.
 enum FinanceSyncAPI {
     /// Expense category names for the transaction editor.
-    /// async means this function can be awaited; kept async so call sites that
-    /// once hit the network can still use the same await style without a big rewrite.
-    /// [String] is an array (ordered list) of String values.
+    /// Kept `async` so former network call sites can still `await` without a rewrite.
     static func fetchCategories() async -> [String] {
-        // KnownCategory.defaultNames is a compiled-in list of category title strings.
         KnownCategory.defaultNames
     }
 }

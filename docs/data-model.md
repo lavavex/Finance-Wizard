@@ -18,6 +18,7 @@ Defined in `Shared/Models/Transaction.swift`.
 | `category` | `String` | Budget category (e.g. Dining, Gas (Car)) |
 | `paymentMethod` | `String` | Card / account name |
 | `multiplier` | `Double` | Points rate (e.g. 5 = 5x) |
+| `subscriptionCadenceOverride` | `String?` | Recurring tab: `"cancelled"` / `"none"` (Not Recurring); cleared in Debug |
 
 ### Amount sign convention (expenses)
 
@@ -106,6 +107,13 @@ Card bill payments only (`Shared/Models/CreditCardPayment.swift`). Never counted
 | `cardName` | Display label for the card |
 | `sourceAccount` | Optional funding account |
 
+## SwiftData: `BudgetPlan` / `RecurringStream`
+
+| Model | File | Role |
+|-------|------|------|
+| `BudgetPlan` | `Shared/Models/Budget.swift` | Monthly cap, category limits, expected income (Budget tab; Debug can reset) |
+| `RecurringStream` | `Shared/Models/RecurringStream.swift` | Stored recurring groups used with live detection on the Recurring tab |
+
 ## App Group store
 
 `Shared/Store/SharedStore.swift`:
@@ -113,7 +121,7 @@ Card bill payments only (`Shared/Models/CreditCardPayment.swift`). Never counted
 ```text
 groupContainer: .identifier("group.net.roberth.FinanceWizard")
 store name: FinanceTransactions
-schema: Transaction, Income, BankAccount, CreditCardPayment
+schema: Transaction, Income, BankAccount, CreditCardPayment, BudgetPlan, RecurringStream
 ```
 
 Both app and widget call `SharedStore.makeContainer()`.

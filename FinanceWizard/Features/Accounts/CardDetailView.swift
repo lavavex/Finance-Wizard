@@ -3,7 +3,6 @@
 //  Finance Wizard
 //
 //  Single account / payment-method detail: balances, bills, spend list.
-//  Teaches: @Query, @Environment modelContext, @State drafts, NavigationLink, optional callbacks.
 //
 
 import SwiftUI
@@ -12,7 +11,6 @@ import SwiftData
 /// Detail screen for one credit card, depository account, or orphan payment method.
 /// Receives period/sort from Accounts so the purchase list matches the hub filters.
 struct CardDetailView: View {
-    // Inputs from the parent NavigationLink (immutable for this screen’s identity).
     let displayName: String
     let rawPaymentMethod: String
     // Default empty Set; parent usually passes matching methods from UnifiedCardRow.
@@ -23,13 +21,11 @@ struct CardDetailView: View {
     var creditAccount: BankAccount? = nil
     var bankAccount: BankAccount? = nil
     var periodPayments: [CreditCardPayment] = []
-    // Optional closure: () -> Void means “no arguments, no return.” Called after rename/rewards save.
     var onNicknameChanged: (() -> Void)? = nil
 
     @Query private var transactions: [Transaction]
     @Environment(\.modelContext) private var modelContext
 
-    // Draft fields for editable nickname and depository reward rates.
     @State private var nicknameDraft: String = ""
     @State private var didSaveNickname = false
     @State private var titleName: String = ""
@@ -48,7 +44,6 @@ struct CardDetailView: View {
         return set
     }
 
-    // Purchases for this account in the selected period, sorted like the hub.
     private var cardRows: [Transaction] {
         let inPeriod = TransactionAnalytics.inPeriod(
             transactions,
@@ -67,7 +62,6 @@ struct CardDetailView: View {
         CreditAnalytics.totalPaid(in: periodPayments)
     }
 
-    // Prefer credit, else bank — whichever was passed for this row.
     private var account: BankAccount? { creditAccount ?? bankAccount }
 
     private var isDepositoryDetail: Bool {
@@ -76,7 +70,6 @@ struct CardDetailView: View {
 
     var body: some View {
         List {
-            // Logo / name header (not a typical list cell — clear background).
             Section {
                 InstitutionLogoHeader(
                     displayName: titleName.isEmpty ? displayName : titleName,
@@ -87,11 +80,10 @@ struct CardDetailView: View {
                 .listRowBackground(Color.clear)
             }
 
-            // Nickname editor
             Section {
                 TextField("Display name", text: $nicknameDraft)
                     .textInputAutocapitalization(.words)
-                // Branch UI: credit vs bank vs orphan method show different identity fields.
+                // Credit vs bank vs orphan method show different identity fields.
                 if let credit = creditAccount {
                     LabeledContent("Bank name") {
                         CardText(credit.plaidDisplayName)
@@ -100,7 +92,6 @@ struct CardDetailView: View {
                     }
                     if let mask = credit.mask, !mask.isEmpty {
                         LabeledContent("Last four") {
-                            // monospaced keeps digits aligned for account masks.
                             CardText(mask)
                                 .font(.body.monospaced())
                                 .foregroundStyle(.secondary)
@@ -129,7 +120,6 @@ struct CardDetailView: View {
                 Button("Save name") {
                     saveNickname()
                 }
-                // Transient “Saved” confirmation after a successful rename.
                 if didSaveNickname {
                     Label("Saved", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
@@ -139,7 +129,6 @@ struct CardDetailView: View {
                 Text("Account name")
             }
 
-            // Balances, spend, bill payments
             Section {
                 if let credit = creditAccount {
                     HStack {
@@ -193,7 +182,6 @@ struct CardDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                // Bill payments under spend — expandable list
                 if creditAccount != nil || paidTotal > 0 || !periodPayments.isEmpty {
                     TotalPaidDisclosure(
                         total: paidTotal,
@@ -206,7 +194,6 @@ struct CardDetailView: View {
                 Text("Summary")
             }
 
-            // Debit vs ACH reward rates (depository accounts only)
             if let bank = bankAccount, bank.isDepository || creditAccount == nil && bankAccount != nil {
                 if bank.isDepository {
                     Section {
@@ -246,7 +233,6 @@ struct CardDetailView: View {
                 }
             }
 
-            // APR, min payment, due dates when liabilities product is populated
             if let credit = creditAccount, credit.hasLiabilitiesDetails {
                 Section {
                     if credit.isOverdue == true {
@@ -325,7 +311,6 @@ struct CardDetailView: View {
                 }
             }
 
-            // Purchase list → TransactionDetailView
             Section("Purchases") {
                 if cardRows.isEmpty {
                     Text("No purchases for this account in the selected period.")
@@ -349,7 +334,6 @@ struct CardDetailView: View {
         }
         .navigationTitle(titleName.isEmpty ? displayName : titleName)
         .navigationBarTitleDisplayMode(.inline)
-        // Seed drafts when the screen appears.
         .onAppear {
             titleName = displayName
             nicknameDraft = displayName
@@ -368,7 +352,7 @@ struct CardDetailView: View {
         let plaidFallback = creditAccount?.plaidDisplayName
             ?? bankAccount?.plaidDisplayName
             ?? rawPaymentMethod
-        // Ternary with nil: empty or unchanged → store nil (use bank name).
+        // Empty or unchanged → store nil (use bank name).
         let custom: String? = (value.isEmpty || value == plaidFallback) ? nil : value
         CardLabelStore.setLabel(
             custom,
@@ -378,9 +362,7 @@ struct CardDetailView: View {
         titleName = custom ?? plaidFallback
         nicknameDraft = titleName
         didSaveNickname = true
-        // Optional call: only runs if the parent provided a callback.
         onNicknameChanged?()
-        // Clear the green “Saved” label after 1.5 seconds.
         Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             didSaveNickname = false
@@ -389,7 +371,6 @@ struct CardDetailView: View {
 
     /// Write debit/ACH reward multipliers onto the BankAccount and save SwiftData.
     private func saveRewardMultipliers() {
-        // guard let exits if this detail isn’t for a bank account.
         guard let bank = bankAccount else { return }
         bank.debitRewardMultiplier = parseOptionalMult(debitMultText)
         bank.achRewardMultiplier = parseOptionalMult(achMultText)

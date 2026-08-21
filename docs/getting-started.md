@@ -60,12 +60,14 @@ Without the shared group, the widget cannot see transactions the app saves.
 ## 6. First run checklist
 
 1. **Build and run** the **Finance Wizard** app (⌘R; scheme **FinanceWizard**).  
-2. **Settings → Link bank account**.  
+2. Cold start: system launch screen → **app-icon splash** → **Welcome**. Tap **Get Started**.  
+   (Later launches skip Welcome. To see it again: **Settings → Developer → Debug → Replay onboarding**.)  
+3. **Settings → Link bank account**.  
    - Sandbox institution: **First Platypus Bank**  
    - Username `user_good`, password `pass_good`  
-3. On **Transactions**, open **Sync → Sync now**.  
-4. List should fill; **Cards** should list payment methods and credit balances after Sync.  
-5. Add the **Total Spend** widget from the Home Screen gallery.
+4. On **Transactions**, open **Sync → Sync now**.  
+5. List should fill; **Accounts** should list cards and balances after Sync.  
+6. Add the **Total Spend** widget from the Home Screen gallery.
 
 ## 7. Optional: JSON file import
 
@@ -78,5 +80,6 @@ Toolbar **Import** still accepts a JSON file with a `transactions` array (legacy
 
 ## Next
 
+- [Onboarding](onboarding.md) — splash, Welcome, replay  
 - [Architecture](architecture.md) — how pieces fit  
 - [Sync & API](sync-and-api.md) — Plaid endpoints and mapping  

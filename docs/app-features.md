@@ -7,6 +7,10 @@ title: App features
 
 > **UI copy policy:** In-app text is for the person using Finance Wizard. Implementation notes (Plaid endpoints, dual category systems, Sync locks, Hosted Link URIs) live in this docs site and in code comments — not in section footers.
 
+## First launch
+
+Splash (same app icon as Welcome) → **Welcome** feature list → **Get Started** → tabs. Details: [Onboarding](onboarding.md).
+
 ## Tab: Transactions
 
 Main list of expenses with filters shared conceptually with the widget.
@@ -42,7 +46,6 @@ Main list of expenses with filters shared conceptually with the widget.
 | Tool | Meaning |
 |------|---------|
 | **Needs review** | Unlocked rates, ambiguous debit/ACH, bill-pay lookalikes, weak categories — swipe to fix |
-| **Subscriptions** | Memberships / fixed bills only (near-identical amount + schedule; excludes retail/dining/gas habits) |
 
 ### Rows
 
@@ -118,9 +121,17 @@ Rates & product presets: `Shared/Cards/CardProductCatalog.swift` + `Shared/Cards
 
 A purchase’s **general** category + title map into a **reward** category (e.g. CVS under Personal Care → **Drugstores**). Cash back is entered as a **percent** (e.g. `3` = 3%).
 
+## Tab: Recurring
+
+`SubscriptionsView` (tab title **Recurring**). Detects repeating charges from SwiftData (vendor + amount + cadence). Active vs Ended (including user **Cancelled** / **Not Recurring** marks). Next-charge dates, estimated monthly total, tap through to transaction detail. Working overlay GIF while rescanning after a mark.
+
+## Tab: Budget
+
+Monthly **overall cap**, **expected income**, and **per-category limits** vs real spend for the selected period. Remaining / over updates as transactions sync.
+
 ## Tab: Settings
 
-See [Settings](settings.md).
+See [Settings](settings.md) (Plaid, backup, Debug replay of Welcome).
 
 ## Filters & sort (shared logic)
 
@@ -151,6 +162,6 @@ Maps **category** → SF Symbol in `Shared/UI/CategoryStyle.swift` (`CategorySym
 ## What the app does *not* do (yet)
 
 - Apple Card live API (CSV import is supported)  
-- Budget limits / overspend alerts  
+- Overspend push notifications (in-app budget remaining / over is on the Budget tab)  
 - Multi-device cloud sync (data is local + re-Sync from Plaid)  
 - Hosted backend for Plaid secrets (BYO keys on device)  

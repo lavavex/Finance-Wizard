@@ -3,25 +3,19 @@
 //  Finance Wizard
 //
 //  Tap a transaction → view details, edit category / multiplier (local only).
-//  Teaches: @Bindable, Form, @State, custom Binding, onChange, .task, async/await, @MainActor.
 //
 
 import SwiftUI
 import SwiftData
 import WidgetKit
 
-// Detail + edit screen for one SwiftData transaction
 /// Full detail form for a single transaction: view fields and edit category, rail, rewards.
 struct TransactionDetailView: View {
-    // @Bindable (Observation) lets Form controls write into a SwiftData model’s properties
-    // when you use $transaction.someField. Here we mostly edit via local @State then Save.
     @Bindable var transaction: Transaction
 
-    // SwiftData context for fetch / insert / delete / save.
     @Environment(\.modelContext) private var modelContext
 
-    // Local drafts: user edits these, then Save copies them onto the model.
-    // Keeping drafts separate avoids half-edited values on the model if the user navigates back.
+    // Local drafts: Save copies onto the model. Separate so back-navigation doesn’t persist half-edits.
     @State private var categoryText: String = ""
     @State private var multiplierText: String = ""
     @State private var selectedRail: PaymentRail = .other
@@ -37,13 +31,10 @@ struct TransactionDetailView: View {
     @State private var didSave = false
     @State private var saveStatusMessage: String?
 
-    // Extra queries for bulk apply + account reward rates.
     @Query private var allTransactions: [Transaction]
     @Query private var bankAccounts: [BankAccount]
 
     /// User control for subscription radar (yearly is the common missing case).
-    /// Nested private enum: only used inside this view (keeps the file self-contained).
-    /// String raw values + CaseIterable + Identifiable make it Picker-friendly.
     private enum SubscriptionDeclareMode: String, CaseIterable, Identifiable {
         case auto
         case yearly
@@ -51,7 +42,6 @@ struct TransactionDetailView: View {
         case weekly
         case none
 
-        // Identifiable requires a stable id — rawValue works for simple string enums.
         var id: String { rawValue }
 
         var label: String {
@@ -75,7 +65,6 @@ struct TransactionDetailView: View {
             }
         }
 
-        // Factory: map a Transaction’s stored override back into the picker mode.
         static func from(transaction: Transaction) -> SubscriptionDeclareMode {
             if transaction.isDeclaredNotSubscription { return .none }
             switch transaction.declaredSubscriptionCadence {
@@ -106,12 +95,10 @@ struct TransactionDetailView: View {
         }
     }
 
-    // Which preset in the Picker matches the free-text category field (if any).
     private var selectedPreset: String? {
         categoryOptions.first { $0 == categoryText }
     }
 
-    // Bank account linked to this payment method (for logos and reward rates).
     private var linkedAccount: BankAccount? {
         BankAccount.matching(paymentMethod: transaction.paymentMethod, in: bankAccounts)
     }
@@ -130,7 +117,6 @@ struct TransactionDetailView: View {
         if rewardOverrideMode == .otherTravel { return .travelOther }
         if let raw = transaction.rewardCategoryOverride,
            let match = RewardCategory.allCases.first(where: {
-               // caseInsensitiveCompare == .orderedSame means equal ignoring case.
                $0.rawValue.caseInsensitiveCompare(raw) == .orderedSame
            }) {
             return match
@@ -159,9 +145,7 @@ struct TransactionDetailView: View {
     }
 
     var body: some View {
-        // Form is like List but optimized for settings-style inputs (pickers, toggles, fields).
         Form {
-            // Hero: icon + title + amount
             Section {
                 HStack(spacing: 12) {
                     Image(systemName: CategoryStyle.symbolName(for: categoryText.isEmpty ? transaction.category : categoryText))
@@ -219,7 +203,6 @@ struct TransactionDetailView: View {
                     Text(transaction.transactionId)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        // textSelection lets the user long-press to copy.
                         .textSelection(.enabled)
                 }
                 if transaction.isCategoryLocked || transaction.isMultiplierLocked || transaction.isPaymentRailLocked {
@@ -239,7 +222,6 @@ struct TransactionDetailView: View {
             }
 
             Section {
-                // categoryPickerBinding is a custom Binding so “Custom…” can mean “no preset.”
                 Picker("Category", selection: categoryPickerBinding) {
                     ForEach(categoryOptions, id: \.self) { name in
                         Label(name, systemImage: CategoryStyle.symbolName(for: name))
@@ -249,7 +231,6 @@ struct TransactionDetailView: View {
                         .tag(Optional<String>.none)
                 }
 
-                // Free-text category (always editable; Picker fills this when a preset is chosen).
                 TextField("Category name", text: $categoryText)
                     .textInputAutocapitalization(.words)
 
@@ -274,7 +255,6 @@ struct TransactionDetailView: View {
                         Text("Portal").tag(RewardTravelMode.portal)
                         Text("Direct / other").tag(RewardTravelMode.otherTravel)
                     }
-                    // onChange runs when the value changes; two-parameter form is (old, new).
                     .onChange(of: rewardOverrideMode) { _, mode in
                         applyTravelModeToMultiplier(mode)
                     }
@@ -298,7 +278,6 @@ struct TransactionDetailView: View {
                     Text("Points / rewards mult.")
                     Spacer()
                     TextField("1", text: $multiplierText)
-                        // decimalPad shows a number keyboard (no Return key).
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(maxWidth: 100)
@@ -322,10 +301,8 @@ struct TransactionDetailView: View {
             }
 
             Section {
-                // Toggle is an on/off switch bound to Bool @State.
                 Toggle("Remember for this vendor", isOn: $learn)
                 Toggle("Only same card/account", isOn: $scopePaymentMethod)
-                    // .disabled grays out the control when applyToMatching forces scope on.
                     .disabled(applyToMatching)
                 Toggle("Apply to other matching transactions", isOn: $applyToMatching)
                     .onChange(of: applyToMatching) { _, isOn in
@@ -336,10 +313,8 @@ struct TransactionDetailView: View {
             }
 
             Section("Points (estimate)") {
-                // Local let inside a ViewBuilder is allowed (Swift 5.5+).
                 let points = abs(transaction.amount) * (Double(multiplierText.replacingOccurrences(of: ",", with: ".")) ?? transaction.multiplier)
                 LabeledContent("Points") {
-                    // FormatStyle for numbers with flexible fraction digits.
                     Text(points, format: .number.precision(.fractionLength(0...2)))
                 }
                 LabeledContent("~ Value @ 1¢/pt") {
@@ -357,29 +332,24 @@ struct TransactionDetailView: View {
         .navigationTitle("Transaction")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // confirmationAction is the standard top-right “done/save” placement.
             ToolbarItem(placement: .confirmationAction) {
                 if isSaving {
                     ProgressView()
                 } else {
                     Button("Save") {
-                        // Task bridges async saveEdits into a button action (which is sync).
                         Task { await saveEdits() }
                     }
                 }
             }
         }
-        // .alert presents a modal dialog. isPresented uses a Binding derived from saveError.
         .alert("Couldn’t save", isPresented: Binding(
             get: { saveError != nil },
             set: { if !$0 { saveError = nil } }
         )) {
-            // role: .cancel is the dismiss-style button.
             Button("OK", role: .cancel) { saveError = nil }
         } message: {
             Text(saveError ?? "")
         }
-        // onAppear runs once when the view enters the hierarchy — seed drafts from the model.
         .onAppear {
             categoryText = transaction.category
             multiplierText = formatMultiplier(transaction.multiplier)
@@ -397,7 +367,6 @@ struct TransactionDetailView: View {
                 rewardOverrideMode = .auto
             }
         }
-        // .task starts async work when the view appears (cancels if the view goes away).
         .task {
             let names = await FinanceSyncAPI.fetchCategories()
             if !names.isEmpty {
@@ -410,7 +379,6 @@ struct TransactionDetailView: View {
         }
     }
 
-    // Human-readable list of which fields are locked.
     private var lockSummary: String {
         var parts: [String] = []
         if transaction.isCategoryLocked { parts.append("category") }
@@ -442,7 +410,6 @@ struct TransactionDetailView: View {
 
     /// When travel mode changes, rewrite the multiplier draft to the card’s rate for that bucket.
     private func applyTravelModeToMultiplier(_ mode: RewardTravelMode) {
-        // Closure assigned to a let for a mini switch that returns a value.
         let reward: RewardCategory = {
             switch mode {
             case .portal: return .travelPortal
@@ -458,13 +425,9 @@ struct TransactionDetailView: View {
         multiplierText = formatMultiplier(rate)
     }
 
-    // @MainActor ensures UI state updates happen on the main thread.
-    // async because save may grow heavier later; currently mostly synchronous work + sleep.
     @MainActor
     private func saveEdits() async {
-        // trimmingCharacters removes leading/trailing spaces users often leave in TextFields.
         let trimmedCategory = categoryText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // guard else { return } validates early and exits with an error message.
         guard !trimmedCategory.isEmpty else {
             saveError = "Category can’t be empty."
             return
@@ -479,7 +442,6 @@ struct TransactionDetailView: View {
         }
 
         isSaving = true
-        // defer runs when the function exits (success or failure) — always clears the spinner.
         defer { isSaving = false }
 
         do {
@@ -527,7 +489,6 @@ struct TransactionDetailView: View {
             try modelContext.save()
             WidgetCenter.shared.reloadAllTimelines()
 
-            // Contextual success copy based on what the user did.
             if subscriptionMode == .yearly {
                 saveStatusMessage = "Saved as yearly subscription."
             } else if TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
@@ -538,7 +499,6 @@ struct TransactionDetailView: View {
                 saveStatusMessage = "Saved on this device"
             }
             didSave = true
-            // Brief confirmation, then hide the green banner.
             Task {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 didSave = false
@@ -585,7 +545,6 @@ struct TransactionDetailView: View {
         }
     }
 
-    // @discardableResult allows callers to ignore the returned Int without a warning.
     /// Apply category/multiplier to other transactions with the same title + card.
     @discardableResult
     private func applyLocalMatching(category: String, multiplier: Double) -> Int {

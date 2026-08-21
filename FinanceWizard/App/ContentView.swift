@@ -2,26 +2,18 @@
 //  ContentView.swift
 //  Finance Wizard
 //
-//  Main app UI after splash: tab bar (Transactions, Accounts, Budget, Subscriptions, Settings),
+//  Main app UI after onboarding: tab bar (Transactions, Accounts, Budget, Recurring, Settings),
 //  the full Transactions tab (filters, import, Plaid sync), and income row/detail views.
-//  This file is large; MARK comments split it into logical sections.
 //
 
-// SwiftUI: declarative UI framework (views describe what to show; system updates the screen).
 import SwiftUI
-// UniformTypeIdentifiers: file types for the document picker (JSON, CSV, etc.).
 import UniformTypeIdentifiers
-// SwiftData: local database of model objects; @Query and modelContext live here.
 import SwiftData
-// WidgetKit: reload home-screen widgets after data changes.
 import WidgetKit
 
 // MARK: - API / file decode shapes
-// MARK is an Xcode organizer comment (shows as a jump-to section in the editor).
-// Decodable types below match JSON keys so JSONDecoder can turn Data into Swift values.
 
 /// One expense row as it appears in a JSON export file (snake_case keys from the server era).
-/// struct + Decodable: Swift can build this type automatically from JSON keys of the same names.
 struct ImportedTransaction: Decodable {
     let transaction_id: String
     let date: String
@@ -30,8 +22,7 @@ struct ImportedTransaction: Decodable {
     let amount: Double
     let payment_method: String
     let multiplier: Double
-    // Optional fields (?): may be missing in older exports; decode as nil when absent.
-    // Present after classify / lock on finance-sync (optional for older exports)
+    // Present after classify / lock on finance-sync (optional for older exports).
     let category_locked: Bool?
     let multiplier_locked: Bool?
     let override_source: String?
@@ -71,15 +62,12 @@ struct IncomeExportFile: Decodable {
     let categories: [String]?
     let income: [ImportedIncome]?
 
-    // Computed property: if income is nil, return an empty array instead of optional.
-    // ?? is nil-coalescing: use the right side when the left side is nil.
     var rows: [ImportedIncome] { income ?? [] }
 }
 
 // MARK: - Root tabs
 
-/// Which main tab is selected. Hashable lets TabView use these as selection tags.
-/// private enum: only visible inside this file (not exported to other modules).
+/// Which main tab is selected.
 private enum AppTab: Hashable {
     case transactions
     case accounts
@@ -90,16 +78,12 @@ private enum AppTab: Hashable {
 
 /// Root of the main UI: a TabView with lazy-loaded secondary tabs for faster launch.
 struct ContentView: View {
-    // @AppStorage reads/writes a UserDefaults key and refreshes the view when it changes.
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
-    // Currently selected tab (starts on Transactions).
     @State private var selectedTab: AppTab = .transactions
     /// Only build heavy tabs after the user opens them (first switch is still work; launch is not).
-    /// Set is an unordered collection of unique values.
     @State private var loadedTabs: Set<AppTab> = [.transactions]
 
     /// Custom Binding so selecting a tab also marks it “loaded” before assignment.
-    /// Binding is a two-way connection: get current value, set a new value (UI ↔ state).
     private var tabSelection: Binding<AppTab> {
         Binding(
             get: { selectedTab },
@@ -111,16 +95,12 @@ struct ContentView: View {
     }
 
     var body: some View {
-        // TabView with selection: bottom tab bar; selection tracks which tab is active.
         TabView(selection: tabSelection) {
             // First tab always built at launch (not lazy).
             AllTransactionsView()
-                // tabItem: label + SF Symbol shown in the tab bar.
                 .tabItem { Label("Transactions", systemImage: "list.bullet") }
-                // tag must match AppTab cases used by selection.
                 .tag(AppTab.transactions)
 
-            // lazyTab defers building Accounts until first visit (see helper below).
             lazyTab(.accounts) {
                 CardsView()
             }
@@ -145,8 +125,6 @@ struct ContentView: View {
             .tabItem { Label("Settings", systemImage: "gearshape") }
             .tag(AppTab.settings)
         }
-        // .environment injects a value into the SwiftUI environment so deep child views
-        // can read it with @Environment(\.screenshotPrivacy) without prop-drilling.
         .environment(\.screenshotPrivacy, screenshotPrivacy)
         // Opening a .fwbackup from Files jumps to Settings (where restore UI lives).
         .onReceive(NotificationCenter.default.publisher(for: PlaidConnectionBackup.openFileNotification)) { _ in
@@ -155,16 +133,12 @@ struct ContentView: View {
         }
     }
 
-    // @ViewBuilder lets a function build views with if/else (like body does).
-    // Generics: Content: View means “whatever concrete view type the caller returns.”
-    // some View hides that concrete type from callers.
     @ViewBuilder
     private func lazyTab<Content: View>(
         _ tab: AppTab,
         @ViewBuilder content: () -> Content
     ) -> some View {
         if loadedTabs.contains(tab) {
-            // Call the trailing closure to build the real tab content.
             content()
         } else {
             // Placeholder until first selection — avoids building all tabs at launch.
@@ -178,31 +152,26 @@ struct ContentView: View {
 
 /// Primary “Finances” screen: period filters, totals, income + expense lists, import & Plaid sync.
 struct AllTransactionsView: View {
-    // @Query: SwiftData live array of all matching models; UI updates when the store changes.
     @Query private var transactions: [Transaction]
     @Query private var incomeRows: [Income]
     @Query private var bankAccounts: [BankAccount]
-    // @Environment(\.modelContext): the open SwiftData context for insert/fetch/save.
     @Environment(\.modelContext) private var modelContext
 
-    // Import sheet + status
     @State private var isImporting = false
     @State private var importContentTypes: [UTType] = [.json]
     @State private var importMode: ImportMode = .json
-    // String? = optional error message (nil means no alert).
     @State private var importError: String?
     @State private var importStatusMessage: String?
     @State private var isSyncing = false
 
-    // Live + final Sync Status panel
     @State private var syncStatusTitle: String = ""
     @State private var syncStatusDetail: String = ""
     @State private var syncStatusKind: SyncStatusKind = .idle
-    /// Keeps the status section visible after a run until the next Sync
+    /// Keeps the status section visible after a run until the next Sync.
     @State private var showSyncStatus = false
     @State private var showLinkSheet = false
 
-    // Same filter concepts as the widget (period + sort + search)
+    // Same filter concepts as the widget (period + sort + search).
     @State private var period: SnapshotPeriod = .month
     /// Which week/month to show (any day in that period; months use month start).
     @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
@@ -211,8 +180,6 @@ struct AllTransactionsView: View {
     /// Heavy scan (review queue) — not computed every body pass.
     @State private var reviewCount: Int = 0
 
-    // Computed properties: recalculated when body needs them (no stored storage).
-    // Rows for the list: period + sort + search
     private var visibleTransactions: [Transaction] {
         let base = TransactionAnalytics.filter(
             transactions,
@@ -224,12 +191,12 @@ struct AllTransactionsView: View {
         return TransactionSearch.filter(base, query: searchText, accounts: bankAccounts)
     }
 
-    // Period-only set (for totals — ignores search so totals stay “whole period”)
+    // Period-only set for totals — ignores search so totals stay “whole period”.
     private var periodTransactions: [Transaction] {
         TransactionAnalytics.inPeriod(transactions, period: period, referenceDate: referenceDate)
     }
 
-    // Income for the same period filter (never mixed into spend)
+    // Income for the same period (never mixed into spend).
     private var periodIncome: [Income] {
         IncomeAnalytics.inPeriod(incomeRows, period: period, referenceDate: referenceDate)
     }
@@ -248,28 +215,23 @@ struct AllTransactionsView: View {
         period.filterLabel(referenceDate: referenceDate)
     }
 
-    // Big number: all cards in the period (expenses only)
+    // Expenses only (all cards in the period).
     private var totalSpend: Double {
         TransactionAnalytics.totalSpend(in: periodTransactions)
     }
 
-    // Money earned in the period (always positive)
+    // Money earned in the period (always positive).
     private var totalIncome: Double {
         IncomeAnalytics.totalEarned(in: periodIncome)
     }
 
-    // Optional net: earned − spent for the same period
     private var periodNet: Double {
         totalIncome - totalSpend
     }
 
     var body: some View {
-        // NavigationStack enables push navigation (NavigationLink → detail screens).
         NavigationStack {
-            // List is a scrollable, sectioned list styled like iOS Settings / Mail.
             List {
-                // Live / last Sync Status (Plaid + downloads)
-                // if let: only show this section when importStatusMessage is non-nil.
                 if let importStatusMessage {
                     Section("Import") {
                         Text(importStatusMessage)
@@ -280,10 +242,8 @@ struct AllTransactionsView: View {
 
                 if showSyncStatus || isSyncing {
                     Section("Sync Status") {
-                        // HStack lays out children horizontally.
                         HStack(alignment: .top, spacing: 12) {
                             if isSyncing {
-                                // System spinner while work is in progress.
                                 ProgressView()
                             } else {
                                 Image(systemName: syncStatusKind.systemImage)
@@ -297,7 +257,6 @@ struct AllTransactionsView: View {
                                     Text(syncStatusDetail)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                        // Allow multi-line detail without clipping.
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
@@ -306,9 +265,8 @@ struct AllTransactionsView: View {
                     }
                 }
 
-                // Totals — spend from expenses only; income is a separate stream
+                // Totals — spend from expenses only; income is a separate stream.
                 Section {
-                    // NavigationLink pushes a new screen when the row is tapped.
                     NavigationLink {
                         CategorySpendView(period: period, referenceDate: referenceDate)
                     } label: {
@@ -323,7 +281,6 @@ struct AllTransactionsView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
-                            // Spacer pushes the amount to the trailing edge.
                             Spacer()
                             MoneyText(totalSpend)
                                 .font(.title2.bold())
@@ -354,7 +311,6 @@ struct AllTransactionsView: View {
                         Spacer()
                         MoneyText(periodNet)
                             .font(.title3.weight(.semibold))
-                            // Green when non-negative, default text color when overspent.
                             .foregroundStyle(periodNet >= 0 ? .green : .primary)
                     }
                     Text("\(periodTransactions.count) expenses · \(periodIncome.count) income in \(periodLabel.lowercased())")
@@ -362,7 +318,6 @@ struct AllTransactionsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // Tools: review queue
                 Section {
                     NavigationLink {
                         ReviewQueueView()
@@ -390,13 +345,11 @@ struct AllTransactionsView: View {
                         Text(incomeEmptyMessage)
                             .foregroundStyle(.secondary)
                     } else {
-                        // ForEach builds one row per identifiable item (Income has an id).
                         ForEach(visibleIncome) { row in
                             NavigationLink {
                                 IncomeDetailView(income: row, bankAccounts: bankAccounts)
                             } label: {
                                 // Match income row to a known bank account (mask or name).
-                                // first(where:) returns the first element that matches, or nil.
                                 let matched = bankAccounts.first { account in
                                     if let mask = row.accountMask, let am = account.mask, mask == am {
                                         return true
@@ -422,7 +375,6 @@ struct AllTransactionsView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(visibleTransactions) { transaction in
-                            // Tap row → full detail + edit category / multiplier
                             NavigationLink {
                                 TransactionDetailView(transaction: transaction)
                             } label: {
@@ -441,41 +393,32 @@ struct AllTransactionsView: View {
                 }
             }
             .navigationTitle("Finances")
-            // searchable adds a search field bound to searchText ($ means Binding).
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .automatic),
                 prompt: "Title, category, amount, last 4"
             )
-            // refreshable: pull-to-refresh gesture runs this async work.
             .refreshable {
                 await syncFromPlaid(resetCursors: false)
             }
-            // .task: async setup when the view appears (and re-runs if identity changes).
             .task {
                 AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
                 InstitutionLogoCache.warmMemory(accounts: bankAccounts)
                 InstitutionLogoCache.prefetch(accounts: bankAccounts)
                 refreshToolStats()
             }
-            // onChange: run side effects when a value changes (new SwiftUI two-parameter form).
             .onChange(of: transactions.count) { _, _ in
                 refreshToolStats()
             }
             .onChange(of: bankAccounts.count) { _, _ in
                 InstitutionLogoCache.warmMemory(accounts: bankAccounts)
             }
-            // toolbar: buttons in the navigation bar
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if isSyncing {
                         ProgressView()
                     } else {
-                        // Incremental Plaid sync + optional full re-pull
-                        // Menu presents a list of actions under one control.
                         Menu {
-                            // Button action is a closure (code that runs on tap).
-                            // Task { await ... } bridges sync UI into async work.
                             Button {
                                 Task { await syncFromPlaid(resetCursors: false, forceRefresh: false) }
                             } label: {
@@ -504,8 +447,6 @@ struct AllTransactionsView: View {
                     }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    // Period + which month (when Month is selected)
-                    // $period and $referenceDate pass Bindings so the menu can mutate state.
                     PeriodFilterMenu(
                         period: $period,
                         referenceDate: $referenceDate,
@@ -513,10 +454,8 @@ struct AllTransactionsView: View {
                         showTitle: false
                     )
 
-                    // Sort menu: Picker inside Menu lists all TransactionSort cases.
                     Menu {
                         Picker("Sort", selection: $sort) {
-                            // allCases comes from CaseIterable on the enum.
                             ForEach(TransactionSort.allCases) { option in
                                 Text(option.displayName).tag(option)
                             }
@@ -535,7 +474,7 @@ struct AllTransactionsView: View {
                         }
                         Button {
                             importMode = .appleCardCSV
-                            // compactMap drops nils if a UTType cannot be created for "csv".
+                            // CSV picker: commaSeparatedText, plainText, and .csv (whichever UTTypes exist).
                             importContentTypes = [.commaSeparatedText, .plainText, UTType(filenameExtension: "csv")].compactMap { $0 }
                             isImporting = true
                         } label: {
@@ -546,8 +485,6 @@ struct AllTransactionsView: View {
                     }
                 }
             }
-            // fileImporter presents the system document picker when isImporting is true.
-            // Trailing closure receives Result: either success([URL]) or failure(Error).
             .fileImporter(
                 isPresented: $isImporting,
                 allowedContentTypes: importContentTypes,
@@ -555,8 +492,6 @@ struct AllTransactionsView: View {
             ) { result in
                 handleImport(result)
             }
-            // alert bound to importError: show when non-nil; clear when dismissed.
-            // Custom Binding maps Bool presentation to optional String storage.
             .alert(
                 "Import failed",
                 isPresented: Binding(
@@ -564,15 +499,11 @@ struct AllTransactionsView: View {
                     set: { if !$0 { importError = nil } }
                 )
             ) {
-                // role: .cancel styles the button as the dismiss action.
                 Button("OK", role: .cancel) { importError = nil }
             } message: {
                 Text(importError ?? "")
             }
-            // sheet presents a modal cover when showLinkSheet is true.
             .sheet(isPresented: $showLinkSheet) {
-                // Trailing closure is a completion handler for link success/failure.
-                // if case .failure(let error): pattern-match only the failure side of Result.
                 PlaidLinkSheet { result in
                     if case .failure(let error) = result {
                         importError = error.localizedDescription
@@ -582,7 +513,6 @@ struct AllTransactionsView: View {
         }
     }
 
-    // Empty-state copy depends on whether data exists vs. filters hide everything.
     private var emptyMessage: String {
         if transactions.isEmpty {
             return "No expenses yet. Link a bank in Settings, then tap Sync."
@@ -610,16 +540,13 @@ struct AllTransactionsView: View {
 
     /// Handles the document picker’s Result: security-scope access, then CSV or JSON path.
     private func handleImport(_ result: Result<[URL], Error>) {
-        // switch on Result: exhaustive branches for success and failure.
         switch result {
         case .failure(let error):
             importError = error.localizedDescription
         case .success(let urls):
-            // guard let + else: unwrap optional; exit if the array was empty.
             guard let url = urls.first else { return }
-            // Security-scoped URLs need start/stop access when the user picks a file outside the sandbox.
+            // Security-scoped URLs need start/stop access for files outside the sandbox.
             let gotAccess = url.startAccessingSecurityScopedResource()
-            // defer runs when the function returns — always stop access if we started it.
             defer {
                 if gotAccess { url.stopAccessingSecurityScopedResource() }
             }
@@ -627,7 +554,7 @@ struct AllTransactionsView: View {
                 let data = try Data(contentsOf: url)
                 let name = url.lastPathComponent.lowercased()
                 let mode = importMode
-                // Auto-detect by extension when the picker is ambiguous
+                // Auto-detect by extension when the picker is ambiguous.
                 if mode == .appleCardCSV || name.hasSuffix(".csv") {
                     let report = try AppleCardCSVImporter.importCSV(
                         data: data,
@@ -647,7 +574,6 @@ struct AllTransactionsView: View {
         }
     }
 
-    // How the Sync Status row is colored / which SF Symbol to show
     private enum SyncStatusKind {
         case idle
         case running
@@ -655,7 +581,6 @@ struct AllTransactionsView: View {
         case warning
         case failure
 
-        // Computed properties on the enum: each case maps to UI chrome.
         var systemImage: String {
             switch self {
             case .idle: return "ellipsis.circle"
@@ -677,8 +602,6 @@ struct AllTransactionsView: View {
         }
     }
 
-    // Update the Sync Status section (call from MainActor / UI path)
-    // @MainActor ensures UI state mutations stay on the main thread.
     @MainActor
     private func setSyncStatus(_ kind: SyncStatusKind, title: String, detail: String = "") {
         showSyncStatus = true
@@ -690,12 +613,9 @@ struct AllTransactionsView: View {
     /// Pull transactions directly from the user’s Plaid developer account.
     /// - Parameter resetCursors: if true, re-download full history for each Item.
     /// - Parameter forceRefresh: call `/transactions/refresh` first (on-demand bank pull).
-    /// async throws-style work is done via try await inside; UI updates hop to MainActor.
     private func syncFromPlaid(resetCursors: Bool, forceRefresh: Bool = false) async {
-        // await MainActor.run { }: hop to the UI thread to set @State safely.
         await MainActor.run {
             isSyncing = true
-            // Immediately-invoked closure to pick a title string based on flags.
             let title: String = {
                 if resetCursors { return "Full re-sync…" }
                 if forceRefresh { return "Force refreshing banks…" }
@@ -711,7 +631,6 @@ struct AllTransactionsView: View {
         }
 
         do {
-            // Progress callback: engine reports status strings; we show them in the panel.
             let report = try await PlaidSyncEngine.syncAll(
                 modelContext: modelContext,
                 resetCursors: resetCursors,
@@ -763,21 +682,16 @@ struct AllTransactionsView: View {
         }
     }
 
-    // Offline JSON import (legacy finance-sync export shape still works)
-    // @discardableResult: callers may ignore the returned Int without a compiler warning.
-    // throws: this function can fail; callers must try or try?.
+    // Offline JSON import (legacy finance-sync export shape still works).
     @discardableResult
     private func upsertTransactions(from data: Data) throws -> Int {
-        // JSONDecoder turns Data into Decodable types; keys must match property names.
         let export = try JSONDecoder().decode(ExportFile.self, from: data)
 
         for item in export.transactions {
-            // Skip rows with unparseable dates.
             guard let date = Self.parseExportDate(item.date) else { continue }
+            // #Predicate must capture a local let, not `item.transaction_id`.
             let targetId = item.transaction_id
 
-            // FetchDescriptor + #Predicate: type-safe SwiftData query for one existing row.
-            // #Predicate is a macro that builds a store filter (must use local lets like targetId).
             var descriptor = FetchDescriptor<Transaction>(
                 predicate: #Predicate<Transaction> { row in
                     row.transactionId == targetId
@@ -785,17 +699,16 @@ struct AllTransactionsView: View {
             )
             descriptor.fetchLimit = 1
 
-            // ?? false: treat missing lock flags as unlocked.
+            // Missing lock flags in older exports → treat as unlocked.
             let categoryLocked = item.category_locked ?? false
             let multiplierLocked = item.multiplier_locked ?? false
 
-            // Upsert: update if found, else insert a new Transaction.
-            // Amount is negated because export amounts are positive spend; model stores signed spend.
+            // Export amounts are positive spend; the model stores signed spend (negative).
             if let existing = try modelContext.fetch(descriptor).first {
                 existing.title = item.vendor
                 existing.amount = -item.amount
                 existing.date = date
-                // Respect user locks: do not overwrite category/multiplier when locked.
+                // Respect user locks so Sync / re-import won’t overwrite category/multiplier.
                 if !existing.isCategoryLocked {
                     existing.category = item.category
                 }
@@ -837,7 +750,7 @@ struct AllTransactionsView: View {
         let rows = export.rows
 
         for item in rows {
-            // Skip non-income discriminators if a mixed payload ever appears
+            // Skip non-income discriminators if a mixed payload ever appears.
             if let kind = item.kind, kind != "income" { continue }
             guard !item.transaction_id.isEmpty,
                   let date = Self.parseExportDate(item.date) else { continue }
@@ -850,9 +763,8 @@ struct AllTransactionsView: View {
             )
             descriptor.fetchLimit = 1
 
-            // API amounts are always > 0; abs() guards against a bad row looking like spend
+            // API amounts are always > 0; abs() guards against a bad row looking like spend.
             let amount = abs(item.amount)
-            // Nested ternary-style defaults with ?: empty string checks.
             let source = item.source.isEmpty ? (item.raw_name ?? "Income") : item.source
             let category = item.category.isEmpty ? "Other Income" : item.category
             let kind = item.kind ?? "income"
@@ -898,8 +810,6 @@ struct AllTransactionsView: View {
     }
 
     /// Parse export date strings like "2026-07-15" into Date (UTC Gregorian, POSIX locale).
-    /// static: called as Self.parseExportDate without needing an instance.
-    /// Date? means success returns a Date; failure returns nil.
     private static func parseExportDate(_ string: String) -> Date? {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -914,25 +824,20 @@ struct AllTransactionsView: View {
 
 /// One income line in the Transactions list (icon, source, category, amount).
 struct IncomeRowView: View {
-    // let properties are inputs set by the parent (immutable for this view’s lifetime).
     let income: Income
-    // Default = nil so callers can omit institution when unknown.
     var institutionId: String? = nil
     var institutionName: String? = nil
 
-    // Read screenshot-privacy flag from the environment (injected higher up).
     @Environment(\.screenshotPrivacy) private var screenshotPrivacy
 
     var body: some View {
         HStack(spacing: 12) {
-            // ZStack overlays the small bank badge on the category symbol.
             ZStack(alignment: .bottomTrailing) {
                 Image(systemName: CategoryStyle.symbolName(for: income.category))
                     .font(.title3)
                     .foregroundStyle(.green)
                     .frame(width: 28, alignment: .center)
                     .accessibilityLabel(income.category)
-                // Show bank monogram/logo when we have any institution hint.
                 if institutionId != nil || institutionName != nil || !income.iconKey.isEmpty {
                     BankIconView(
                         paymentMethod: income.iconKey,
@@ -945,17 +850,14 @@ struct IncomeRowView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                // Display: source (employer / payer)
                 Text(income.source)
                     .font(.body)
-                // String interpolation builds secondary line; privacy may mask last-4 digits.
                 Text(
                     "\(income.category) · \(ScreenshotPrivacy.cardText(income.accountDisplay, privacy: screenshotPrivacy))"
                 )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 6) {
-                    // Text(date, style: .date) uses a locale-aware date format.
                     Text(income.date, style: .date)
                     if income.pending {
                         Text("Pending")
@@ -978,7 +880,7 @@ struct IncomeDetailView: View {
     let income: Income
     var bankAccounts: [BankAccount] = []
 
-    // Optional linked BankAccount used for logos when names/masks match.
+    /// Linked BankAccount for logos when names/masks match.
     private var linkedAccount: BankAccount? {
         bankAccounts.first { account in
             if let mask = income.accountMask, let am = account.mask, mask == am { return true }
@@ -988,7 +890,6 @@ struct IncomeDetailView: View {
     }
 
     var body: some View {
-        // Form is a List-like container with grouped inset style (good for settings/details).
         Form {
             Section {
                 HStack(spacing: 12) {
@@ -1009,14 +910,12 @@ struct IncomeDetailView: View {
             }
 
             Section("Details") {
-                // LabeledContent is a standard key–value row (label leading, value trailing).
                 LabeledContent("Date") {
                     Text(income.date, style: .date)
                 }
                 LabeledContent("Category") {
                     Text(income.category)
                 }
-                // if let with where-style comma conditions: only when name is non-empty.
                 if let accountName = income.accountName, !accountName.isEmpty {
                     LabeledContent("Account") {
                         HStack(spacing: 8) {
@@ -1038,7 +937,6 @@ struct IncomeDetailView: View {
                         }
                     }
                 } else if let institution = income.sourceInstitution, !institution.isEmpty {
-                    // else if: fall back to institution name when account name is missing.
                     LabeledContent("Institution") {
                         HStack(spacing: 8) {
                             BankIconView(
@@ -1075,19 +973,16 @@ struct IncomeDetailView: View {
                     Text(income.transactionId)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        // textSelection enables long-press copy of the ID.
                         .textSelection(.enabled)
                 }
             }
 
         }
         .navigationTitle("Income")
-        // Inline title sits in the nav bar (not large/collapsing).
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-// Preview: in-memory SwiftData so the canvas does not need a real store file.
 #Preview {
     ContentView()
         .modelContainer(for: [Transaction.self, Income.self], inMemory: true)

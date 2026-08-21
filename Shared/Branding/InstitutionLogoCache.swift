@@ -14,20 +14,12 @@
 //  6) monogram / primaryColor / ensureLogo / prefetch
 //  7) Disk helpers + name aliases + Color(hex:) parser
 //
-//  Learning notes:
-//  - NSCache is an auto-evicting in-memory cache (system may drop entries under pressure).
-//  - App Group = shared container so the widget and app can read the same logo files.
-//  - Notification.Name is a typed string for NotificationCenter events.
-//  - async/await + Task.detached move heavy disk/decode work off the main thread.
-//  - NSLock protects shared mutable sets/flags used from multiple threads.
-//
 
 import Foundation
 import UIKit
 import SwiftUI
 
 /// Posted on the main queue when a logo is written so views can refresh.
-/// extension adds static names onto Apple’s Notification.Name type.
 extension Notification.Name {
     static let institutionLogoDidUpdate = Notification.Name("InstitutionLogoCache.didUpdate")
     /// App target should fetch from Plaid and call `store` (Shared has no Plaid client).
@@ -45,7 +37,6 @@ enum InstitutionLogoCache {
     nonisolated private static let colorPrefix = "plaid.color."
     nonisolated private static let namePrefix = "plaid.instName."
     /// Hot path: decoded UIImages keyed by institution id or "name:…".
-    /// Closure-initialized static: runs once when first accessed.
     nonisolated(unsafe) private static let memoryLogos: NSCache<NSString, UIImage> = {
         let c = NSCache<NSString, UIImage>()
         c.countLimit = 256
@@ -63,7 +54,6 @@ enum InstitutionLogoCache {
     nonisolated(unsafe) private static let aliasListCache = NSCache<NSString, NSArray>()
     /// Institution ids currently waiting on a network fetch (dedupe parallel requests).
     nonisolated(unsafe) private static var inFlight = Set<String>()
-    // NSLock is Sendable; no nonisolated(unsafe) needed.
     nonisolated private static let lock = NSLock()
     nonisolated(unsafe) private static var didSeedBundled = false
     /// Resolved once — logoDirectory() used to create dirs + stat group container on every tile.
@@ -157,7 +147,6 @@ enum InstitutionLogoCache {
 
         writeLogoData(data, key: id)
         if let img = UIImage(data: data) {
-            // NSCache requires NSString keys (Objective-C bridge)
             memoryLogos.setObject(img, forKey: id as NSString)
         }
         // UI listens on the main queue — hop there before posting
@@ -186,7 +175,6 @@ enum InstitutionLogoCache {
         var didChange = false
 
         let imageData = decodeImageData(logoBase64)
-        // flatMap: if data exists, try UIImage(data:); if either is nil, result is nil
         let decodedImage = imageData.flatMap { UIImage(data: $0) }
 
         // Background tile color: Plaid primary_color → sample from logo → name/id fallback.
@@ -896,8 +884,6 @@ enum InstitutionLogoCache {
         return nil
     }
 
-    /// Write logo bytes to App Group (widget) and app caches (reliability).
-    /// .atomic means write to a temp file then rename (safer if the app crashes mid-write).
     /// All logo files in the App Group cache (filename → bytes) for backup.
     nonisolated static func exportAllLogoFiles() -> [String: Data] {
         guard let dir = logoDirectory() else { return [:] }
@@ -1001,14 +987,12 @@ enum InstitutionLogoCache {
 // MARK: - Color hex helper
 
 extension Color {
-    /// Failable initializer: Parse #RRGGBB or RRGGBB (or 8-digit with alpha) from Plaid primary_color.
-    /// init? means construction can fail and return nil instead of a Color.
+    /// Parse #RRGGBB or RRGGBB (or 8-digit with alpha) from Plaid primary_color.
     init?(hex: String) {
         var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.hasPrefix("#") { s.removeFirst() }
         guard s.count == 6 || s.count == 8 else { return nil }
         var value: UInt64 = 0
-        // Scanner parses hex text into an integer
         guard Scanner(string: s).scanHexInt64(&value) else { return nil }
         let r, g, b, a: Double
         if s.count == 8 {

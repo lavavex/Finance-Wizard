@@ -32,9 +32,32 @@ Link completion uses the custom scheme `financewizard://hosted-link-complete` (H
 | Linked items | Count of stored Items |
 | API host | Hostname for the selected environment |
 
+## Privacy
+
+**Hide for screenshots** (`settings.screenshotPrivacy`) masks dollar amounts and card last-four in the UI so you can share a screen without balances.
+
+## Backup & restore
+
+Password-encrypted `.fwbackup` from **Settings → Backup & restore**. Includes Plaid keys, bank tokens, SwiftData, nicknames, vendor rules, and UserDefaults under `plaid.` / `card.` / `settings.` (including onboarding). Default restore is **Safe merge**. **Wipe device, then restore** deletes local data first.
+
+## Debug menu
+
+**Settings → Developer → Debug** (`DebugMenuView.swift`):
+
+| Action | What it does |
+|--------|----------------|
+| **Onboarding completed** / **Replay onboarding** | Flips `settings.onboardingCompleted`. Replay shows Welcome immediately. |
+| Local counts | Transactions, income, accounts, Recurring marks, linked banks, vendor rules |
+| Plaid (no secret) | Configured?, environment, client id |
+| Reset pieces | Sync cursors, vendor rules, nicknames, Recurring marks, logos, budget, rewards profiles |
+| **Wipe all local data** | Same local wipe as wipe-then-restore (no backup). Plaid Dashboard unchanged. Turns onboarding off. |
+| Prefs list | Keys under `plaid.` / `card.` / `settings.` |
+
+Does not change anything in the Plaid Dashboard.
+
 ## Debug export
 
-**Settings → Export data for debug** builds a zip you can AirDrop / save / share:
+**Settings → About → Export database for debug** builds a zip you can AirDrop / save / share:
 
 | Included | Excluded |
 |----------|----------|
@@ -81,6 +104,8 @@ In App Store Connect → Xcode Cloud → Settings → **Build Number**, you can 
 | Items / cursors | `FinanceWizard/Plaid/PlaidItemStore.swift` |
 | Keychain | `FinanceWizard/Plaid/PlaidKeychain.swift` |
 | UI | `FinanceWizard/Features/Settings/SettingsView.swift` (`AboutBuildView`, `AppBuildInfo`) |
+| Debug menu | `FinanceWizard/Features/Settings/DebugMenuView.swift` |
 | Debug export | `FinanceWizard/Features/Settings/DebugDataExport.swift` |
+| Backup wipe | `PlaidConnectionBackup.wipeLocalAppData` (public; used by restore + Debug) |
 
 Credentials are **device-local** (not in the App Group).

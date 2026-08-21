@@ -3,8 +3,6 @@
 //  Finance Wizard
 //
 //  Settings screen: Plaid developer credentials, linked banks, status, and debug export.
-//  Built with SwiftUI (declarative UI — you describe what the screen should look like;
-//  SwiftUI updates it when @State / data changes).
 //
 
 import SwiftUI
@@ -13,16 +11,9 @@ import UIKit
 import UniformTypeIdentifiers
 
 /// Main Settings screen for Plaid keys, bank links, privacy, and About.
-///
-/// `struct …: View` means this type conforms to the View protocol — it must provide a
-/// `body` that returns UI. SwiftUI re-evaluates `body` when observed state changes.
 struct SettingsView: View {
-    // @Environment reads a value from the SwiftUI environment (shared down the view tree).
-    // modelContext is the SwiftData “scratchpad” for insert/update/delete/save of model objects.
     @Environment(\.modelContext) private var modelContext
 
-    // @State stores view-owned mutable data. Changing it triggers a UI refresh.
-    // private keeps these properties only usable inside this type.
     @State private var clientID: String = ""
     @State private var secret: String = ""
     @State private var environment: PlaidEnvironment = .sandbox
@@ -30,7 +21,6 @@ struct SettingsView: View {
     @State private var didSave = false
     @State private var showSecret = false
     /// Sheet payload so Relink always passes the correct Item (avoids stale `.new` mode).
-    /// Optional + Identifiable lets `.sheet(item:)` present when non-nil and dismiss when nil.
     @State private var linkSheetRequest: LinkSheetRequest?
     @State private var linkedItems: [PlaidLinkedItem] = []
     @State private var statusMessage: String?
@@ -55,20 +45,13 @@ struct SettingsView: View {
     @State private var showRestorePlanSheet = false
     @State private var restorePolicy: PlaidConnectionBackup.RestorePolicy = .safeMerge
 
-    // @AppStorage ties a Bool to UserDefaults under a key — persists across launches.
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
 
-    // body is required by View. @ViewBuilder lets you list views with if/forEach without
-    // wrapping everything in explicit return / Group in many cases.
     var body: some View {
-        // NavigationStack provides a navigation bar and push/pop of destination views.
         NavigationStack {
-            // Form is a styled list for settings-style rows (sections, toggles, fields).
             Form {
                 // MARK: Screenshot privacy
-                // MARK: is an Xcode navigator bookmark — not runtime code.
                 Section {
-                    // Toggle binds to a Bool via $screenshotPrivacy ($ = two-way Binding).
                     Toggle(isOn: $screenshotPrivacy) {
                         Label("Hide for screenshots", systemImage: "eye.slash")
                     }
@@ -80,20 +63,16 @@ struct SettingsView: View {
 
                 // MARK: Credentials
                 Section {
-                    // $clientID is a Binding so the TextField can read and write the @State.
                     TextField("client_id", text: $clientID)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.body.monospaced())
 
                     HStack {
-                        // Group is an invisible container used to apply modifiers to either
-                        // TextField or SecureField without duplicating the modifiers twice.
                         Group {
                             if showSecret {
                                 TextField("secret", text: $secret)
                             } else {
-                                // SecureField hides typed characters (password-style field).
                                 SecureField("secret", text: $secret)
                             }
                         }
@@ -102,7 +81,6 @@ struct SettingsView: View {
                         .font(.body.monospaced())
 
                         Button {
-                            // toggle() flips a Bool: true ↔ false
                             showSecret.toggle()
                         } label: {
                             Image(systemName: showSecret ? "eye.slash" : "eye")
@@ -110,7 +88,6 @@ struct SettingsView: View {
                         .buttonStyle(.borderless)
                     }
 
-                    // Picker writes the chosen case into $environment via .tag(env).
                     Picker("Environment", selection: $environment) {
                         ForEach(PlaidEnvironment.allCases) { env in
                             Text(env.displayName).tag(env)
@@ -135,7 +112,6 @@ struct SettingsView: View {
                 } header: {
                     Text("Plaid account")
                 } footer: {
-                    // \(…) interpolates values into a string at runtime.
                     Text("Keys stay on this device. OAuth banks (Chase, etc.) use \(PlaidCredentialsStore.defaultRedirectURI) by default — add that exact URL under Plaid Dashboard → Allowed redirect URIs. Override only if you use a Universal Link. The app still finishes Link via financewizard://…")
                 }
 
@@ -145,7 +121,6 @@ struct SettingsView: View {
                         Text("No banks linked yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        // ForEach builds one row per item. Items must be Identifiable (have id).
                         ForEach(linkedItems) { item in
                             HStack(spacing: 12) {
                                 BankIconView(
@@ -154,7 +129,6 @@ struct SettingsView: View {
                                     displayName: item.institutionName,
                                     institutionName: item.institutionName
                                 )
-                                // VStack stacks views vertically; alignment: .leading left-aligns them.
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.institutionName)
                                         .font(.body.weight(.semibold))
@@ -163,7 +137,6 @@ struct SettingsView: View {
                                             .font(.caption.weight(.semibold))
                                             .foregroundStyle(.orange)
                                     } else if !item.accountNames.isEmpty {
-                                        // joined(separator:) turns ["A","B"] into "A, B"
                                         Text(item.accountNames.joined(separator: ", "))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -172,10 +145,8 @@ struct SettingsView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
                                 }
-                                // Spacer pushes content apart; minLength avoids zero-width collapse.
                                 Spacer(minLength: 0)
                             }
-                            // contentShape makes the whole row tappable for context menus, not just text.
                             .contentShape(Rectangle())
                             .contextMenu {
                                 Button {
@@ -185,14 +156,12 @@ struct SettingsView: View {
                                 }
                                 .disabled(!PlaidCredentialsStore.isConfigured)
 
-                                // role: .destructive styles the action as destructive (often red).
                                 Button(role: .destructive) {
                                     itemPendingDelete = item
                                 } label: {
                                     Label("Unlink", systemImage: "trash")
                                 }
                             }
-                            // swipeActions adds buttons revealed by swiping a list/form row.
                             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                                 Button {
                                     startRelink(item)
@@ -227,7 +196,6 @@ struct SettingsView: View {
 
                 // MARK: Sync info
                 Section {
-                    // LabeledContent is a title-on-left / value-on-right settings row.
                     LabeledContent("Credentials") {
                         Text(PlaidCredentialsStore.isConfigured ? "Configured" : "Missing")
                             .foregroundStyle(PlaidCredentialsStore.isConfigured ? .green : .orange)
@@ -272,7 +240,6 @@ struct SettingsView: View {
                     Text("Password-encrypted full backup: Plaid keys, bank access tokens, transactions, income, accounts, budget, nicknames, learned rules, and app prefs (anything under plaid./card./settings. plus cached logos). Default restore is Safe merge. Choose Wipe device, then restore to delete local data first — including things added after an older backup was made.")
                 }
 
-                // if let unwraps an optional: only shows this section when statusMessage is non-nil.
                 if let statusMessage {
                     Section {
                         Text(statusMessage)
@@ -283,7 +250,6 @@ struct SettingsView: View {
 
                 // MARK: About
                 Section {
-                    // NavigationLink pushes a new screen onto the NavigationStack when tapped.
                     NavigationLink {
                         AboutBuildView()
                     } label: {
@@ -301,7 +267,6 @@ struct SettingsView: View {
                     } label: {
                         if isExportingDebug {
                             HStack {
-                                // ProgressView shows an indeterminate spinner while work runs.
                                 ProgressView()
                                 Text("Preparing export…")
                             }
@@ -313,9 +278,20 @@ struct SettingsView: View {
                 } header: {
                     Text("About")
                 }
+
+                Section {
+                    NavigationLink {
+                        DebugMenuView()
+                    } label: {
+                        Label("Debug", systemImage: "ant")
+                    }
+                } header: {
+                    Text("Developer")
+                } footer: {
+                    Text("Replay onboarding, inspect counts, and reset local state. Does not change the Plaid Dashboard.")
+                }
             }
             .navigationTitle("Settings")
-            // onAppear runs once when the view appears (good place to load stored values).
             .onAppear {
                 reload()
                 consumeIncomingBackupIfNeeded()
@@ -323,17 +299,14 @@ struct SettingsView: View {
             .onReceive(NotificationCenter.default.publisher(for: PlaidConnectionBackup.openFileNotification)) { _ in
                 consumeIncomingBackupIfNeeded()
             }
-            // sheet(item:) presents when linkSheetRequest becomes non-nil; onDismiss runs after close.
             .sheet(item: $linkSheetRequest, onDismiss: reload) { request in
                 PlaidLinkSheet(mode: request.mode) { result in
-                    // switch matches Result success vs failure (Swift’s typed success/error enum).
                     switch result {
                     case .success(let item):
                         statusIsError = false
                         switch request.mode {
                         case .new:
                             statusMessage = "Linked \(item.institutionName). Tap Sync on Transactions."
-                            // Task { } starts unstructured async work from a non-async context.
                             Task { await reconcileAfterRelink(item) }
                         case .update:
                             statusMessage = "Relinked \(item.institutionName). Refreshing accounts…"
@@ -341,31 +314,24 @@ struct SettingsView: View {
                         }
                     case .failure(let error):
                         statusIsError = true
-                        // localizedDescription is a human-readable error string.
                         statusMessage = error.localizedDescription
                     }
                     reload()
                 }
             }
-            // onReceive listens to a NotificationCenter publisher (app-wide events).
             .onReceive(NotificationCenter.default.publisher(for: .plaidItemsReplaced)) { note in
-                // userInfo is an optional dictionary attached to a notification.
                 let ids = (note.userInfo?["itemIds"] as? [String]) ?? []
                 guard !ids.isEmpty else { return }
-                // try? turns a throwing call into nil on failure instead of propagating the error.
                 let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
-                // where filters the loop: only accounts whose itemId is in ids.
                 for account in all where ids.contains(account.itemId) {
                     modelContext.delete(account)
                 }
                 try? modelContext.save()
                 reload()
             }
-            // confirmationDialog is a system action sheet (title + destructive/cancel buttons).
             .confirmationDialog(
                 "Unlink \(itemPendingDelete?.institutionName ?? "bank")?",
                 isPresented: Binding(
-                    // Custom Binding: presented when itemPendingDelete is set; clearing dismisses.
                     get: { itemPendingDelete != nil },
                     set: { if !$0 { itemPendingDelete = nil } }
                 ),
@@ -506,12 +472,10 @@ struct SettingsView: View {
         statusMessage = "Opened \(url.lastPathComponent). Enter the backup password to continue."
     }
 
-    // @MainActor means this async function must run on the main thread (required for UI state).
     @MainActor
     private func runDebugExport() async {
         isExportingDebug = true
         statusMessage = nil
-        // defer runs when the function exits (success or error) — always clears the spinner flag.
         defer { isExportingDebug = false }
         do {
             let url = try DebugDataExporter.exportPackage(modelContext: modelContext)
@@ -659,7 +623,6 @@ struct SettingsView: View {
         didSave = true
         statusIsError = false
         statusMessage = "Credentials saved on this device."
-        // Brief success flag, then hide the “Saved” label after 1.5 seconds.
         Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             didSave = false
@@ -668,7 +631,6 @@ struct SettingsView: View {
 
     /// Opens Plaid Link in update mode for an existing linked Item (relink / re-auth).
     private func startRelink(_ item: PlaidLinkedItem) {
-        // guard else { return } exits early if the condition fails — keeps happy-path unindented.
         guard PlaidCredentialsStore.isConfigured else {
             statusIsError = true
             statusMessage = "Add Plaid credentials before relinking."
@@ -724,7 +686,6 @@ struct SettingsView: View {
 /// Identifiable wrapper so `.sheet(item:)` can present Plaid Link with a fixed mode.
 /// Capturing mode on a struct avoids racey re-reads of separate @State flags.
 private struct LinkSheetRequest: Identifiable {
-    // UUID() creates a unique id each time a request is made (new sheet presentation).
     let id = UUID()
     let mode: PlaidLinkMode
 }
@@ -1008,11 +969,9 @@ private struct PlaidRestorePlanSheet: View {
 // MARK: - Build info (from Info.plist / Xcode versions)
 
 /// Reads marketing version, build number, and related values from the app’s Info.plist.
-/// static members belong to the type itself (AppBuildInfo.x), not an instance.
 enum AppBuildInfo {
     /// CFBundleShortVersionString ← MARKETING_VERSION (e.g. 1.0)
     static var marketingVersion: String {
-        // as? is a conditional cast: succeeds as String or yields nil → then ?? provides default.
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
     }
 
@@ -1054,7 +1013,6 @@ struct AboutBuildView: View {
                 LabeledContent("Version") {
                     Text(AppBuildInfo.marketingVersion)
                         .font(.body.monospaced())
-                        // textSelection allows long-press copy of the text.
                         .textSelection(.enabled)
                 }
                 LabeledContent("Build") {
@@ -1086,7 +1044,6 @@ struct AboutBuildView: View {
 
             Section("Runtime") {
                 LabeledContent("iOS") {
-                    // UIDevice is UIKit — systemVersion is the OS version string (e.g. "17.4").
                     Text(UIDevice.current.systemVersion)
                         .font(.body.monospaced())
                 }
@@ -1097,12 +1054,10 @@ struct AboutBuildView: View {
             }
         }
         .navigationTitle("About")
-        // .inline keeps the title in the nav bar center (not large title style).
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-// #Preview is a SwiftUI canvas helper so Xcode can render this view without running the full app.
 #Preview {
     SettingsView()
 }

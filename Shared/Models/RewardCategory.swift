@@ -14,12 +14,6 @@
 import Foundation
 import SwiftUI
 
-// MARK: - General spend categories (Transactions / charts)
-
-// See KnownCategory.swift — Dining, Gas (Car), Groceries, Shopping, etc.
-
-// MARK: - Reward / benefit earn categories
-
 /// Categories used only for card earn rates & Benefits UI.
 enum RewardCategory: String, CaseIterable, Identifiable, Codable, Sendable {
     case dining = "Dining"
@@ -41,7 +35,6 @@ enum RewardCategory: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var id: String { rawValue }
 
-    /// SF Symbol for Benefits lists (switch can share one return for several cases).
     var systemImage: String {
         switch self {
         case .dining: return "fork.knife"
@@ -216,8 +209,6 @@ enum RewardCategory: String, CaseIterable, Identifiable, Codable, Sendable {
 }
 
 // MARK: - Style extension
-// extension CategoryStyle adds reward-specific color/symbol helpers onto an
-// existing type defined elsewhere (CategoryStyle lives in another file).
 
 extension CategoryStyle {
     /// Color for a reward earn category (reuses general palette where it fits).

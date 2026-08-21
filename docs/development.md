@@ -102,7 +102,8 @@ App Store Connect → your app → **Xcode Cloud** → workflow → **Environmen
 
 | Change | Put it in |
 |--------|-----------|
-| App entry, root tabs, splash | `FinanceWizard/App/` |
+| App entry, splash, root gate | `FinanceWizard/App/` |
+| Welcome / onboarding flag | `FinanceWizard/Features/Onboarding/` |
 | Feature UI (transactions, accounts, budget, settings, import) | `FinanceWizard/Features/<Area>/` |
 | App-only services (logo fetch, local helpers) | `FinanceWizard/Services/` |
 | Plaid Link / sync / credentials | `FinanceWizard/Plaid/` |
@@ -120,23 +121,36 @@ Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synce
 
 ## Conventions used in this project
 
-- **Learning-friendly comments** throughout Swift sources: file headers, `///` on types/functions, and `//` inline notes that explain **what the code does** and **what Swift terms mean** (`@State`, `@Query`, optionals, `async`/`await`, etc.). Dense loops get group comments rather than a line-by-line wall.  
-- Expenses from API are **negated** when saved.  
-- Upsert by `transactionId`, never blind replace of the whole DB on Sync.  
+- **Comments:** short file headers + `///` for behavior and constraints. No Swift-syntax lectures. No LESSON / TYPE HERE dumps in shipping source. See `AGENTS.md`.  
+- **Docs:** every behavior change is updated in `docs/` in the same change (again `AGENTS.md`).  
+- Expenses from Plaid/API are **negated** when saved.  
+- Upsert by `transactionId`, never blind-replace the whole DB on Sync.  
 - Widget and app share **analytics** helpers so filters stay consistent.  
 
 ### Suggested reading order (if you’re learning the app)
 
 1. `FinanceWizard/App/FinanceWizardApp.swift` — how the app starts  
-2. `Shared/Models/Transaction.swift` + `Shared/Store/SharedStore.swift` — data + totals  
-3. `FinanceWizard/App/ContentView.swift` — tabs and main list  
-4. `FinanceWizard/Plaid/PlaidSyncEngine.swift` — how bank data lands on disk  
-5. Any feature screen under `FinanceWizard/Features/`  
+2. `FinanceWizard/App/SplashScreenView.swift` + `Features/Onboarding/` — splash → Welcome or tabs  
+3. `Shared/Models/Transaction.swift` + `Shared/Store/SharedStore.swift` — data + totals  
+4. `FinanceWizard/App/ContentView.swift` — tabs and main list  
+5. `FinanceWizard/Plaid/PlaidSyncEngine.swift` — how bank data lands on disk  
+6. Any feature screen under `FinanceWizard/Features/`  
 
 ## Git
 
-Repo root is the Xcode project folder (contains `.xcodeproj`, `FinanceWizard/`, `Shared/`, `Widget/`, `docs/`).  
-GitHub remote for this project: `Finance-Wizard`.
+Repo root is the Xcode project folder (contains `.xcodeproj`, `FinanceWizard/`, `Shared/`, `Widget/`, `docs/`).
+
+| Remote | URL |
+|--------|-----|
+| **origin** (fetch) | `git@github.com:lavavex/Finance-Wizard.git` |
+| **origin** (push) | GitHub **and** Gitea (`git@gitea:roberth/Finance-Wizard.git`) |
+| **gitea** | `git@gitea:roberth/Finance-Wizard.git` |
+
+`gitea` is an SSH host alias in `~/.ssh/config` → `git@10.10.0.34` (port 22), key `~/.ssh/id_ed25519`. Add that public key under Gitea **Settings → SSH / GPG Keys**.
+
+`git push origin main` updates both hosts. `git push gitea main` is Gitea only. `git pull` still comes from GitHub.
+
+Create the empty repo on Gitea first (`roberth/Finance-Wizard`, no README) if it does not exist.
 
 Suggested ignore (see project `.gitignore`):
 
@@ -152,7 +166,7 @@ git remote add origin git@github.com:YOUR_USER/Finance-Wizard.git
 git push -u origin main
 ```
 
-See also: [GitHub Pages setup](github-pages.md).
+See also: [GitHub Pages setup](github-pages.md). Agent rules for this repo: [`AGENTS.md`](../AGENTS.md) (always update docs; run `xcodebuild` when you write Swift).
 
 ## Testing Sync (Sandbox)
 
@@ -167,7 +181,7 @@ SwiftUI `#Preview` uses in-memory `modelContainer` where possible so the canvas 
 
 ## Future extension ideas
 
-- Category budget alerts  
+- Category budget alerts / overspend push notifications  
 - Widget “trailing 30 days” period  
 - `mark-exported` if this app owns the queue  
 - Shared App Group settings for default period  

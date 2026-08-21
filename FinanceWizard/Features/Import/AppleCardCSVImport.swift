@@ -8,7 +8,7 @@
 //  Daily Cash %, Daily Cash Amount].
 //
 //  Upsert = update if a row with the same stable id exists, otherwise insert.
-//  That way re-importing the same CSV updates rows instead of duplicating them.
+//  Re-importing the same CSV updates rows instead of duplicating them.
 //
 
 import Foundation
@@ -16,7 +16,6 @@ import SwiftData
 import CryptoKit
 
 /// Errors thrown when the CSV cannot be imported (empty file, bad header, etc.).
-/// LocalizedError provides a user-facing message via localizedDescription.
 enum AppleCardCSVImportError: LocalizedError {
     case empty
     case noHeader
@@ -35,9 +34,7 @@ enum AppleCardCSVImportError: LocalizedError {
 }
 
 /// Counts of what the importer did — returned to the UI for a summary message.
-/// Sendable means it is safe to pass across concurrency domains (actors / async tasks).
 struct AppleCardCSVImportReport: Sendable {
-    // Default property values mean you can start with AppleCardCSVImportReport() and tally up.
     var purchases: Int = 0
     var payments: Int = 0
     var credits: Int = 0
@@ -55,19 +52,16 @@ struct AppleCardCSVImportReport: Sendable {
     }
 }
 
-/// Namespace for Apple Card CSV import helpers (static methods only; no instances).
+/// Apple Card CSV import helpers.
 enum AppleCardCSVImporter {
-    // Static constants shared by all import methods (payment method / institution labels).
     static let paymentMethod = AppleCardAccount.paymentMethod
     static let institutionName = AppleCardAccount.institutionName
 
     /// Upsert rows from Apple Card CSV into SwiftData.
-    /// data: raw file bytes; modelContext: SwiftData context to insert/update/save.
-    /// throws on empty/invalid CSV; returns a report of counts on success.
+    /// Throws on empty/invalid CSV; returns a report of counts on success.
     @MainActor
     static func importCSV(data: Data, modelContext: ModelContext) throws -> AppleCardCSVImportReport {
         // Try UTF-8 first, then Latin-1 (some exports use different encodings).
-        // ?? is nil-coalescing: use the right-hand side if the left is nil.
         guard let text = String(data: data, encoding: .utf8)
             ?? String(data: data, encoding: .isoLatin1),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -75,25 +69,21 @@ enum AppleCardCSVImporter {
         }
 
         let rows = CSVParser.parse(text)
-        // rows.first is the header line (column names).
         guard let header = rows.first else { throw AppleCardCSVImportError.noHeader }
         let map = columnMap(header)
-        // Need date, amount, and at least one of description or merchant to be useful.
+        // Need date, amount, and at least one of description or merchant.
         guard map.date != nil, map.amount != nil, map.description != nil || map.merchant != nil else {
             throw AppleCardCSVImportError.noRecognizedColumns
         }
 
         // Treat Apple Card as a linked credit account (not “Other spend”).
-        // _ = discards the return value when we only care about the side effect.
         _ = AppleCardAccount.ensureLinked(in: modelContext)
 
         var report = AppleCardCSVImportReport()
-        // dropFirst() skips the header so we only process data rows.
         let body = rows.dropFirst()
         guard !body.isEmpty else { throw AppleCardCSVImportError.noRows }
 
         for cols in body {
-            // apply returns false for rows it cannot parse → count as skipped.
             guard apply(cols: cols, map: map, modelContext: modelContext, report: &report) else {
                 report.skipped += 1
                 continue
@@ -110,7 +100,6 @@ enum AppleCardCSVImporter {
     // MARK: - Row apply
 
     /// Parses one CSV data row and upserts the right model(s). Returns false if the row is unusable.
-    /// report is inout so this function can increment counters on the caller’s report.
     @MainActor
     private static func apply(
         cols: [String],
@@ -118,7 +107,6 @@ enum AppleCardCSVImporter {
         modelContext: ModelContext,
         report: inout AppleCardCSVImportReport
     ) -> Bool {
-        // Nested helper: safely read column index idx from cols, or "" if missing/out of range.
         func col(_ idx: Int?) -> String {
             guard let idx, idx < cols.count else { return "" }
             return cols[idx].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -138,7 +126,6 @@ enum AppleCardCSVImporter {
 
         let merchant = col(map.merchant)
         let description = col(map.description)
-        // Prefer merchant name as the display title; fall back to description then a default.
         let title = merchant.isEmpty ? (description.isEmpty ? "Apple Card" : description) : merchant
         let appleCategory = col(map.category)
         let typeRaw = col(map.type).lowercased()
@@ -155,7 +142,7 @@ enum AppleCardCSVImporter {
 
         switch type {
         case .payment:
-            // Card payment: record both a CreditCardPayment and a negative “expense” for the ledger.
+            // Card payment: record both a CreditCardPayment and a negative expense for the ledger.
             upsertPayment(
                 id: stableId,
                 title: title.isEmpty ? "Apple Card Payment" : title,
@@ -166,7 +153,7 @@ enum AppleCardCSVImporter {
             upsertExpense(
                 id: stableId,
                 title: title.isEmpty ? "Apple Card Payment" : title,
-                // Negative amount convention: money leaving the card / reducing spend total.
+                // Negative amount: money leaving the card / reducing spend total.
                 amount: -abs(amountAbs),
                 date: date,
                 category: TransactionAnalytics.creditCardPaymentCategory,
@@ -180,7 +167,7 @@ enum AppleCardCSVImporter {
             report.payments += 1
 
         case .credit:
-            // Refund / statement credit — store as income so it doesn’t inflate spend
+            // Refund / statement credit — store as income so it doesn’t inflate spend.
             upsertIncome(
                 id: stableId,
                 source: title,
@@ -189,7 +176,7 @@ enum AppleCardCSVImporter {
                 category: "Refund",
                 modelContext: modelContext
             )
-            // Remove any prior expense mis-import
+            // Remove any prior expense mis-import.
             deleteExpense(id: stableId, modelContext: modelContext)
             report.credits += 1
 
@@ -241,11 +228,10 @@ enum AppleCardCSVImporter {
         if t.contains("payment") { return .payment }
         if t.contains("credit") || t.contains("refund") || t.contains("return") { return .credit }
         if t.contains("purchase") || t.contains("fee") || t.contains("interest") { return .purchase }
-        // Heuristic when Type column missing
+        // Heuristic when Type column missing.
         if lower.contains("payment") && lower.contains("apple") { return .payment }
         if lower.contains("ach deposit") || lower.contains("refund") { return .credit }
-        // Default: spend
-        // _ = amount silences “unused parameter” while keeping amount in the signature for future use.
+        // Default: spend. `amount` kept in the signature for future heuristics.
         _ = amount
         return .purchase
     }
@@ -254,7 +240,6 @@ enum AppleCardCSVImporter {
     private static func mapAppleCategory(_ apple: String) -> String {
         let c = apple.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if c.isEmpty { return KnownCategory.miscellaneous.rawValue }
-        // contains checks substrings so “Rideshare” / “Taxi” both map to transit.
         if c.contains("parking") || c.contains("transit") || c.contains("rideshare") || c.contains("taxi") {
             return KnownCategory.transit.rawValue
         }
@@ -303,7 +288,7 @@ enum AppleCardCSVImporter {
         }
         if c.contains("payment") { return TransactionAnalytics.creditCardPaymentCategory }
         if c.contains("other") { return KnownCategory.miscellaneous.rawValue }
-        // Prefer a known category; otherwise Miscellaneous (avoid free-form Apple labels drifting)
+        // Prefer a known category; otherwise Miscellaneous (avoid free-form Apple labels drifting).
         if let known = KnownCategory.canonicalName(for: apple) {
             return known
         }
@@ -329,13 +314,11 @@ enum AppleCardCSVImporter {
         paymentRail: String,
         modelContext: ModelContext
     ) {
-        // #Predicate is a compile-checked filter for SwiftData queries.
         var descriptor = FetchDescriptor<Transaction>(
             predicate: #Predicate<Transaction> { row in
                 row.transactionId == id
             }
         )
-        // fetchLimit = 1: we only need the first match for upsert.
         descriptor.fetchLimit = 1
         if let existing = try? modelContext.fetch(descriptor).first {
             existing.title = title
@@ -357,7 +340,6 @@ enum AppleCardCSVImporter {
             }
             existing.plaidPaymentChannel = "other"
         } else {
-            // insert adds a new model instance that will be saved with the context.
             modelContext.insert(
                 Transaction(
                     transactionId: id,
@@ -491,7 +473,6 @@ enum AppleCardCSVImporter {
     // MARK: - Columns
 
     /// Maps logical fields (date, amount, …) to zero-based column indexes in the CSV header.
-    /// Optional Int? is nil when that column wasn’t found.
     private struct ColumnMap {
         var date: Int?
         var amount: Int?
@@ -504,10 +485,9 @@ enum AppleCardCSVImporter {
     /// Scans header cells and fills ColumnMap by matching common Apple Card / export names.
     private static func columnMap(_ header: [String]) -> ColumnMap {
         var map = ColumnMap()
-        // enumerated() yields (index, value) pairs for each header cell.
         for (i, raw) in header.enumerated() {
             let h = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            // First matching name wins for each field (map.x == nil means not set yet).
+            // First matching name wins for each field.
             if map.date == nil,
                h == "transaction date" || h == "date" || h == "purchase date"
                 || h == "trans date" || h.hasPrefix("transaction date") {
@@ -527,7 +507,7 @@ enum AppleCardCSVImporter {
                 map.type = i
             }
         }
-        // Prefer Transaction Date over Clearing Date if both present — already first match
+        // Prefer Transaction Date over Clearing Date if both present — already first match.
         return map
     }
 
@@ -549,7 +529,6 @@ enum AppleCardCSVImporter {
             formatter.dateFormat = f
             if let d = formatter.date(from: trimmed) { return d }
         }
-        // ISO8601 with fractional seconds
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let d = iso.date(from: trimmed) { return d }
@@ -558,7 +537,7 @@ enum AppleCardCSVImporter {
     }
 
     /// Stable id so re-import updates instead of duplicating.
-    /// Hashes date+amount+title+type+description with SHA-256 (CryptoKit) and prefixes applecard:.
+    /// Hashes date+amount+title+type+description with SHA-256 and prefixes `applecard:`.
     private static func stableTransactionId(
         date: Date,
         amount: Double,
@@ -566,11 +545,11 @@ enum AppleCardCSVImporter {
         type: String,
         description: String
     ) -> String {
-        // startOfDay normalizes time so the same calendar day always hashes the same.
+        // startOfDay so the same calendar day always hashes the same.
         let day = ISO8601DateFormatter().string(from: Calendar.current.startOfDay(for: date))
         let raw = "\(day)|\(String(format: "%.2f", amount))|\(title)|\(type)|\(description)"
-        // SHA256.hash returns a digest; we take the first 16 bytes as hex for a short id.
         let digest = SHA256.hash(data: Data(raw.utf8))
+        // First 16 bytes of SHA-256 as hex — short stable id, not a full digest.
         let hex = digest.prefix(16).map { String(format: "%02x", $0) }.joined()
         return "applecard:\(hex)"
     }
@@ -586,9 +565,7 @@ enum CSVParser {
         var rows: [[String]] = []
         var row: [String] = []
         var field = ""
-        // inQuotes tracks whether we’re inside a "…" field (commas/newlines are literal there).
         var inQuotes = false
-        // Array(text) turns the String into [Character] for index-based scanning.
         let chars = Array(text)
         var i = 0
         while i < chars.count {
@@ -601,7 +578,6 @@ enum CSVParser {
                         i += 2
                         continue
                     }
-                    // Closing quote ends the quoted field.
                     inQuotes = false
                     i += 1
                     continue
@@ -610,7 +586,6 @@ enum CSVParser {
                 i += 1
                 continue
             }
-            // Outside quotes: comma = next field; newline = next row; quote = start quoted field.
             switch c {
             case "\"":
                 inQuotes = true
@@ -629,7 +604,7 @@ enum CSVParser {
                 row = []
                 i += 1
             case "\r":
-                // swallow; handle \r\n as one break
+                // Handle \r\n as one break.
                 if i + 1 < chars.count, chars[i + 1] == "\n" {
                     i += 1
                 }

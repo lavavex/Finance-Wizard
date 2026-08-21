@@ -10,9 +10,6 @@ import Foundation
 import SwiftData
 
 /// Cash account bucket for widgets / lists (Plaid depository subtypes).
-///
-/// Small enums like this keep UI labels, icons, and grouping logic in one place.
-/// String raw values + CaseIterable make pickers and switch statements easy.
 enum DepositoryKind: String, Sendable, CaseIterable, Identifiable {
     case checking
     case savings
@@ -28,7 +25,6 @@ enum DepositoryKind: String, Sendable, CaseIterable, Identifiable {
         }
     }
 
-    /// SF Symbol name for SwiftUI Image(systemName:).
     var systemImage: String {
         switch self {
         case .checking: return "building.columns.fill"
@@ -137,7 +133,6 @@ final class BankAccount {
     }
 
     /// Checking / savings / other cash (money market, prepaid, etc.).
-    /// Inspects subtype and name with simple string contains checks.
     var depositoryKind: DepositoryKind {
         let sub = (subtype ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let name = self.name.lowercased()
@@ -148,7 +143,6 @@ final class BankAccount {
         if sub.contains("money market") || sub.contains("cash management") || sub.contains("prepaid") {
             return .other
         }
-        // Plaid often uses exact subtype strings
         switch sub {
         case "checking", "paypal": return .checking
         case "savings", "cd", "hsa": return .savings
@@ -162,7 +156,6 @@ final class BankAccount {
     }
 
     /// Reward multiplier for a payment rail, if configured on this account.
-    /// switch on an enum is exhaustive: every PaymentRail case must be handled.
     func rewardMultiplier(for rail: PaymentRail) -> Double? {
         switch rail {
         case .debit: return debitRewardMultiplier
@@ -172,14 +165,12 @@ final class BankAccount {
     }
 
     /// 0…1 when limit known; nil otherwise.
-    /// min/max clamp utilization so bad data never goes outside 0–100%.
     var utilization: Double? {
         guard isCredit, let limit = creditLimit, limit > 0 else { return nil }
         return min(max(currentBalance / limit, 0), 1)
     }
 
     /// True when any liabilities payment/APR fields are present.
-    /// || short-circuits: first true stops evaluating the rest.
     var hasLiabilitiesDetails: Bool {
         minimumPaymentAmount != nil
             || nextPaymentDueDate != nil
@@ -262,7 +253,6 @@ final class BankAccount {
     func matchesPaymentMethod(_ method: String) -> Bool {
         let m = method.trimmingCharacters(in: .whitespacesAndNewlines)
         let plaid = plaidDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        // caseInsensitiveCompare returns ComparisonResult; .orderedSame means equal ignoring case.
         if m.caseInsensitiveCompare(plaid) == .orderedSame { return true }
         if m.caseInsensitiveCompare(name) == .orderedSame { return true }
         if let mask, !mask.isEmpty, m.contains(mask) { return true }
@@ -274,11 +264,8 @@ final class BankAccount {
     }
 
     /// Best BankAccount match for a payment method label among linked accounts.
-    /// static method: call as BankAccount.matching(paymentMethod:in:) without an instance.
     static func matching(paymentMethod: String, in accounts: [BankAccount]) -> BankAccount? {
-        // Prefer credit accounts with mask match, then any match
         let hits = accounts.filter { $0.matchesPaymentMethod(paymentMethod) }
-        // \.isCredit is a key path — shorthand for { $0.isCredit }
         if let credit = hits.first(where: \.isCredit) { return credit }
         return hits.first
     }

@@ -4,19 +4,11 @@
 //
 //  Compare spend to the monthly budget plan for a period.
 //
-//  Learning notes:
-//  - struct = a value type that groups related data (copied when passed around).
-//  - enum with only static methods = a namespace for helpers (no instances needed).
-//  - Computed properties (var with a body, no stored value) recalculate each time you read them.
-//  - Optional types (Double?) mean “maybe a number, maybe nil (missing).”
-//
 
 import Foundation
 
 /// Progress for one budget category in a period (spent vs optional limit).
-/// Identifiable: SwiftUI lists need a stable `id` so rows can animate and update correctly.
 struct BudgetCategoryProgress: Identifiable {
-    /// Protocol requirement: unique key for this row (here, the category name).
     var id: String { category }
     let category: String
     let spent: Double
@@ -25,7 +17,6 @@ struct BudgetCategoryProgress: Identifiable {
     let transactionCount: Int
 
     /// Dollars left under the limit. `nil` when there is no limit.
-    /// `guard let` unwraps an optional and early-returns if it is missing.
     var remaining: Double? {
         guard let limit else { return nil }
         return limit - spent
@@ -44,8 +35,7 @@ struct BudgetCategoryProgress: Identifiable {
     }
 }
 
-/// One frozen “picture” of budget health for a period (totals, income, per-category rows).
-/// Built by `BudgetAnalytics.snapshot` so UI does not re-run heavy math in every view body.
+/// Frozen budget health for a period (totals, income, per-category rows).
 struct BudgetSnapshot {
     let period: SnapshotPeriod
     let referenceDate: Date
@@ -94,8 +84,6 @@ struct BudgetSnapshot {
     }
 
     /// Sum of category limits (for display).
-    /// compactMap(\.limit) keeps only non-nil limits; reduce(0, +) adds them starting at 0.
-    /// The `\.limit` syntax is a key path: “read the `limit` property of each element.”
     var sumOfCategoryLimits: Double {
         categories.compactMap(\.limit).reduce(0, +)
     }
@@ -104,7 +92,6 @@ struct BudgetSnapshot {
 /// Pure analytics helpers for budgets (no UI). Call `snapshot` to build a `BudgetSnapshot`.
 enum BudgetAnalytics {
     /// Builds a full budget picture: period spend, category progress, income vs plan.
-    /// Default parameter values (`period:`, `referenceDate:`) apply when callers omit them.
     static func snapshot(
         plan: BudgetPlan,
         transactions: [Transaction],
@@ -112,44 +99,34 @@ enum BudgetAnalytics {
         period: SnapshotPeriod = .month,
         referenceDate: Date = Date()
     ) -> BudgetSnapshot {
-        // One shared pass over transactions for totals + spend rows (see PeriodSpendIndex).
         let spendIndex = PeriodSpendIndex.build(
             transactions: transactions,
             period: period,
             referenceDate: referenceDate
         )
-        // Group spend by category name into summary rows.
         let categorySpend = TransactionAnalytics.categorySummaries(
             from: spendIndex.spendTransactions,
             categoryLimit: nil
         )
-        // Dictionary maps category name → summary for O(1) lookups later.
-        // map transforms each summary into a (key, value) pair for the dictionary.
         let spentByCategory = Dictionary(
             uniqueKeysWithValues: categorySpend.map { ($0.category, $0) }
         )
 
-        // Rows for every category that has a limit and/or spend this period
         var keys = Set(spentByCategory.keys)
-        // where limit > 0: only real caps count toward “budgeted” categories
         for (cat, limit) in plan.categoryLimits where limit > 0 {
             keys.insert(KnownCategory.canonicalName(for: cat) ?? cat)
         }
-        // Prefer Budget picker order, then any free-form leftovers A–Z
         let knownOrder = KnownCategory.budgetPickerNames
-        // filter keeps names that are in keys; + concatenates two arrays
         let ordered = knownOrder.filter { keys.contains($0) }
             + keys.subtracting(Set(knownOrder)).sorted()
 
         var categories: [BudgetCategoryProgress] = []
         var budgetedSpend = 0.0
         for cat in ordered {
-            // Optional chaining: summary?.spent is nil if the category is missing
             let summary = spentByCategory[cat]
             let spent = summary?.spent ?? 0
             let limit = plan.limit(forCategory: cat)
             if limit != nil { budgetedSpend += spent }
-            // Skip zero-spend categories with no limit
             if spent < 0.005, limit == nil { continue }
             categories.append(
                 BudgetCategoryProgress(
@@ -161,8 +138,6 @@ enum BudgetAnalytics {
             )
         }
 
-        // Categories with limits first (over budget on top), then unbudgeted by spend
-        // Trailing closure: sort { a, b in … } is the comparison function.
         categories.sort { a, b in
             let aHas = a.limit != nil
             let bHas = b.limit != nil
@@ -172,19 +147,16 @@ enum BudgetAnalytics {
         }
 
         let totalSpent = spendIndex.totalSpend
-        // max(0, …) clamps so we never show negative unbudgeted spend
         let unbudgeted = max(0, totalSpent - budgetedSpend)
         let income = IncomeAnalytics.totalEarned(
             in: IncomeAnalytics.inPeriod(incomeRows, period: period, referenceDate: referenceDate)
         )
 
         let streams = plan.expectedIncomeStreams
-        // reduce walks the array, accumulating a running total ($0 is so far, $1 is next item)
         let expectedInPeriod = streams.reduce(0.0) {
             $0 + $1.expectedAmount(in: period, referenceDate: referenceDate)
         }
         let expectedMonthly = plan.expectedMonthlyIncome
-        // compactMap drops nil next-dates; min() picks the earliest Date among remaining
         let nextPayday = streams
             .compactMap { $0.nextDate(from: Date()) }
             .min()
@@ -194,7 +166,6 @@ enum BudgetAnalytics {
             referenceDate: referenceDate,
             periodLabel: period.filterLabel(referenceDate: referenceDate),
             totalSpent: totalSpent,
-            // Immediately-invoked closure: run a small block to produce monthlyLimit
             monthlyLimit: {
                 guard let m = plan.monthlyLimit, m > 0 else { return nil }
                 return m

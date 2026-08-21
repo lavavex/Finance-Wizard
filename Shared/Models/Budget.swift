@@ -4,11 +4,6 @@
 //
 //  Monthly budgeting: overall cap, per-category limits, expected income streams.
 //
-//  This file mixes three Swift building blocks:
-//  1) enum  — a fixed set of choices (daily / weekly / monthly)
-//  2) struct — a lightweight value type for one planned income stream
-//  3) @Model class — a single BudgetPlan row saved with SwiftData
-//
 
 import Foundation
 import SwiftData
@@ -16,22 +11,13 @@ import SwiftData
 // MARK: - Expected income
 
 /// How often a planned income hits.
-///
-/// Swift teaching:
-/// • enum with a raw type of String (RawValue) so each case maps to "daily", etc.
-/// • CaseIterable gives you `.allCases` for pickers.
-/// • Identifiable needs `id` so SwiftUI ForEach can track rows.
-/// • Codable lets JSONEncoder/Decoder turn this into JSON and back.
-/// • Sendable means it is safe to pass across concurrency domains (actors/tasks).
 enum ExpectedIncomeFrequency: String, CaseIterable, Identifiable, Codable, Sendable {
     case daily
     case weekly
     case monthly
 
-    // For String raw-value enums, rawValue is the case name by default ("daily").
     var id: String { rawValue }
 
-    /// User-facing label (capitalized) for menus and forms.
     var displayName: String {
         switch self {
         case .daily: return "Daily"
@@ -50,10 +36,7 @@ enum ExpectedIncomeFrequency: String, CaseIterable, Identifiable, Codable, Senda
     }
 }
 
-/// One planned income source (paycheck, side hustle, etc.).
-///
-/// struct (value type): assigning or passing a struct copies its data.
-/// That is ideal for small Codable blobs stored as JSON on BudgetPlan.
+/// One planned income source (paycheck, side hustle, etc.). Stored as JSON on BudgetPlan.
 struct ExpectedIncomeStream: Identifiable, Codable, Hashable, Sendable {
     var id: String
     /// User label, e.g. "Payroll", "Venmo clients".
@@ -66,7 +49,6 @@ struct ExpectedIncomeStream: Identifiable, Codable, Hashable, Sendable {
     /// Monthly: day of month 1…31 (clamped to month length when scheduling).
     var dayOfMonth: Int?
 
-    // UUID().uuidString makes a random unique id when the caller does not supply one.
     init(
         id: String = UUID().uuidString,
         label: String = "Income",
@@ -94,7 +76,6 @@ struct ExpectedIncomeStream: Identifiable, Codable, Hashable, Sendable {
         case .daily:
             return "Every day"
         case .weekly:
-            // if let weekday, let name = … unwraps two optionals in one line.
             if let weekday, let name = Self.weekdayName(weekday) {
                 return "Weekly on \(name)"
             }
@@ -108,7 +89,6 @@ struct ExpectedIncomeStream: Identifiable, Codable, Hashable, Sendable {
     }
 
     /// Next expected pay date on or after `from` (calendar local).
-    /// Nested function dateIn(year:month:) exists only inside this method.
     func nextDate(from: Date = Date(), calendar: Calendar = .current) -> Date? {
         let start = calendar.startOfDay(for: from)
         switch frequency {
@@ -159,14 +139,12 @@ struct ExpectedIncomeStream: Identifiable, Codable, Hashable, Sendable {
             calendar: calendar
         )
         guard let range else {
-            // Fallback: scale monthly estimate by period length when interval missing
             return estimatedMonthly
         }
         let start = calendar.startOfDay(for: range.start)
         let endExclusive = range.end
         var total = 0.0
         var cursor = start
-        // Safety: cap iterations
         var safety = 0
         while cursor < endExclusive, safety < 400 {
             safety += 1
@@ -175,16 +153,13 @@ struct ExpectedIncomeStream: Identifiable, Codable, Hashable, Sendable {
             if next >= start {
                 total += max(0, amount)
             }
-            // Advance past this hit
             guard let advanced = calendar.date(byAdding: .day, value: 1, to: next) else { break }
             cursor = advanced
         }
         return total
     }
 
-    // private static = helper only this type can call, no instance needed.
     private static func weekdayName(_ weekday: Int) -> String? {
-        // Calendar weekday: 1 = Sunday … 7 = Saturday
         let symbols = Calendar.current.weekdaySymbols
         guard weekday >= 1, weekday <= symbols.count else { return nil }
         return symbols[weekday - 1]
@@ -206,10 +181,7 @@ struct ExpectedIncomeStream: Identifiable, Codable, Hashable, Sendable {
 // MARK: - Plan model
 
 /// Singleton-style plan (one row). Category caps + expected income in JSON blobs.
-///
-/// Why JSON blobs? SwiftData stores simple property types easily. Dictionaries and
-/// arrays of custom structs are encoded to Data (binary/JSON bytes) so one column
-/// can hold a whole map of category limits or a list of income streams.
+/// SwiftData stores simple types easily; dictionaries and custom structs are encoded as Data.
 @Model
 final class BudgetPlan {
     /// Stable key so we always load the same plan.
@@ -240,8 +212,6 @@ final class BudgetPlan {
         self.updatedAt = updatedAt
     }
 
-    // Computed property with get and set: reading decodes JSON; writing encodes
-    // and also stamps updatedAt. Callers use a normal dictionary API.
     var categoryLimits: [String: Double] {
         get { Self.decodeLimits(categoryLimitsJSON) }
         set {
@@ -259,7 +229,6 @@ final class BudgetPlan {
     }
 
     /// Sum of estimated monthly income across all streams.
-    /// reduce(0) { $0 + $1… } folds the array into one total.
     var expectedMonthlyIncome: Double {
         expectedIncomeStreams.reduce(0) { $0 + $1.estimatedMonthly }
     }
@@ -268,7 +237,6 @@ final class BudgetPlan {
     func limit(forCategory category: String) -> Double? {
         let key = category.trimmingCharacters(in: .whitespacesAndNewlines)
         if let v = categoryLimits[key], v > 0 { return v }
-        // Case-insensitive match
         if let hit = categoryLimits.first(where: {
             $0.key.caseInsensitiveCompare(key) == .orderedSame
         }), hit.value > 0 {
@@ -285,13 +253,11 @@ final class BudgetPlan {
             map[key] = amount
         } else {
             map.removeValue(forKey: key)
-            // Also drop any case variants
             map = map.filter { $0.key.caseInsensitiveCompare(key) != .orderedSame }
         }
         categoryLimits = map
     }
 
-    /// Insert or replace a stream by id (upsert = update or insert).
     func upsertExpectedIncome(_ stream: ExpectedIncomeStream) {
         var list = expectedIncomeStreams
         if let idx = list.firstIndex(where: { $0.id == stream.id }) {
@@ -306,7 +272,6 @@ final class BudgetPlan {
         expectedIncomeStreams = expectedIncomeStreams.filter { $0.id != id }
     }
 
-    // try? means “if encoding throws, return nil instead of crashing.”
     private static func encodeLimits(_ map: [String: Double]) -> Data? {
         try? JSONEncoder().encode(map)
     }
@@ -338,9 +303,6 @@ final class BudgetPlan {
 enum BudgetStore {
     static let defaultPlanId = "default"
 
-    // @MainActor: run on the main thread (UI / ModelContext safety).
-    // ModelContext is SwiftData’s “session” for fetch / insert / save.
-    // #Predicate builds a type-safe filter at compile time.
     @MainActor
     static func loadOrCreate(in modelContext: ModelContext) -> BudgetPlan {
         let id = defaultPlanId
