@@ -2,18 +2,18 @@
 //  PlaidEnvironment.swift
 //  Finance Wizard
 //
-//  Which Plaid API host to call (sandbox / development / production).
+//  Which Plaid API host to call (sandbox or production).
+//  Plaid retired the old “Development” host; stored values map to Sandbox.
 //
 
 import Foundation
 
 /// Which Plaid backend this app talks to.
 ///
-/// Plaid issues separate API secrets per environment in their dashboard.
-/// Sandbox is for fake test banks; production is real user bank data.
+/// Plaid issues a separate API secret per environment in the dashboard.
+/// Sandbox is fake test banks; Production is real bank data (needs Plaid Production access).
 enum PlaidEnvironment: String, CaseIterable, Identifiable, Codable, Sendable {
     case sandbox
-    case development
     case production
 
     var id: String { rawValue }
@@ -22,7 +22,6 @@ enum PlaidEnvironment: String, CaseIterable, Identifiable, Codable, Sendable {
     var displayName: String {
         switch self {
         case .sandbox: return "Sandbox (test banks)"
-        case .development: return "Development"
         case .production: return "Production"
         }
     }
@@ -32,10 +31,15 @@ enum PlaidEnvironment: String, CaseIterable, Identifiable, Codable, Sendable {
         switch self {
         case .sandbox:
             return URL(string: "https://sandbox.plaid.com")!
-        case .development:
-            return URL(string: "https://development.plaid.com")!
         case .production:
             return URL(string: "https://production.plaid.com")!
         }
+    }
+
+    /// Decode Settings / backup strings. Unknown or retired `development` → Sandbox.
+    static func fromStored(_ raw: String?) -> PlaidEnvironment {
+        let value = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value == "production" { return .production }
+        return .sandbox
     }
 }

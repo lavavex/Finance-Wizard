@@ -65,11 +65,16 @@ enum PlaidCredentialsStore {
 
     // MARK: - Environment
 
-    /// Which Plaid host to call (sandbox / development / production).
+    /// Which Plaid host to call (sandbox or production).
     static var environment: PlaidEnvironment {
         get {
-            let raw = UserDefaults.standard.string(forKey: environmentKey) ?? PlaidEnvironment.sandbox.rawValue
-            return PlaidEnvironment(rawValue: raw) ?? .sandbox
+            let raw = UserDefaults.standard.string(forKey: environmentKey)
+            let env = PlaidEnvironment.fromStored(raw)
+            // Retired Plaid “Development” host — persist Sandbox so the picker matches.
+            if raw?.lowercased() == "development" {
+                UserDefaults.standard.set(env.rawValue, forKey: environmentKey)
+            }
+            return env
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: environmentKey)

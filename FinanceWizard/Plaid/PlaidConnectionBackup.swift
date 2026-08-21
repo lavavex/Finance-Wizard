@@ -631,8 +631,8 @@ private extension PlaidConnectionBackup {
                 wrote = true
             }
             // Environment only when credentials were incomplete before restore.
-            if wrote, let env = PlaidEnvironment(rawValue: creds.environment) {
-                PlaidCredentialsStore.environment = env
+            if wrote {
+                PlaidCredentialsStore.environment = PlaidEnvironment.fromStored(creds.environment)
             }
             if !PlaidCredentialsStore.hasCustomRedirectURI, !creds.redirectURIOverride.isEmpty {
                 PlaidCredentialsStore.redirectURI = creds.redirectURIOverride
@@ -648,9 +648,7 @@ private extension PlaidConnectionBackup {
             if !creds.secret.isEmpty {
                 PlaidCredentialsStore.secret = creds.secret
             }
-            if let env = PlaidEnvironment(rawValue: creds.environment) {
-                PlaidCredentialsStore.environment = env
-            }
+            PlaidCredentialsStore.environment = PlaidEnvironment.fromStored(creds.environment)
             PlaidCredentialsStore.redirectURI = creds.redirectURIOverride
             PlaidCredentialsStore.clearLegacyLocalhostRedirectIfNeeded()
             return CredApplyResult(written: true, skipped: false)
