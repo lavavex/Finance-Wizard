@@ -4,9 +4,6 @@
   <h1>Finance Wizard</h1>
 
   <img alt="iOS 26+" src="https://img.shields.io/badge/iOS-26+-black">
-  <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-Native-orange">
-  <img alt="Plaid" src="https://img.shields.io/badge/Plaid-Your%20keys-9962be">
-  <img alt="On device" src="https://img.shields.io/badge/Data-On%20your%20iPhone-2ea44f">
 </div>
 
 <p align="center">
@@ -21,7 +18,7 @@
 Use the TestFlight build to try new features and report bugs before a public App Store release. Public beta is coming soon — the join link will live in the [getting started](docs/user/getting-started.md) guide.
 
 <a href="docs/user/getting-started.md">
-  <img height="72" alt="Get the beta on TestFlight" src="Resources/testflight-badge.svg">
+  <img width="80" height="80" alt="TestFlight" src="Resources/TestFlight.png">
 </a>
 
 ## What you get
