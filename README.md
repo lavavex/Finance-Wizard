@@ -8,15 +8,14 @@ Wiki in **[`docs/`](docs/index.md)** (GitHub Pages source).
 
 | Topic | Doc |
 |-------|-----|
-| Setup | [docs/getting-started.md](docs/getting-started.md) |
-| Onboarding | [docs/onboarding.md](docs/onboarding.md) |
-| Architecture | [docs/architecture.md](docs/architecture.md) |
-| Features | [docs/app-features.md](docs/app-features.md) |
-| Settings / Debug | [docs/settings.md](docs/settings.md) |
-| Sync & Plaid | [docs/sync-and-api.md](docs/sync-and-api.md) |
-| Widget | [docs/widget.md](docs/widget.md) |
-| Troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
-| Enable GitHub Pages | [docs/github-pages.md](docs/github-pages.md) |
+| **User** | [docs/user/](docs/user/index.md) |
+| Getting started (TestFlight) | [docs/user/getting-started.md](docs/user/getting-started.md) |
+| Using the app | [docs/user/using-the-app.md](docs/user/using-the-app.md) |
+| **Developer** | [docs/dev/](docs/dev/index.md) |
+| Development (Xcode) | [docs/dev/development.md](docs/dev/development.md) |
+| Architecture | [docs/dev/architecture.md](docs/dev/architecture.md) |
+| Sync & Plaid | [docs/dev/sync-and-api.md](docs/dev/sync-and-api.md) |
+| Publishing the wiki | [docs/dev/github-pages.md](docs/dev/github-pages.md) |
 
 Agent rules (docs + test builds): [`AGENTS.md`](AGENTS.md).
 
@@ -25,16 +24,9 @@ URL is typically `https://<user>.github.io/Finance-Wizard/` (`baseurl` in `docs/
 
 ## Quick start
 
-1. Open `FinanceWizard.xcodeproj` in Xcode 26+.  
-2. Sign **FinanceWizard** and **WidgetExtension** with the same team.  
-3. App Group `group.net.roberth.FinanceWizard` on both targets.  
-4. Run scheme **FinanceWizard**. First launch: splash → **Welcome** → **Get Started**.  
-5. **Settings** → Plaid `client_id` + secret (Sandbox) → **Save**.  
-6. **Link bank account** → **Transactions → Sync**.  
+**Testers:** [Getting started](docs/user/getting-started.md) — TestFlight → Welcome → Plaid keys → Link bank → Sync.
 
-Replay Welcome: **Settings → Developer → Debug → Replay onboarding**.
-
-Bundle IDs `net.roberth.FinanceWizard` / `.Widget`.
+**Developers:** [Development](docs/dev/development.md) — Xcode 26+, same team on app + widget, App Group `group.net.roberth.FinanceWizard`.
 
 ## Layout
 
@@ -42,7 +34,8 @@ Bundle IDs `net.roberth.FinanceWizard` / `.Widget`.
 FinanceWizard/     App UI, Features/, Plaid/
 Shared/            SwiftData, analytics (app + widget)
 Widget/            Total Spend, Category Spend, Balances
-docs/              Wiki
+docs/user/         Tester / TestFlight guides
+docs/dev/          Contributor / Xcode guides
 AGENTS.md          Coding-agent rules
 ```
 

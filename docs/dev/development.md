@@ -32,6 +32,40 @@ Docs: [Foundation Models](https://developer.apple.com/documentation/foundationmo
 
 Simulator: Apple Intelligence / Foundation Models support depends on host Mac + OS; prefer a supported physical device if the model reports unavailable.
 
+Testers installing from TestFlight should use [Getting started](../user/getting-started.md), not this page.
+
+## Building from source
+
+1. On a Mac, open **`FinanceWizard.xcodeproj`** (git root) with **Xcode 26+**.
+2. Select the **FinanceWizard** scheme (not only the widget extension).
+3. Pick a simulator or a physical device running **iOS 26+**.
+
+### Signing
+
+1. **FinanceWizard** target → **Signing & Capabilities** → your **Team** (Personal Team is fine).
+2. Repeat for **WidgetExtension** (same team).
+3. Bundle IDs: app `net.roberth.FinanceWizard`, widget `net.roberth.FinanceWizard.Widget`.
+
+### App Groups (required)
+
+Both targets must enable:
+
+```text
+group.net.roberth.FinanceWizard
+```
+
+Entitlements: `FinanceWizard/FinanceWizard.entitlements`, `WidgetExtension.entitlements`. Without the shared group, widgets cannot see transactions the app saves.
+
+### Shared code
+
+| Folder | Role |
+|--------|------|
+| `Shared/` | SwiftData models, store, analytics (app **and** widget) |
+| `FinanceWizard/` | App UI + Plaid client |
+| `Widget/` | WidgetKit extension |
+
+Folders are file-system synced — new `.swift` files join the target automatically.
+
 ## Opening & building
 
 ```bash
@@ -115,7 +149,7 @@ App Store Connect → your app → **Xcode Cloud** → workflow → **Environmen
 | Institution logos | `Shared/Branding/` |
 | Widget UI | `Widget/Widgets/` |
 | Widget bundle + config intents | `Widget/` (root) |
-| Docs wiki | `docs/` |
+| Docs wiki | `docs/user/` (testers), `docs/dev/` (contributors) |
 
 Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synced** — new `.swift` files join the target automatically. Keep shared types in `Shared/` so app and widget stay aligned.
 
@@ -140,17 +174,17 @@ Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synce
 
 Repo root is the Xcode project folder (contains `.xcodeproj`, `FinanceWizard/`, `Shared/`, `Widget/`, `docs/`).
 
-| Remote | URL |
-|--------|-----|
-| **origin** (fetch) | `git@github.com:lavavex/Finance-Wizard.git` |
-| **origin** (push) | GitHub **and** Gitea (`git@gitea:roberth/Finance-Wizard.git`) |
-| **gitea** | `git@gitea:roberth/Finance-Wizard.git` |
+| Remote | URL | Role |
+|--------|-----|------|
+| **origin** | `git@gitea:roberth/Finance-Wizard.git` | Fetch **and** push. This is the only place we commit/push. |
+| **github** | `git@github.com:lavavex/Finance-Wizard.git` | Fetch only. Gitea mirrors to GitHub — do not push here. |
 
-`gitea` is an SSH host alias in `~/.ssh/config` → `git@10.10.0.34` (port 22), key `~/.ssh/id_ed25519`. Add that public key under Gitea **Settings → SSH / GPG Keys**.
+`gitea` in `~/.ssh/config` is `git@10.10.0.34` (port 22), key `~/.ssh/id_ed25519`.
 
-`git push origin main` updates both hosts. `git push gitea main` is Gitea only. `git pull` still comes from GitHub.
-
-Create the empty repo on Gitea first (`roberth/Finance-Wizard`, no README) if it does not exist.
+```bash
+git push origin main    # Gitea; GitHub updates via Gitea’s mirror
+git pull                # from Gitea
+```
 
 Suggested ignore (see project `.gitignore`):
 
@@ -166,7 +200,7 @@ git remote add origin git@github.com:YOUR_USER/Finance-Wizard.git
 git push -u origin main
 ```
 
-See also: [GitHub Pages setup](github-pages.md). Agent rules for this repo: [`AGENTS.md`](../AGENTS.md) (always update docs; run `xcodebuild` when you write Swift).
+See also: [GitHub Pages setup](github-pages.md). Agent rules for this repo: [`AGENTS.md`](../../AGENTS.md) (always update docs; run `xcodebuild` when you write Swift).
 
 ## Testing Sync (Sandbox)
 
