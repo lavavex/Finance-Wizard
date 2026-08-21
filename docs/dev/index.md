@@ -9,7 +9,7 @@ Guides for building, debugging, and changing Finance Wizard.
 
 | Page | What it covers |
 |------|----------------|
-| [Development](development.md) | Xcode, signing, App Groups, git (push Gitea only) |
+| [Development](development.md) | Xcode, signing, App Groups, GitHub forks / PRs |
 | [Architecture](architecture.md) | Targets, folders, launch tree, data flow |
 | [Onboarding](onboarding.md) | Splash, Welcome gate, completed flag |
 | [Data model](data-model.md) | SwiftData, amounts, App Group store |

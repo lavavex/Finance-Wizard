@@ -69,13 +69,11 @@ Folders are file-system synced — new `.swift` files join the target automatica
 ## Opening & building
 
 ```bash
-# From git root
-# Prefer Xcode that ships the iOS 26+ SDK (beta is OK)
-open -a Xcode-beta FinanceWizard.xcodeproj
-# or: open FinanceWizard.xcodeproj
+# From git root (Xcode 26+ / iOS 26 SDK)
+open FinanceWizard.xcodeproj
 ```
 
-In Xcode: scheme **FinanceWizard** (Finance Wizard app) → Run (⌘R).
+In Xcode: scheme **FinanceWizard** (the app, not only the widget) → Run (⌘R).
 
 ## Version & build numbers (local ↔ Xcode Cloud)
 
@@ -172,35 +170,27 @@ Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synce
 
 ## Git
 
-Repo root is the Xcode project folder (contains `.xcodeproj`, `FinanceWizard/`, `Shared/`, `Widget/`, `docs/`).
+Repo root is the folder that contains `.xcodeproj`, `FinanceWizard/`, `Shared/`, `Widget/`, and `docs/`.
 
-| Remote | URL | Role |
-|--------|-----|------|
-| **origin** | `git@gitea:roberth/Finance-Wizard.git` | Fetch **and** push. This is the only place we commit/push. |
-| **github** | `git@github.com:lavavex/Finance-Wizard.git` | Fetch only. Gitea mirrors to GitHub — do not push here. |
+**Public repo:** [github.com/lavavex/Finance-Wizard](https://github.com/lavavex/Finance-Wizard)
 
-`gitea` in `~/.ssh/config` is `git@10.10.0.34` (port 22), key `~/.ssh/id_ed25519`.
+### Contributors
 
-```bash
-git push origin main    # Gitea; GitHub updates via Gitea’s mirror
-git pull                # from Gitea
-```
-
-Suggested ignore (see project `.gitignore`):
-
-- `xcuserdata/`  
-- `DerivedData/`  
-- `.DS_Store`  
-
-### SSH remote (private repo)
+1. Fork on GitHub (or clone the public repo if you have write access).
+2. Use **your** GitHub remote as `origin`. Add `upstream` if you forked:
 
 ```bash
-# After creating empty private repo on GitHub:
-git remote add origin git@github.com:YOUR_USER/Finance-Wizard.git
-git push -u origin main
+git clone git@github.com:YOUR_USER/Finance-Wizard.git
+cd Finance-Wizard
+git remote add upstream git@github.com:lavavex/Finance-Wizard.git
 ```
 
-See also: [GitHub Pages setup](github-pages.md). Agent rules for this repo: [`AGENTS.md`](../../AGENTS.md) (always update docs; run `xcodebuild` when you write Swift).
+3. Branch, commit, `git push origin your-branch`, open a pull request against **`lavavex/Finance-Wizard`**.
+4. Do not put LAN git hosts, personal SSH keys, or machine Xcode paths in committed docs. Those belong in **`docs/local/`** (gitignored except `docs/local/README.md`).
+
+Typical ignore (see `.gitignore`): `xcuserdata/`, `DerivedData/`, `.DS_Store`, `docs/local/*` (except the README).
+
+See also: [GitHub Pages](github-pages.md). Agent rules: [`AGENTS.md`](../../AGENTS.md).
 
 ## Testing Sync (Sandbox)
 

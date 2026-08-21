@@ -21,3 +21,7 @@ workers/**/dist/
 
 # Local/CI build stamp from set-build-number.sh
 ci_scripts/.last_build_number
+
+# Maintainer-only notes (machine paths, Gitea remotes, SSH). Tracked: docs/local/README.md
+docs/local/*
+!docs/local/README.md
