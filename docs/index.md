@@ -42,4 +42,4 @@ For people building, debugging, or changing the code.
 
 ## License / privacy
 
-Personal project. You supply Plaid keys. Bank passwords stay inside Plaid Link. Access tokens and the API secret stay on device.
+[MIT](../LICENSE). You supply Plaid keys. Bank passwords stay inside Plaid Link. Access tokens and the API secret stay on device.
