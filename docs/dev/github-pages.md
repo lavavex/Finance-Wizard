@@ -63,7 +63,7 @@ Or simply open the Markdown files in the browser/IDE; structure is normal Markdo
 
 ## 6. Navigation
 
-Every page links from [Home](index.md). Relative links work in GitHub’s file browser and on Pages when `baseurl` is correct.
+Every page links from [Home](../index.md). User guides live in `docs/user/`; contributor guides in `docs/dev/`. Relative links work in GitHub’s file browser and on Pages when `baseurl` is correct.
 
 ## Wiki vs Pages
 

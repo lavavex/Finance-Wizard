@@ -5,7 +5,7 @@ title: Onboarding
 
 # Onboarding
 
-First launch shows a branded splash, then a single **Welcome** screen. **Get Started** opens the tab bar. There is no second onboarding page (bank linking stays in Settings / Transactions).
+First launch shows a branded splash, then a single **Welcome** screen. **Get Started** opens the tab bar. There is no second onboarding page (bank linking stays in Settings / Transactions). End-user install steps: [Getting started](../user/getting-started.md).
 
 ## Launch sequence
 
