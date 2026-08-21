@@ -11,13 +11,17 @@ Install and setup: [Getting started](getting-started.md). Building the app? [Dev
 
 ### “Add your Plaid client_id and secret”
 
-**Settings** → paste **client_id** and **secret** → pick **Environment** → **Save credentials**. The secret must match that environment (Sandbox secret with Sandbox).
+**Settings** → paste **client_id** and **secret** → pick **Sandbox** or **Production** → **Save credentials**. The secret must match that environment (Sandbox secret with Sandbox).
 
 ### Link closes immediately or never opens
 
 - Allow the browser sheet when iOS asks.
 - Save credentials again, then retry **Link bank account**.
 - Sandbox only works with a Sandbox secret.
+
+### “Link closed without linking a bank (or the session timed out)”
+
+Finish the bank login in the browser sheet and wait for it to return to the app. Don’t swipe the sheet away while you’re still on Plaid. Sandbox: search **First Platypus Bank**, username `user_good`, password `pass_good`. Then try **Link** again.
 
 ### Link finishes but nothing shows up
 

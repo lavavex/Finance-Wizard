@@ -159,12 +159,12 @@ struct PlaidLinkSheet: View {
             let controller = HostedLinkSessionController()
             sessionController = controller
 
-            // Race browser callback against token polling. When no https OAuth
-            // redirect is configured, Hosted Link may not bounce via
-            // financewizard:// — success is still visible on /link/token/get.
+            // Keep polling while the bank sheet is open. A 30s cap used to fire
+            // while the user was still typing Sandbox credentials.
             enum RaceEvent {
                 case browserClosed(callback: URL?)
                 case linkReady(PlaidAPIClient.LinkSuccessPayload)
+                case graceExpired
             }
 
             let success = try await withThrowingTaskGroup(of: RaceEvent.self) { group in
@@ -178,13 +178,14 @@ struct PlaidLinkSheet: View {
                 group.addTask {
                     let payload = try await PlaidAPIClient.waitForLinkSuccess(
                         linkToken: session.linkToken,
-                        maxAttempts: 60,
+                        maxAttempts: 1200,
                         delayNanoseconds: 500_000_000
                     )
                     return .linkReady(payload)
                 }
 
                 var ready: PlaidAPIClient.LinkSuccessPayload?
+                var userDismissedBrowser = false
                 for try await event in group {
                     switch event {
                     case .linkReady(let payload):
@@ -192,20 +193,25 @@ struct PlaidLinkSheet: View {
                         group.cancelAll()
                         await MainActor.run { controller.cancel() }
                     case .browserClosed(let callback):
-                        if callback != nil {
-                            // Custom-scheme completion fired — wait briefly for token
-                            group.cancelAll()
-                            ready = try await PlaidAPIClient.waitForLinkSuccess(
-                                linkToken: session.linkToken,
-                                maxAttempts: 12,
-                                delayNanoseconds: 400_000_000
-                            )
-                        } else {
-                            // User dismissed browser; stop polling
-                            group.cancelAll()
+                        userDismissedBrowser = (callback == nil)
+                        // Plaid may take a few seconds after the bounce to
+                        // publish public_token on /link/token/get.
+                        group.addTask {
+                            try await Task.sleep(for: .seconds(15))
+                            return .graceExpired
                         }
+                    case .graceExpired:
+                        group.cancelAll()
                     }
-                    break
+                    if ready != nil { break }
+                    if case .graceExpired = event { break }
+                }
+                if ready == nil, !userDismissedBrowser {
+                    throw PlaidAPIError.http(
+                        status: 0,
+                        code: nil,
+                        message: "Link closed without linking a bank (or the session timed out). Try Link again."
+                    )
                 }
                 return ready
             }
