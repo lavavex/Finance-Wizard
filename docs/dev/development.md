@@ -176,6 +176,13 @@ Repo root is the folder that contains `.xcodeproj`, `FinanceWizard/`, `Shared/`,
 
 **Public repo:** [github.com/lavavex/Finance-Wizard](https://github.com/lavavex/Finance-Wizard)
 
+### Branches
+
+| Branch | Role |
+|--------|------|
+| `dev` | Active development. Commit here. Open PRs here. |
+| `main` | Shipped code: TestFlight, GitHub Pages. Updated by merging `dev` when ready. |
+
 ### Contributors
 
 1. Fork on GitHub (or clone the public repo if you have write access).
@@ -187,7 +194,7 @@ cd Finance-Wizard
 git remote add upstream git@github.com:lavavex/Finance-Wizard.git
 ```
 
-3. Branch, commit, `git push origin your-branch`, open a pull request against **`lavavex/Finance-Wizard`**.
+3. Branch from **`dev`**, commit, `git push origin your-branch`, open a pull request against **`lavavex/Finance-Wizard`** targeting **`dev`**.
 4. Do not put LAN git hosts, personal SSH keys, or machine Xcode paths in committed docs. Those belong in **`docs/local/`** (gitignored except `docs/local/README.md`).
 
 Typical ignore (see `.gitignore`): `xcuserdata/`, `DerivedData/`, `.DS_Store`, `docs/local/*` (except the README).

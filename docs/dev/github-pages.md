@@ -5,7 +5,7 @@ title: Publishing this wiki (GitHub Pages)
 
 # Publishing this wiki (GitHub Pages)
 
-These files live in **`docs/`** on the main branch (`docs/user/` testers, `docs/dev/` contributors). GitHub can host them as a static site. Maintainer-only notes in **`docs/local/`** are gitignored (except `docs/local/README.md`).
+These files live in **`docs/`**. GitHub Pages deploys from **`main`** (`docs/user/` testers, `docs/dev/` contributors). Day-to-day edits happen on **`dev`** and show up here when `dev` is merged to `main`. Maintainer-only notes in **`docs/local/`** are gitignored (except `docs/local/README.md`).
 
 ## 1. Push the repo (private is fine)
 
