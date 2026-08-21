@@ -23,6 +23,19 @@
 		<true/>
 	</dict>
 
+	<!-- Hosted Link completion (ASWebAuthenticationSession callback) -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>net.roberth.FinanceWizard.hosted-link</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>financewizard</string>
+			</array>
+		</dict>
+	</array>
+
 	<!-- Open .fwbackup from Files / iCloud Drive / other apps -->
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>

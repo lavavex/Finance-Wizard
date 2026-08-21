@@ -10,7 +10,7 @@ Finance Wizard talks **directly to Plaid** using **your** developer `client_id` 
 ## Setup (once)
 
 1. Create a free account at [dashboard.plaid.com](https://dashboard.plaid.com).  
-2. Copy **client_id** and the **secret** for **Sandbox** (or Development / Production).  
+2. Copy **client_id** and the **secret** for **Sandbox** or **Production**.  
 3. In the app: **Settings → Plaid developer account** → paste keys → pick environment → **Save**.  
 4. **Link bank account** (Sandbox: search “First Platypus Bank”, user `user_good` / pass `pass_good`).  
 5. On **Transactions**, tap **Sync → Sync now**.
@@ -52,12 +52,12 @@ In-app WKWebView Link is **deprecated**. Finance Wizard uses [Hosted Link](https
 
 ```text
 1. POST /link/token/create with hosted_link:
-     is_mobile_app: true
+     is_mobile_app: true  (always — this is an ASWebAuthenticationSession)
      completion_redirect_uri: financewizard://hosted-link-complete
 2. Open response.hosted_link_url in ASWebAuthenticationSession
 3. User completes Link (including bank OAuth) in the secure browser
 4. Browser redirects to financewizard://hosted-link-complete → session closes
-5. POST /link/token/get  → public_token
+5. Poll POST /link/token/get until public_token (keeps going while the sheet is open)
 6. POST /item/public_token/exchange
 7. Store access_token (Keychain) + item metadata
 ```
@@ -110,8 +110,9 @@ Host depends on Settings environment:
 | Environment | Host |
 |-------------|------|
 | Sandbox | `https://sandbox.plaid.com` |
-| Development | `https://development.plaid.com` |
 | Production | `https://production.plaid.com` |
+
+Plaid no longer has a **Development** environment. A leftover `development` value in Settings or a backup is treated as Sandbox.
 
 ## How rows map into the app
 

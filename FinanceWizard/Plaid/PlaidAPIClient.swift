@@ -161,10 +161,9 @@ enum PlaidAPIClient {
         // hosted_link.completion_redirect_uri (closes ASWebAuthenticationSession).
         let completionURI = PlaidHostedLink.completionRedirectURI
         let httpsRedirect = PlaidCredentialsStore.httpsRedirectURI
-        // Full mobile Hosted Link (app-to-app OAuth + custom-scheme completion)
-        // only when we have a valid https redirect. Otherwise omit redirect_uri
-        // entirely (sending financewizard:// was the Relink failure).
-        let useMobileAppHostedLink = httpsRedirect != nil
+        // Always mobile Hosted Link: we open ASWebAuthenticationSession, so Plaid
+        // must bounce to the custom scheme when the user finishes (Sandbox too).
+        // Omitting is_mobile_app left the session open until the 30s poll died.
 
         let isUpdate = accessToken.map { !$0.isEmpty } ?? false
         // Liabilities (APR / due dates) needs explicit end-user consent (Data Transparency).
@@ -191,9 +190,8 @@ enum PlaidAPIClient {
             redirect_uri: httpsRedirect,
             webhook: PlaidCredentialsStore.plaidWebhookURL,
             hosted_link: .init(
-                is_mobile_app: useMobileAppHostedLink,
-                // Custom-scheme completion only valid for mobile Hosted Link sessions.
-                completion_redirect_uri: useMobileAppHostedLink ? completionURI : nil,
+                is_mobile_app: true,
+                completion_redirect_uri: completionURI,
                 url_lifetime_seconds: 1800
             )
         )
@@ -255,6 +253,7 @@ enum PlaidAPIClient {
 
         var lastError: Error?
         for attempt in 0..<maxAttempts {
+            try Task.checkCancellation()
             if attempt > 0 {
                 try await Task.sleep(nanoseconds: delayNanoseconds)
             }
@@ -262,6 +261,8 @@ enum PlaidAPIClient {
                 if let payload = try await fetchLinkSuccess(linkToken: linkToken) {
                     return payload
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 lastError = error
             }

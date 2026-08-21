@@ -51,6 +51,12 @@ Current builds use **Hosted Link** + `ASWebAuthenticationSession`. Rebuild/reins
 
 Race after Hosted Link. The app polls `/link/token/get`. Retry or check Plaid Dashboard logs.
 
+### Link failed: “closed without linking a bank (or the session timed out)”
+
+The poll used to give up after **30s** while the bank sheet was still open (easy to hit on Sandbox: search bank → `user_good` / `pass_good` → pick accounts). It now polls until the `ASWebAuthenticationSession` closes, then waits a short grace period for `/link/token/get`.
+
+Still failing: confirm Sandbox secret, `hosted_link.is_mobile_app` + `financewizard://hosted-link-complete`, and that **First Platypus Bank** completed (not cancelled). Plaid Dashboard → Logs for that `link_token`.
+
 ### OAuth bank never returns (Production)
 
 May need an **https Universal Link** in Settings + Plaid Dashboard allowlist.
