@@ -1,65 +1,55 @@
-<p align="center">
-  <img src="FinanceWizard/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="120" height="120" alt="Finance Wizard">
-</p>
+<div align="center">
+  <img alt="Finance Wizard" src="FinanceWizard/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="128" height="128">
 
-<h1 align="center">Finance Wizard</h1>
+  <h1>Finance Wizard</h1>
+
+  <img alt="iOS 26+" src="https://img.shields.io/badge/iOS-26+-black">
+  <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-Native-orange">
+  <img alt="Plaid" src="https://img.shields.io/badge/Plaid-Your%20keys-9962be">
+  <img alt="On device" src="https://img.shields.io/badge/Data-On%20your%20iPhone-2ea44f">
+</div>
 
 <p align="center">
-  <strong>Your banks. Your keys. On your iPhone.</strong>
-</p>
-
-<p align="center">
-  A personal expense tracker for iOS&nbsp;26+.<br>
-  Connect accounts with <em>your</em> Plaid developer keys.<br>
+  <b>Finance Wizard</b> is a personal expense tracker for iPhone.
+  Connect your banks with <a href="https://dashboard.plaid.com">your own Plaid developer keys</a>,
+  keep every charge on this device, and see spend, budgets, and recurring bills in a native SwiftUI app.
   Nothing is uploaded to a Finance Wizard server.
 </p>
 
-<p align="center">
-  <a href="docs/user/getting-started.md"><strong>Get the TestFlight beta</strong></a>
-  ·
-  <a href="docs/user/index.md">User guide</a>
-  ·
-  <a href="docs/user/help.md">Help</a>
-</p>
+## TestFlight
 
----
+Use the TestFlight build to try new features and report bugs before a public App Store release. Public beta is coming soon — the join link will live in the [getting started](docs/user/getting-started.md) guide.
 
-## What it does
+<a href="docs/user/getting-started.md">
+  <img height="72" alt="Get the beta on TestFlight" src="Resources/testflight-badge.svg">
+</a>
 
-| | |
-|---|---|
-| **Transactions** | Every charge and paycheck in one list. Fix categories. Sync when you want. |
-| **Accounts** | Cards, checking, and savings — balances, utilization, bills coming due. |
-| **Budget** | A monthly cap and category limits against real spend. |
-| **Recurring** | Subscriptions and repeating bills, with next-charge dates. |
-| **Widgets** | Total Spend, spend by category, and cash balances on the Home Screen. |
+## What you get
 
-Apple Card is imported from a **CSV** (Wallet / card.apple.com). There is no live Apple Card feed.
+- **Transactions** — every charge and paycheck in one list. Fix categories. Sync when you want.
+- **Accounts** — cards, checking, and savings: balances, utilization, bills coming due.
+- **Budget** — a monthly cap and category limits against real spend.
+- **Recurring** — subscriptions and repeating bills, with next-charge dates.
+- **Widgets** — Total Spend, spend by category, and cash balances on the Home Screen.
 
-## How your data stays yours
+Apple Card is imported from a **CSV** (Wallet / [card.apple.com](https://card.apple.com)). There is no live Apple Card API.
 
-- Bank passwords are entered only in **Plaid’s** sign-in screen.
-- Access tokens and your Plaid **secret** live in the iPhone Keychain.
-- Transactions live in SwiftData on this device (shared with widgets).
-- Optional encrypted **backup** if you want a copy you control.
+## Your data stays on the phone
 
-You need a [Plaid developer account](https://dashboard.plaid.com) (free Sandbox is enough to try it).
+Bank passwords are entered only in **Plaid’s** sign-in screen. Access tokens and your Plaid secret live in the iPhone Keychain. Transactions live in SwiftData on this device (widgets read the same store). Optional encrypted backup if you want a copy you control.
 
-## Get started
-
-1. Install **TestFlight**, then Finance Wizard (public beta soon — link will go in the [getting started](docs/user/getting-started.md) guide).
-2. Open the app → **Welcome** → **Get Started**.
-3. **Settings** → paste your Plaid `client_id` and **secret** → **Save**.
-4. **Link bank account** → **Transactions → Sync**.
-
-Full walkthrough: **[Getting started](docs/user/getting-started.md)**  
-Tabs and widgets: **[Using the app](docs/user/using-the-app.md)** · **[Widgets](docs/user/widgets.md)**
+A free [Plaid](https://dashboard.plaid.com) account is enough to start (Sandbox uses fake test banks).
 
 ## Documentation
 
-| | |
-|---|---|
-| **[User docs](docs/user/index.md)** | TestFlight, how to use the app, Settings, help |
-| **[Developer docs](docs/dev/index.md)** | Xcode, architecture, Plaid API, contributing |
+- [Getting started](docs/user/getting-started.md) — TestFlight, Welcome, Plaid keys, first Sync
+- [Using the app](docs/user/using-the-app.md) — tabs, categories, Apple Card CSV
+- [Settings](docs/user/settings.md) — keys, banks, privacy, backup
+- [Widgets](docs/user/widgets.md) — Home Screen widgets
+- [Help](docs/user/help.md) — Link, Sync, Relink, empty list
+
+## Development
+
+Thanks for taking a look. Start with the [developer docs](docs/dev/index.md) and [how it works](docs/dev/how-it-works.md). Agent rules: [`AGENTS.md`](AGENTS.md).
 
 Not affiliated with Plaid or Apple Card — only your own Plaid keys and Apple platforms.
