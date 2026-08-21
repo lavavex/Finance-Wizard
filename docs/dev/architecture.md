@@ -61,7 +61,7 @@ docs/                          GitHub Pages documentation
 | **Where data stays** | Inference is on-device (Apple Intelligence); still prefer minimal transaction context in prompts |
 | **Capability / entitlement** | None beyond what the system already requires for Apple Intelligence |
 
-`Features/AI/` is a skeleton (`OnDeviceAI`, status view). It is **not** hooked into Settings yet. The rest of the app builds and runs without it.
+`Features/AI/` is a skeleton (`OnDeviceAI`, unused `OnDeviceAIStatusView`). It is **not** hooked into Settings. The rest of the app builds and runs without it.
 
 ### Why `Shared/`?
 
@@ -111,7 +111,7 @@ RootWithSplash
             └── Settings      (SettingsView → DebugMenuView)
 ```
 
-See [Onboarding](onboarding.md).
+See [How it works](how-it-works.md) for the file-level map. See [Onboarding](onboarding.md).
 
 ## Persistence
 

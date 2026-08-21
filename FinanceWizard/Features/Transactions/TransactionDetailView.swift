@@ -366,16 +366,11 @@ struct TransactionDetailView: View {
             } else {
                 rewardOverrideMode = .auto
             }
-        }
-        .task {
-            let names = await FinanceSyncAPI.fetchCategories()
-            if !names.isEmpty {
-                var merged = names
-                if !merged.contains(transaction.category), !transaction.category.isEmpty {
-                    merged.insert(transaction.category, at: 0)
-                }
-                categoryOptions = merged
+            var merged = KnownCategory.defaultNames
+            if !merged.contains(transaction.category), !transaction.category.isEmpty {
+                merged.insert(transaction.category, at: 0)
             }
+            categoryOptions = merged
         }
     }
 

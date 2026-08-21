@@ -10,6 +10,7 @@ Guides for building, debugging, and changing Finance Wizard.
 | Page | What it covers |
 |------|----------------|
 | [Development](development.md) | Xcode, signing, App Groups, GitHub forks / PRs |
+| [How it works](how-it-works.md) | End-to-end map with file names |
 | [Architecture](architecture.md) | Targets, folders, launch tree, data flow |
 | [Onboarding](onboarding.md) | Splash, Welcome gate, completed flag |
 | [Data model](data-model.md) | SwiftData, amounts, App Group store |

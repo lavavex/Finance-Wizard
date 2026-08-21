@@ -161,6 +161,7 @@ Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synce
 
 ### Suggested reading order (if you’re learning the app)
 
+0. `docs/dev/how-it-works.md` — how processes, Plaid, tabs, and widgets connect  
 1. `FinanceWizard/App/FinanceWizardApp.swift` — how the app starts  
 2. `FinanceWizard/App/SplashScreenView.swift` + `Features/Onboarding/` — splash → Welcome or tabs  
 3. `Shared/Models/Transaction.swift` + `Shared/Store/SharedStore.swift` — data + totals  
@@ -202,6 +203,14 @@ See also: [GitHub Pages](github-pages.md). Agent rules: [`AGENTS.md`](../../AGEN
 ## Previews
 
 SwiftUI `#Preview` uses in-memory `modelContainer` where possible so the canvas does not need the App Group.
+
+## Leftovers (historical names, still used)
+
+| Item | Status |
+|------|--------|
+| `Features/AI/` | Next feature. Not in the tab bar or Settings yet. |
+| `SubscriptionsView.swift` | Recurring **tab** UI; filename is historical. |
+| `Widget/Widgets/Widget.swift` | Total Spend widget (`FinanceHomeWidget`). |
 
 ## Future extension ideas
 
