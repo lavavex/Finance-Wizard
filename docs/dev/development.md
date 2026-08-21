@@ -153,6 +153,7 @@ Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synce
 
 ## Conventions used in this project
 
+- **License:** [MIT](../../LICENSE).  
 - **Comments:** short file headers + `///` for behavior and constraints. No Swift-syntax lectures. No LESSON / TYPE HERE dumps in shipping source. See `AGENTS.md`.  
 - **Docs:** every behavior change is updated in `docs/` in the same change (again `AGENTS.md`).  
 - Expenses from Plaid/API are **negated** when saved.  
