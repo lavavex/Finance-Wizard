@@ -5,13 +5,6 @@
 //  Institution logo tiles. Prefer cached brand color; only sample logo pixels
 //  once when no color is stored (avoids list scroll jank).
 //
-//  Learning notes:
-//  - @State holds view-local mutable state; SwiftUI re-renders when it changes.
-//  - Task { @MainActor in … } starts async work that updates UI on the main thread.
-//  - onAppear / onChange / onReceive hook into the view lifecycle and system events.
-//  - AnyShapeStyle type-erases different fill styles (solid color vs gradient).
-//  - loadGeneration cancels stale async results when the institution changes mid-load.
-//
 
 import SwiftUI
 import UIKit
@@ -25,7 +18,6 @@ struct BankIconView: View {
     var institutionId: String? = nil
     var institutionName: String? = nil
 
-    // @State: private UI state that belongs to this view instance
     @State private var logo: UIImage?
     @State private var brandColor: Color = Color(red: 0.22, green: 0.24, blue: 0.28)
     @State private var monogram: String = "?"
@@ -44,7 +36,6 @@ struct BankIconView: View {
     }
 
     var body: some View {
-        // Local constant for the rounded square used as fill + clip + stroke
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
         shape
@@ -95,17 +86,14 @@ struct BankIconView: View {
                 logo = nil
                 refresh(requestFetch: true)
             }
-            // NotificationCenter publisher: another part of the app finished storing a logo
             .onReceive(NotificationCenter.default.publisher(for: .institutionLogoDidUpdate)) { note in
                 let updatedID = note.userInfo?["institutionID"] as? String
                 if updatedID == nil || updatedID == institutionId || institutionId == nil {
-                    // Logos land in memory cache; re-bind without disk I/O on main.
                     if let img = InstitutionLogoCache.memoryLogo(
                         institutionID: institutionId,
                         names: nameCandidates
                     ) {
                         applyLogo(img)
-                        // &+= is wrapping add; tick forces .id refresh of the view
                         tick &+= 1
                     }
                 }
@@ -209,7 +197,6 @@ struct BankIconView: View {
 
     /// True when the color is still the default slate gray placeholder.
     private func isPlaceholderGray(_ color: Color) -> Bool {
-        // Bridge SwiftUI Color → UIKit UIColor to read raw RGB
         let ui = UIColor(color)
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return true }
@@ -234,7 +221,6 @@ struct InstitutionLogoHeader: View {
     @State private var loadGeneration = 0
 
     var body: some View {
-        // HStack = horizontal stack of logo tile + text column
         HStack(spacing: 16) {
             let shape = RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
             shape
@@ -269,9 +255,7 @@ struct InstitutionLogoHeader: View {
                 .overlay { shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5) }
                 .clipped()
 
-            // VStack = vertical stack for name, institution, mask
             VStack(alignment: .leading, spacing: 4) {
-                // CardText redacts last-four when screenshot privacy is on
                 CardText(displayName)
                     .font(.title3.weight(.semibold))
                 if let institutionName, !institutionName.isEmpty {
@@ -287,7 +271,6 @@ struct InstitutionLogoHeader: View {
             }
             Spacer()
         }
-        // Combine children into one accessibility element for VoiceOver
         .accessibilityElement(children: .combine)
         .onAppear { refresh(requestFetch: true) }
         .onReceive(NotificationCenter.default.publisher(for: .institutionLogoDidUpdate)) { _ in

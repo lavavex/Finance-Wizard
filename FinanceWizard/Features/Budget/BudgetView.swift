@@ -3,22 +3,17 @@
 //  Finance Wizard
 //
 //  Monthly budget screen: overall cap, expected income, category limits, progress vs spend.
-//  SwiftUI + SwiftData: @Query keeps transaction/income arrays live as the store changes.
 //
 
 import SwiftUI
 import SwiftData
 
 /// Main Budget tab UI — period filter, spend vs limits, expected income, category targets.
-/// Conforms to View: must provide a `body` that describes the interface.
 struct BudgetView: View {
-    // @Query automatically fetches and observes SwiftData models; UI updates when data changes.
     @Query private var transactions: [Transaction]
     @Query private var incomeRows: [Income]
-    // modelContext is the SwiftData context for save/insert/delete on BudgetPlan, etc.
     @Environment(\.modelContext) private var modelContext
 
-    // @State: view-owned values that trigger a redraw when changed.
     @State private var plan: BudgetPlan?
     @State private var period: SnapshotPeriod = .month
     @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
@@ -35,13 +30,12 @@ struct BudgetView: View {
     /// Pure computed properties only re-run when their inputs change; this Int is a deliberate dependency.
     @State private var incomeEpoch = 0
 
-    /// Human-readable label for the selected period (e.g. “March 2024”).
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
     }
 
     /// Aggregated spend/income vs limits for the current plan and period.
-    /// Optional: nil while plan is still loading.
+    /// nil while plan is still loading.
     private var snapshot: BudgetSnapshot? {
         guard let plan else { return nil }
         // Reading incomeEpoch ties this computed property to income edits (forces recompute).
@@ -57,9 +51,7 @@ struct BudgetView: View {
 
     var body: some View {
         NavigationStack {
-            // Group is an invisible container so modifiers apply whether we show list or spinner.
             Group {
-                // if let plan, let snapshot unwraps both optionals only when both are non-nil.
                 if let plan, let snapshot {
                     budgetList(plan: plan, snapshot: snapshot)
                 } else {
@@ -68,9 +60,7 @@ struct BudgetView: View {
             }
             .navigationTitle("Budget")
             .toolbar {
-                // ToolbarItem places controls in the navigation bar.
                 ToolbarItem(placement: .topBarTrailing) {
-                    // $period and $referenceDate are Bindings (two-way links to @State).
                     PeriodFilterMenu(
                         period: $period,
                         referenceDate: $referenceDate,
@@ -79,20 +69,17 @@ struct BudgetView: View {
                     )
                 }
             }
-            // .task runs async work when the view appears (and cancels if the view goes away).
             .task {
                 let loaded = BudgetStore.loadOrCreate(in: modelContext)
                 plan = loaded
                 monthlyDraft = formatAmount(loaded.monthlyLimit)
             }
-            // sheet presents a modal when the bound Bool becomes true.
             .sheet(isPresented: $showAddCategory) {
                 addCategorySheet
             }
             .sheet(isPresented: $showIncomeEditor) {
                 ExpectedIncomeEditorSheet(
                     stream: editingIncome,
-                    // Trailing closures: callbacks the sheet calls when the user saves/deletes/cancels.
                     onSave: { stream in
                         plan?.upsertExpectedIncome(stream)
                         try? modelContext.save()
@@ -113,7 +100,6 @@ struct BudgetView: View {
                     }
                 )
             }
-            // .alert shows a system alert dialog; custom Binding ties visibility to editingCategory.
             .alert(
                 "Category limit",
                 isPresented: Binding(
@@ -140,14 +126,12 @@ struct BudgetView: View {
         }
     }
 
-    // @ViewBuilder lets this function return different view trees (List content) without type errors.
     @ViewBuilder
     private func budgetList(plan: BudgetPlan, snapshot: BudgetSnapshot) -> some View {
         List {
             // MARK: Overview
             Section {
                 VStack(alignment: .leading, spacing: 12) {
-                    // firstTextBaseline aligns text baselines across columns of different font sizes.
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Spent")
@@ -165,7 +149,6 @@ struct BudgetView: View {
                                 Text(snapshot.isOverTotal ? "Over" : "Left")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                // abs() turns negative remaining (over budget) into a positive display amount.
                                 MoneyText(abs(remaining))
                                     .font(.title3.weight(.semibold))
                                     .foregroundStyle(snapshot.isOverTotal ? .red : .green)
@@ -178,7 +161,6 @@ struct BudgetView: View {
                     }
 
                     if let fraction = snapshot.totalFraction {
-                        // ProgressView(value:) is a determinate bar; min caps at 100% fill for the bar.
                         ProgressView(value: min(fraction, 1))
                             .tint(snapshot.isOverTotal ? .red : .accentColor)
                         Text("\(Int((fraction * 100).rounded()))% of monthly budget")
@@ -186,7 +168,6 @@ struct BudgetView: View {
                             .foregroundStyle(snapshot.isOverTotal ? .red : .secondary)
                     }
 
-                    // Actual + expected income
                     if snapshot.income > 0 || snapshot.expectedIncome > 0.005 {
                         VStack(alignment: .leading, spacing: 6) {
                             if snapshot.income > 0 {
@@ -229,7 +210,6 @@ struct BudgetView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
                                     Spacer()
-                                    // FormatStyle API: .dateTime builds a localized date string.
                                     Text(next, format: .dateTime.month(.abbreviated).day().weekday(.wide))
                                         .font(.caption2.weight(.medium))
                                         .foregroundStyle(.secondary)
@@ -261,7 +241,6 @@ struct BudgetView: View {
                         } label: {
                             expectedIncomeRow(stream)
                         }
-                        // .plain avoids button styling that would look like a big blue link in a List.
                         .buttonStyle(.plain)
                     }
                     if plan.expectedMonthlyIncome > 0 {
@@ -412,7 +391,7 @@ struct BudgetView: View {
             }
 
             if let fraction = row.fraction {
-                // total: 1 means value is a 0…1-ish fraction; allow slightly over for visual overflow.
+                // Allow slightly over 1.0 so overflow is visible on the bar.
                 ProgressView(value: min(max(fraction, 0), 1.5), total: 1)
                     .tint(row.isOver ? .red : CategoryStyle.color(for: row.category))
                 HStack {
@@ -446,7 +425,6 @@ struct BudgetView: View {
         NavigationStack {
             Form {
                 Picker("Category", selection: $addCategoryName) {
-                    // id: \.self uses the String itself as the identity for ForEach.
                     ForEach(KnownCategory.budgetPickerNames, id: \.self) { name in
                         Text(name).tag(name)
                     }
@@ -480,12 +458,10 @@ struct BudgetView: View {
                         addCategoryAmount = ""
                         showAddCategory = false
                     }
-                    // disabled when parse fails (empty/invalid amount).
                     .disabled(parseAmount(addCategoryAmount) == nil)
                 }
             }
         }
-        // presentationDetents controls sheet height options (.medium = half screen-ish).
         .presentationDetents([.medium])
     }
 
@@ -511,7 +487,6 @@ struct BudgetView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: ",", with: "")
             .replacingOccurrences(of: "$", with: "")
-        // Double(cleaned) is a failable initializer — returns nil if the string isn’t a number.
         guard !cleaned.isEmpty, let v = Double(cleaned), v >= 0 else { return nil }
         return v
     }
@@ -519,7 +494,6 @@ struct BudgetView: View {
     /// Formats an optional amount for a text field (empty string means “no limit”).
     private func formatAmount(_ value: Double?) -> String {
         guard let value, value > 0 else { return "" }
-        // FormatStyle: fractionLength(0...2) allows 0–2 decimal places as needed.
         return value.formatted(.number.precision(.fractionLength(0...2)))
     }
 
@@ -532,11 +506,9 @@ struct BudgetView: View {
 // MARK: - Expected income editor
 
 /// Sheet for adding or editing one ExpectedIncomeStream (label, amount, schedule).
-/// private means only visible inside this source file.
 private struct ExpectedIncomeEditorSheet: View {
     // nil stream = create mode; non-nil = edit mode with existing values.
     let stream: ExpectedIncomeStream?
-    // Function types: closures the parent passes in to handle save/delete/cancel.
     let onSave: (ExpectedIncomeStream) -> Void
     let onDelete: (String) -> Void
     let onCancel: () -> Void
@@ -581,10 +553,8 @@ private struct ExpectedIncomeEditorSheet: View {
                             Text(freq.displayName).tag(freq)
                         }
                     }
-                    // Segmented control style (pill buttons) for a small set of options.
                     .pickerStyle(.segmented)
 
-                    // switch on an enum shows different UI per frequency case.
                     switch frequency {
                     case .daily:
                         Text("Counts every calendar day.")
@@ -592,7 +562,6 @@ private struct ExpectedIncomeEditorSheet: View {
                             .foregroundStyle(.secondary)
                     case .weekly:
                         Picker("Day of week", selection: $weekday) {
-                            // Closed range 1...7 as ForEach source; id: \.self for Int identity.
                             ForEach(1...7, id: \.self) { day in
                                 Text(weekdayLabel(day)).tag(day)
                             }
@@ -610,7 +579,6 @@ private struct ExpectedIncomeEditorSheet: View {
                     Text(previewFooter)
                 }
 
-                // Only offer Remove when editing an existing stream.
                 if isEditing, let id = stream?.id {
                     Section {
                         Button("Remove income", role: .destructive) {
@@ -631,7 +599,6 @@ private struct ExpectedIncomeEditorSheet: View {
                         .fontWeight(.semibold)
                 }
             }
-            // onAppear seeds form fields from the existing stream when editing.
             .onAppear {
                 if let stream {
                     label = stream.label
@@ -639,7 +606,6 @@ private struct ExpectedIncomeEditorSheet: View {
                         ? stream.amount.formatted(.number.precision(.fractionLength(0...2)))
                         : ""
                     frequency = stream.frequency
-                    // ?? provides a default when the optional weekday is nil.
                     weekday = stream.weekday
                         ?? Calendar.current.component(.weekday, from: Date())
                     dayOfMonth = stream.dayOfMonth ?? 1
@@ -670,7 +636,6 @@ private struct ExpectedIncomeEditorSheet: View {
         let amount = parseAmount(amountText) ?? 0
         let name = label.trimmingCharacters(in: .whitespacesAndNewlines)
         return ExpectedIncomeStream(
-            // Keep existing id when editing; UUID().uuidString for brand-new streams.
             id: stream?.id ?? UUID().uuidString,
             label: name.isEmpty ? "Income" : name,
             amount: amount,
@@ -713,7 +678,6 @@ private struct ExpectedIncomeEditorSheet: View {
     }
 }
 
-// Preview with an in-memory model container so canvas doesn’t need a real database file.
 #Preview {
     BudgetView()
         .modelContainer(

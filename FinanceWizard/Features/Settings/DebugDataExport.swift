@@ -6,7 +6,7 @@
 //  Never includes Plaid secrets or access tokens.
 //
 //  Flow: fetch SwiftData models → encode a JSON snapshot → optional store file copy →
-//  zip folder → present share sheet. Educational notes below explain Foundation / SwiftData terms.
+//  zip folder → present share sheet.
 //
 
 import Foundation
@@ -15,14 +15,11 @@ import UIKit
 import SwiftUI
 
 /// Errors that can occur while building or writing a debug export package.
-/// LocalizedError lets Swift show a user-facing message via localizedDescription.
 enum DebugDataExportError: LocalizedError {
-    // Associated values: writeFailed carries a String detail; others have none.
     case noAppGroup
     case writeFailed(String)
     case encodeFailed
 
-    /// Optional human-readable description for each case (used by error.localizedDescription).
     var errorDescription: String? {
         switch self {
         case .noAppGroup:
@@ -36,32 +33,25 @@ enum DebugDataExportError: LocalizedError {
 }
 
 /// Builds a temporary folder with JSON snapshot + optional SwiftData store files.
-/// enum with only static methods is a common Swift pattern for a “namespace” (no instances).
 enum DebugDataExporter {
     /// Create export package; caller presents share sheet then should keep URL alive until dismiss.
-    /// throws: callers use try / try? / do-catch to handle failures.
-    /// @MainActor: touch UI-related model context on the main thread.
     @MainActor
     static func exportPackage(modelContext: ModelContext) throws -> URL {
         let stamp = Self.timestamp()
         let folderName = "FinanceWizard-debug-\(stamp)"
-        // temporaryDirectory is the system temp folder; files here can be cleaned by the OS later.
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(folderName, isDirectory: true)
 
         if FileManager.default.fileExists(atPath: root.path) {
             try FileManager.default.removeItem(at: root)
         }
-        // withIntermediateDirectories: true creates parent folders if needed.
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
         // 1) Human/AI-readable JSON (primary artifact)
         let snapshot = try buildSnapshot(modelContext: modelContext)
-        // JSONEncoder turns Encodable values into JSON Data (bytes).
         let encoder = JSONEncoder()
-        // prettyPrinted indents JSON; sortedKeys makes keys stable for diffs.
+        // prettyPrinted + sortedKeys keep diffs stable.
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        // iso8601 encodes Date as standard text timestamps.
         encoder.dateEncodingStrategy = .iso8601
         let jsonData = try encoder.encode(snapshot)
         // .atomic writes to a temp file then renames — safer if the app crashes mid-write.
@@ -73,7 +63,7 @@ enum DebugDataExporter {
             options: .atomic
         )
 
-        // 2) README — multiline string with """ … """ (can span many lines).
+        // 2) README
         let readme = """
         Finance Wizard — debug data export
         ==================================
@@ -120,9 +110,6 @@ enum DebugDataExporter {
 
     // MARK: - Snapshot
 
-    // Private nested types: only visible inside DebugDataExporter.
-    // Encodable means JSONEncoder can turn them into JSON automatically (property names become keys).
-
     /// Top-level JSON shape for the debug dump.
     private struct Snapshot: Encodable {
         var meta: Meta
@@ -161,7 +148,7 @@ enum DebugDataExporter {
         var cardLabels: Int
     }
 
-    /// DTO = Data Transfer Object: a plain Codable copy of BankAccount for export (not the live model).
+    /// Plain Codable copy of BankAccount for export (not the live SwiftData model).
     private struct AccountDTO: Encodable {
         var accountId: String
         var itemId: String
@@ -255,7 +242,6 @@ enum DebugDataExporter {
     /// Fetches live SwiftData models and maps them into the Encodable Snapshot.
     @MainActor
     private static func buildSnapshot(modelContext: ModelContext) throws -> Snapshot {
-        // FetchDescriptor describes a query; modelContext.fetch runs it against the store.
         let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         let txs = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
         let income = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
@@ -264,11 +250,9 @@ enum DebugDataExporter {
         let labels = CardLabelStore.debugExportMap()
         let rules = VendorRulesStore.load()
 
-        // ISO8601DateFormatter formats dates as standard strings (e.g. 2024-01-15T12:00:00.000Z).
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
-        // Nested functions: local helpers that close over `iso` above.
         func d(_ date: Date?) -> String? {
             guard let date else { return nil }
             return iso.string(from: date)
@@ -281,7 +265,6 @@ enum DebugDataExporter {
             notes.append("No linked Plaid Items in metadata.")
         }
         // Lightweight inconsistency hints (helpful for debugging without full analysis)
-        // \.isCredit is a key path: shorthand for { $0.isCredit } when filtering.
         let creditIDs = Set(accounts.filter(\.isCredit).map(\.accountId))
         let orphanPayments = payments.filter { pay in
             guard let id = pay.creditAccountId else { return false }
@@ -307,7 +290,6 @@ enum DebugDataExporter {
             notes.append("No institution logos cached on disk — Sync to refresh branding.")
         }
 
-        // sorted + map: transform each BankAccount into AccountDTO for JSON.
         let accountDTOs = accounts
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             .map { a in
@@ -446,7 +428,6 @@ enum DebugDataExporter {
     // MARK: - Store files
 
     /// Copies raw SwiftData/SQLite files from the App Group container into the export folder.
-    /// App Groups let the main app (and extensions) share a common container on disk.
     private static func copyStoreFiles(into storeDir: URL) throws {
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: SharedStore.appGroupID
@@ -461,13 +442,11 @@ enum DebugDataExporter {
             .appendingPathComponent("Application Support", isDirectory: true)
 
         var copied = 0
-        // contentsOfDirectory lists files; skipsHiddenFiles ignores dotfiles.
         if let files = try? FileManager.default.contentsOfDirectory(
             at: support,
             includingPropertiesForKeys: [.fileSizeKey],
             options: [.skipsHiddenFiles]
         ) {
-            // where filters: only files whose name starts with the store name prefix.
             for file in files where file.lastPathComponent.hasPrefix(SharedStore.storeName) {
                 let dest = storeDir.appendingPathComponent(file.lastPathComponent)
                 try? FileManager.default.copyItem(at: file, to: dest)
@@ -475,7 +454,6 @@ enum DebugDataExporter {
             }
         }
 
-        // Inventory note — small text file documenting what was found/copied.
         let inventory = """
         App Group: \(SharedStore.appGroupID)
         Support path: \(support.path)
@@ -499,7 +477,6 @@ enum DebugDataExporter {
             try FileManager.default.removeItem(at: zipURL)
         }
 
-        // Array of (name, data) tuples for each file to pack.
         var entries: [(name: String, data: Data)] = []
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
@@ -510,10 +487,8 @@ enum DebugDataExporter {
             throw DebugDataExportError.writeFailed("Could not enumerate export folder.")
         }
 
-        // for case let … as URL: type-casts enumerator elements to URL and skips others.
         for case let fileURL as URL in enumerator {
             var isDir: ObjCBool = false
-            // ObjCBool bridges Objective-C BOOL; .boolValue converts to Swift Bool.
             guard fm.fileExists(atPath: fileURL.path, isDirectory: &isDir), !isDir.boolValue else {
                 continue
             }
@@ -556,7 +531,6 @@ private enum MinimalZip {
         var offset: UInt32 = 0
 
         for entry in entries {
-            // Data(entry.name.utf8) encodes the file name as UTF-8 bytes.
             let nameData = Data(entry.name.utf8)
             let crc = crc32(entry.data)
             let size = UInt32(entry.data.count)
@@ -646,7 +620,6 @@ private enum MinimalZip {
         return crc ^ 0xffff_ffff
     }
 
-    // Closure-initialized static let: table is computed once when first used, then reused.
     private static let crcTable: [UInt32] = {
         (0..<256).map { i -> UInt32 in
             var c = UInt32(i)
@@ -661,23 +634,18 @@ private enum MinimalZip {
 // MARK: - Share sheet
 
 /// Wraps UIKit’s UIActivityViewController (system Share sheet) for use inside SwiftUI.
-/// UIViewControllerRepresentable bridges a UIKit view controller into SwiftUI’s view tree.
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
-    // Optional callback when the share sheet finishes (success, cancel, etc.).
     var onComplete: (() -> Void)? = nil
 
-    /// Called once to create the UIKit controller.
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        // completionWithItemsHandler runs after the user finishes or dismisses sharing.
         vc.completionWithItemsHandler = { _, _, _, _ in
             onComplete?()
         }
         return vc
     }
 
-    /// Called when SwiftUI state changes — empty here because this sheet doesn’t need updates.
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
@@ -685,7 +653,6 @@ struct ShareSheet: UIViewControllerRepresentable {
 
 extension CardLabelStore {
     /// Full nickname map for debug export (keys like account:… / method:…).
-    /// UserDefaults is simple key-value storage that survives app restarts.
     static func debugExportMap() -> [String: String] {
         UserDefaults.standard.dictionary(forKey: "card.customLabels") as? [String: String] ?? [:]
     }

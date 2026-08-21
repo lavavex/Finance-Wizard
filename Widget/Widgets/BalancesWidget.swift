@@ -3,16 +3,8 @@
 //  Widget
 //
 //  Checking & savings balances from linked Plaid depository accounts.
-//
-//  Uses StaticConfiguration (no Edit Widget intent) — data comes only from
-//  SharedStore’s deposit balances snapshot after the main app syncs Plaid.
-//
-//  SWIFT TERMS IN THIS FILE:
-//  - TimelineProvider: Older/non-intent provider protocol (placeholder / snapshot / timeline).
-//  - @escaping: Completion closure may outlive the function call (async system callback).
-//  - WidgetFamily: Size used to decide how many account rows fit.
-//  - ForEach: Loop a collection of Identifiable rows into SwiftUI views.
-//  - StaticConfiguration: Widget config without user-editable App Intent parameters.
+//  No Edit Widget options — data comes from SharedStore after the app syncs.
+//  Timeline refreshes about every 15 minutes.
 //
 
 import WidgetKit
@@ -27,11 +19,7 @@ struct BalancesEntry: TimelineEntry {
 }
 
 /// Builds BalancesEntry values from SharedStore (no user configuration intent).
-///
-/// Note the completion-handler style (`completion: @escaping ...`) — classic
-/// TimelineProvider API. Compare with async AppIntentTimelineProvider in Widget.swift.
 struct BalancesProvider: TimelineProvider {
-    /// Sample data for gallery / loading state (not real user balances).
     func placeholder(in context: Context) -> BalancesEntry {
         BalancesEntry(
             date: Date(),
@@ -65,8 +53,6 @@ struct BalancesProvider: TimelineProvider {
         )
     }
 
-    /// One entry for the widget gallery. `@escaping` means the system may call
-    /// `completion` later (not necessarily before this function returns).
     func getSnapshot(in context: Context, completion: @escaping (BalancesEntry) -> Void) {
         completion(makeEntry(family: context.family))
     }
@@ -79,7 +65,6 @@ struct BalancesProvider: TimelineProvider {
         completion(Timeline(entries: [entry], policy: .after(next)))
     }
 
-    /// Load real data; row limit depends on widget size.
     private func makeEntry(family: WidgetFamily) -> BalancesEntry {
         let limit: Int
         switch family {
@@ -96,12 +81,10 @@ struct BalancesProvider: TimelineProvider {
 
 // MARK: - View
 
-/// SwiftUI UI for checking/savings balances.
 struct BalancesWidgetView: View {
     var entry: BalancesEntry
     @Environment(\.widgetFamily) private var family
 
-    /// Computed Bool helper for branching layouts.
     private var isSmall: Bool { family == .systemSmall }
 
     private var totalText: String {
@@ -130,7 +113,6 @@ struct BalancesWidgetView: View {
             Text(entry.snapshot.message ?? "No accounts")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                // Allow multi-line error text to wrap inside the widget.
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -155,7 +137,6 @@ struct BalancesWidgetView: View {
                 .minimumScaleFactor(0.45)
 
             VStack(spacing: 2) {
-                // prefix(4): show at most four rows even if snapshot has more.
                 ForEach(entry.snapshot.accounts.prefix(4)) { row in
                     accountRow(row, compact: true)
                 }
@@ -186,7 +167,6 @@ struct BalancesWidgetView: View {
                     .layoutPriority(1)
             }
 
-            // Quick totals by kind when we have both
             if entry.snapshot.checkingTotal > 0 || entry.snapshot.savingsTotal > 0 {
                 HStack(spacing: 10) {
                     if entry.snapshot.checkingTotal != 0 {
@@ -221,7 +201,6 @@ struct BalancesWidgetView: View {
 
             Spacer(minLength: 0)
 
-            // Optional binding: only show footer if we have a last-synced date.
             if let synced = entry.snapshot.lastSyncedAt {
                 Text("Synced \(synced.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption2)
@@ -231,13 +210,11 @@ struct BalancesWidgetView: View {
         }
     }
 
-    /// Compact “Checking · Savings” style subtitle from which kinds exist.
     private var kindSummary: String {
         var parts: [String] = []
         let checkingCount = entry.snapshot.accounts.filter { $0.kind == .checking }.count
         let savingsCount = entry.snapshot.accounts.filter { $0.kind == .savings }.count
         let otherCount = entry.snapshot.accounts.filter { $0.kind == .other }.count
-        // Prefer counts from full totals presence
         if entry.snapshot.checkingTotal != 0 || checkingCount > 0 {
             parts.append("Checking")
         }
@@ -250,7 +227,6 @@ struct BalancesWidgetView: View {
         return parts.isEmpty ? "Balances" : parts.joined(separator: " · ")
     }
 
-    /// Small labeled total (Checking / Savings / Other) for the medium layout header.
     private func kindChip(title: String, amount: Double, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title)
@@ -268,7 +244,6 @@ struct BalancesWidgetView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// One account line: icon + name + balance.
     private func accountRow(_ row: DepositBalanceRow, compact: Bool) -> some View {
         HStack(spacing: compact ? 4 : 6) {
             Image(systemName: row.kind.systemImage)
@@ -309,7 +284,6 @@ struct BalancesWidgetView: View {
         )
     }
 
-    /// Prefer a short label for tight widget width.
     private func shortName(_ row: DepositBalanceRow) -> String {
         let name = row.displayName
         if name.count <= 22 { return name }
@@ -331,7 +305,6 @@ struct BalancesWidget: Widget {
     let kind: String = "BalancesWidget"
 
     var body: some WidgetConfiguration {
-        // StaticConfiguration: no App Intent — nothing for the user to configure.
         StaticConfiguration(kind: kind, provider: BalancesProvider()) { entry in
             BalancesWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)

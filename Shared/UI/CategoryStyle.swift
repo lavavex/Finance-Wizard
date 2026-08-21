@@ -14,16 +14,9 @@
 //    Purple = Services
 //    Pink   = Entertainment
 //
-//  Learning notes:
-//  - enum without cases used only for static members = a simple namespace.
-//  - Color(red:green:blue:) uses 0…1 RGB components (not 0…255).
-//  - switch with `case let c where …` pattern-matches and binds a local name.
-//  - Nested enum ColorGroup groups related cases for pie-slice merging.
-//
 
 import SwiftUI
 
-// Shared look for budget categories (color + SF Symbol)
 enum CategoryStyle {
 
     // MARK: - Apple Card–like palette (works in light & dark)
@@ -98,8 +91,6 @@ enum CategoryStyle {
             break
         }
 
-        // Fine-grained finance-sync category names
-        // `case let c where matches(...)` binds the normalized string and tests a list
         switch normalize(category) {
         case let c where matches(c, ["housing", "rent", "mortgage"]):
             return "house.fill"
@@ -254,7 +245,6 @@ enum CategoryStyle {
 
     /// Merge category rows that share the same Apple Card color into one slice each.
     static func combineByColor(_ items: [CategorySpendSummary]) -> [CategorySpendSummary] {
-        // Accumulators keyed by color group
         var spent: [ColorGroup: Double] = [:]
         var counts: [ColorGroup: Int] = [:]
 
@@ -264,7 +254,6 @@ enum CategoryStyle {
             counts[group, default: 0] += item.transactionCount
         }
 
-        // map over dictionary pairs → one CategorySpendSummary per group
         return spent.map { group, amount in
             CategorySpendSummary(
                 category: group.displayName,

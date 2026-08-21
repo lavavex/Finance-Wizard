@@ -8,14 +8,6 @@
 //  Cash-back cards: percent (5 = 5%). Caps / portal-only notes included.
 //  Sources: maxrewards.com card detail pages (fetched 2026-07).
 //
-//  Learning notes:
-//  - This file is mostly static data (built-in card presets), plus match/make helpers.
-//  - struct CardProductPreset = one product’s default rates, benefits, and match needles.
-//  - Identifiable / Hashable / Sendable: list ids, equality/sets, concurrency safety.
-//  - Dictionary [String: Double] maps reward category name → earn rate.
-//  - Optional annualFee / maxRewardsPath use nil when unknown or not applicable.
-//  - Matching is substring search on Plaid names (needles), not live web scraping.
-//
 
 import Foundation
 
@@ -46,7 +38,6 @@ struct CardProductPreset: Identifiable, Hashable, Sendable {
     /// MaxRewards path for attribution (no scraping at runtime).
     var maxRewardsPath: String?
 
-    /// Explicit memberwise init so merchantBoosts can default to [] for cash-back-only cards.
     init(
         id: String,
         displayName: String,
@@ -537,7 +528,6 @@ enum CardProductCatalog {
 
     /// Look up one product by its stable id (or nil if unknown).
     static func product(id: String) -> CardProductPreset? {
-        // first { } returns the first element that matches the test
         all.first { $0.id == id }
     }
 
@@ -547,9 +537,7 @@ enum CardProductCatalog {
     }
 
     /// Best automatic match for a linked BankAccount (or nil if ambiguous).
-    /// Builds one lowercase “haystack” string from account names, then scores needle hits.
     static func match(account: BankAccount) -> CardProductPreset? {
-        // joined haystack so any field can contain the product name
         let hay = [
             account.officialName ?? "",
             account.name,
@@ -559,8 +547,7 @@ enum CardProductCatalog {
         .joined(separator: " ")
         .lowercased()
 
-        // compactMap drops products with no needle hit; score = length of the matching needle
-        // (longer needles are more specific, e.g. "sapphire reserve" beats "reserve")
+        // Longer needles are more specific (e.g. "sapphire reserve" beats "reserve").
         let scored: [(CardProductPreset, Int)] = all.compactMap { product in
             let hit = product.matchNeedles.first { hay.contains($0.lowercased()) }
             guard let hit else { return nil }

@@ -10,10 +10,6 @@
 //  • Stable display names (existing txs keep working)
 //  • Aliases so “Gas”, “Medical”, etc. canonicalize for limits + pickers
 //
-//  Swift: case housing = "Housing" gives a custom raw String so the stored /
-//  displayed name can include spaces and punctuation while the case name stays
-//  a valid Swift identifier (no spaces).
-//
 
 import Foundation
 
@@ -83,7 +79,6 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
     }
 
     /// Names for the Transactions category picker (includes bill pay).
-    /// allCases comes from CaseIterable; map(\.rawValue) is a key-path map.
     static var defaultNames: [String] {
         allCases.map(\.rawValue)
     }
@@ -94,7 +89,6 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
     }
 
     /// Logical order for Budget “add limit” picker (essentials first).
-    /// Explicit array order — not the same as declaration order if we reorder later.
     static var budgetPickerOrder: [KnownCategory] {
         [
             .housing, .utilities, .homeInternet, .carInsurance,
@@ -110,9 +104,6 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
     }
 
     /// Alternate labels that should resolve to a known category.
-    ///
-    /// private static let with a closure { }() runs once to build the dictionary.
-    /// Nested function alias(_:_:) fills many keys without repeating map[k] = cat.
     private static let aliases: [String: KnownCategory] = {
         var map: [String: KnownCategory] = [:]
         func alias(_ keys: [String], _ cat: KnownCategory) {

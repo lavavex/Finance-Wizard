@@ -4,7 +4,6 @@
 //
 //  Accounts hub: credit cards + checking/savings, Plaid logos, credit
 //  liabilities, and collapsible bill payments under spend.
-//  Teaches: NavigationStack, @Query sort, @State board rebuild, .task(id:), refreshable, @ViewBuilder.
 //
 
 import SwiftUI
@@ -14,10 +13,8 @@ import SwiftData
 
 /// Root Accounts tab: overview totals, upcoming bills, and navigable account rows.
 struct CardsView: View {
-    // Multiple @Query sources feed the board. sort: orders bank accounts by name.
     @Query private var transactions: [Transaction]
     @Query(sort: \BankAccount.name) private var accounts: [BankAccount]
-    // Newest payments first (order: .reverse on the date key path).
     @Query(sort: \CreditCardPayment.date, order: .reverse) private var payments: [CreditCardPayment]
     @Environment(\.modelContext) private var modelContext
 
@@ -25,8 +22,7 @@ struct CardsView: View {
     @State private var period: SnapshotPeriod = .month
     @State private var referenceDate: Date = TransactionAnalytics.monthStart(for: Date())
     @State private var sort: TransactionSort = .dateNewest
-    // nicknameEpoch is a “bump counter”: incrementing it forces dependent views to refresh
-    // after the user renames a card (queries alone might not notice label-store changes).
+    // Bump counter: queries alone may not notice CardLabelStore nickname changes.
     @State private var nicknameEpoch = 0
     @State private var isSyncing = false
     @State private var syncBanner: String?
@@ -39,7 +35,7 @@ struct CardsView: View {
         period.filterLabel(referenceDate: referenceDate)
     }
 
-    // Credit accounts only; reading nicknameEpoch ties refresh to rename events.
+    // Reading nicknameEpoch ties refresh to rename events.
     private var creditAccounts: [BankAccount] {
         _ = nicknameEpoch // intentional read so body re-evaluates after renames
         return accounts.filter(\.isCredit)
@@ -51,12 +47,10 @@ struct CardsView: View {
     }
 
     var body: some View {
-        // NavigationStack owns the navigation bar and push/pop stack for this tab.
         NavigationStack {
             List {
                 // MARK: Overview
                 Section {
-                    // NavigationLink destination builds CategorySpendView with current filters.
                     NavigationLink {
                         CategorySpendView(period: period, referenceDate: referenceDate)
                     } label: {
@@ -87,7 +81,6 @@ struct CardsView: View {
                         payments: board.periodPayments,
                         periodLabel: periodLabel,
                         institutionId: nil,
-                        // Trailing closure as a function value for per-payment logo resolution.
                         resolveInstitutionId: { institutionId(for: $0) }
                     )
 
@@ -112,7 +105,6 @@ struct CardsView: View {
                                 }
                             }
 
-                            // if let util unwraps optional utilization for the bar.
                             if let util = board.totalUtilization {
                                 UtilizationBar(value: util, label: "Overall utilization")
                             }
@@ -156,7 +148,6 @@ struct CardsView: View {
                     Text("Overview")
                 }
 
-                // Sync status banner (pull-to-refresh result).
                 if let syncBanner {
                     Section {
                         Text(syncBanner)
@@ -168,7 +159,6 @@ struct CardsView: View {
                 // MARK: Upcoming bills (next 30 days)
                 if !board.upcomingBills.isEmpty {
                     Section {
-                        // id: \.accountId because BankAccount may use accountId as identity here.
                         ForEach(board.upcomingBills, id: \.accountId) { account in
                             UpcomingBillRow(account: account)
                         }
@@ -215,7 +205,6 @@ struct CardsView: View {
                     Text("Checking & savings")
                 }
 
-                // Orphan methods section only appears when there are unmatched spend methods.
                 if !board.otherSpendRows.isEmpty {
                     Section {
                         ForEach(board.otherSpendRows) { row in
@@ -227,13 +216,11 @@ struct CardsView: View {
                 }
             }
             .navigationTitle("Accounts")
-            // .refreshable wires pull-to-refresh; the closure is async.
             .refreshable {
                 await syncFromPlaid()
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    // Menu wrapping a Picker is a common “sort options” pattern.
                     Menu {
                         Picker("Sort", selection: $sort) {
                             ForEach(TransactionSort.allCases) { option in
@@ -255,7 +242,6 @@ struct CardsView: View {
                     )
                 }
             }
-            // Re-run when refreshToken changes (period, counts, nickname, etc.).
             .task(id: refreshToken) {
                 AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
                 // Clear orphan/duplicate deposit accounts (e.g. X Money after Relink)
@@ -282,7 +268,6 @@ struct CardsView: View {
         let payments = self.payments
         _ = nicknameEpoch
 
-        // Task { @MainActor in } schedules work on the main actor asynchronously.
         Task { @MainActor in
             // Task.yield() lets SwiftUI paint once before the potentially heavy build.
             await Task.yield()
@@ -299,9 +284,7 @@ struct CardsView: View {
 
     /// Pull latest accounts/transactions from Plaid and show a short banner.
     private func syncFromPlaid() async {
-        // guard prevents overlapping syncs if the user pulls twice quickly.
         guard !isSyncing else { return }
-        // MainActor.run hops to the main thread to touch UI state safely.
         await MainActor.run {
             isSyncing = true
             syncBanner = "Syncing with Plaid…"
@@ -328,7 +311,6 @@ struct CardsView: View {
         }
     }
 
-    // @ViewBuilder lets a function return different View types (or one link) as content.
     @ViewBuilder
     private func accountNavigationLink(row: UnifiedCardRow) -> some View {
         NavigationLink {
@@ -346,7 +328,6 @@ struct CardsView: View {
                     paymentMethods: row.matchingPaymentMethods,
                     in: board.periodPayments
                 ),
-                // Closure callback: child notifies parent that a nickname changed.
                 onNicknameChanged: { nicknameEpoch += 1 }
             )
         } label: {
@@ -360,7 +341,6 @@ struct CardsView: View {
            let account = accounts.first(where: { $0.accountId == id }) {
             return account.institutionId
         }
-        // first(where:) returns the first element matching the closure, or nil.
         if let maskMatch = creditAccounts.first(where: { account in
             guard let mask = account.mask, !mask.isEmpty else { return false }
             return payment.cardName.contains(mask)

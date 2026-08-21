@@ -10,37 +10,21 @@
 import Foundation
 import SwiftData
 
-// MARK: - What is @Model?
-//
-// SwiftData’s @Model turns a class into something that can be stored in a local
-// database (similar idea to Core Data, but simpler to write).
-//
-// • final class  — “final” means no other type may subclass this class.
-// • Stored properties (var title, var amount, …) become columns in the store.
-// • Computed properties (var displayDate { … }) are NOT stored; they are
-//   calculated on the fly from other fields each time you read them.
-// • The ? after a type (e.g. Bool?) means optional: the value can be a real
-//   value OR nil (missing). Useful when older saved rows never had that field.
-
 /// A single spend transaction persisted in the App Group SwiftData store.
 @Model
 final class Transaction {
-    // @Attribute(.unique) tells SwiftData: no two rows may share this value.
-    // Stable id from finance-sync (Plaid/local). UNIQUE stops duplicate rows on re-sync.
+    /// Stable id from finance-sync (Plaid/local). Unique so re-sync cannot duplicate rows.
     @Attribute(.unique) var transactionId: String
 
     var title: String
-    // Money value for expenses: stored negative (API often sends positive expense amounts;
-    // the app normalizes so “spend” math can use abs() or signed sums consistently).
-    // Income lives in the separate `Income` model and is never mixed into spend.
+    /// Expenses are stored negative (API often sends positive spend). Income is a separate model.
     var amount: Double
     var date: Date
     var category: String
     var paymentMethod: String
     var multiplier: Double
 
-    // Optional so older stores can migrate without requiring a value on every row.
-    // Treat nil as false in UI (see isCategoryLocked / isMultiplierLocked).
+    /// Nil on older rows; treat as false (see isCategoryLocked / isMultiplierLocked).
     var categoryLocked: Bool?
     var multiplierLocked: Bool?
     var overrideSource: String?
@@ -61,9 +45,7 @@ final class Transaction {
     /// `"none"` = not a subscription.
     var subscriptionCadenceOverride: String?
 
-    // MARK: - Plaid enrichment (optional; nil on CSV / older rows)
-    // These fields come from the bank link (Plaid). CSV imports leave them nil.
-    // Optional types keep migration safe when the schema gains new columns.
+    // MARK: - Plaid enrichment (nil on CSV / older rows)
 
     /// When the charge was authorized (prefer over `date` for posted txs when present).
     var authorizedDate: Date?
@@ -85,21 +67,15 @@ final class Transaction {
     var isPending: Bool?
 
     // MARK: - Computed properties
-    //
-    // A computed property has a body in braces and no stored value of its own.
-    // Reading `tx.displayDate` runs this code every time. The ?? operator means
-    // “use the left side if non-nil, otherwise use the right side.”
 
     /// Date to show in lists: authorized when known, else posted/bank date.
     var displayDate: Date { authorizedDate ?? date }
 
-    /// Effective lock flag (nil → unlocked). Nil-coalescing keeps optionals easy to use as Bool.
+    /// Effective lock flag (nil → unlocked).
     var isCategoryLocked: Bool { categoryLocked ?? false }
-    /// Effective lock flag (nil → unlocked)
     var isMultiplierLocked: Bool { multiplierLocked ?? false }
 
     /// Parsed subscription cadence override (user-declared).
-    /// guard let … else { return nil } exits early if decoding/parsing fails.
     var declaredSubscriptionCadence: SubscriptionCadence? {
         guard let raw = subscriptionCadenceOverride?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -107,7 +83,6 @@ final class Transaction {
               !raw.isEmpty, raw != "none", raw != "auto" else {
             return nil
         }
-        // rawValue init on an enum returns an optional: nil if the string is unknown.
         return SubscriptionCadence(rawValue: raw)
     }
 
@@ -120,7 +95,6 @@ final class Transaction {
     }
 
     /// Reward earn bucket used for Benefits rates (override wins when set).
-    /// Demonstrates optional chaining (?.) and first(where:) to search a collection.
     var effectiveRewardCategory: RewardCategory {
         if let raw = rewardCategoryOverride?.trimmingCharacters(in: .whitespacesAndNewlines),
            !raw.isEmpty,
@@ -132,9 +106,6 @@ final class Transaction {
         return RewardCategory.forTransaction(generalCategory: category, title: title)
     }
 
-    // init is the constructor. Parameters with `= value` are optional to pass —
-    // callers can omit them and get the default. self.property = parameter copies
-    // the argument into the stored property on this instance.
     init(
         transactionId: String,
         title: String,

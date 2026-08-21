@@ -5,19 +5,12 @@
 //  User’s own Plaid developer credentials (client_id + secret + environment).
 //  Secret is stored in Keychain; client id / env use UserDefaults.
 //
-//  SWIFT TERMS IN THIS FILE:
-//  - computed property (get/set): Looks like a stored field but runs code on read/write.
-//  - UserDefaults: Lightweight key-value prefs (not for secrets).
-//  - static: Belongs to the type itself, not an instance.
-//  - throws: requireConfigured() fails with PlaidAPIError if credentials are missing.
-//  - ?? nil-coalescing: Use left side if non-nil, otherwise the right side default.
-//
 
 import Foundation
 
 /// Reads and writes the developer’s Plaid client_id, secret, environment, and OAuth URLs.
 ///
-/// Architecture note: client_id and environment are non-secret prefs → UserDefaults.
+/// client_id and environment are non-secret prefs → UserDefaults.
 /// The secret is sensitive → PlaidKeychain. Never log or print the secret.
 enum PlaidCredentialsStore {
     // MARK: - Storage keys
@@ -44,7 +37,6 @@ enum PlaidCredentialsStore {
     /// Plaid dashboard client_id. Empty string means “not set yet.”
     static var clientID: String {
         get {
-            // Optional chaining + trim + default to "" if the key is missing.
             UserDefaults.standard.string(forKey: clientIDKey)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         }
@@ -64,10 +56,8 @@ enum PlaidCredentialsStore {
         set {
             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
-                // Clearing the field removes the Keychain item entirely.
                 PlaidKeychain.delete(account: secretAccount)
             } else {
-                // try? means: ignore Keychain write failures (returns nil on throw).
                 try? PlaidKeychain.set(trimmed, account: secretAccount)
             }
         }
@@ -78,12 +68,10 @@ enum PlaidCredentialsStore {
     /// Which Plaid host to call (sandbox / development / production).
     static var environment: PlaidEnvironment {
         get {
-            // Read raw string, then failable init `PlaidEnvironment(rawValue:)` → optional enum.
             let raw = UserDefaults.standard.string(forKey: environmentKey) ?? PlaidEnvironment.sandbox.rawValue
             return PlaidEnvironment(rawValue: raw) ?? .sandbox
         }
         set {
-            // Store the enum’s raw String so we can rebuild it next launch.
             UserDefaults.standard.set(newValue.rawValue, forKey: environmentKey)
         }
     }
@@ -103,8 +91,8 @@ enum PlaidCredentialsStore {
         }
         set {
             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Treat clearing the field or re-entering the built-in default as “use default”
-            // so we don’t permanently override later default changes.
+            // Clearing the field or re-entering the built-in default means “use default”
+            // so later default-URL changes are not permanently overridden.
             if trimmed.isEmpty || trimmed == defaultRedirectURI {
                 UserDefaults.standard.removeObject(forKey: redirectURIKey)
             } else {

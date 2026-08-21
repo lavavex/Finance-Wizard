@@ -6,14 +6,6 @@
 //  Bar icons/$ are BarMark.annotations so they stay locked to the correct bar.
 //  Pie uses two separate Chart views for label position.
 //
-//  Learning notes:
-//  - SwiftUI View: body describes UI; @Environment reads ambient settings.
-//  - Computed private vars prepare data for body without storing duplicate state.
-//  - Charts framework: Chart + BarMark / SectorMark plot spend.
-//  - @ViewBuilder lets a property or function return different View types per branch.
-//  - Generics (applyCategoryColors<V: View>) work with any View subtype.
-//  - Closures like .annotation { } build nested UI attached to a mark.
-//
 
 import SwiftUI
 import Charts
@@ -62,14 +54,12 @@ struct CategorySpendChartView: View {
         max(orderedCategories.map(\.spent).max() ?? 0, 1)
     }
 
-    /// Domain 0…max with a little headroom for trailing / top $ labels
-    /// ClosedRange is written as lower...upper.
+    /// Domain 0…max with a little headroom for trailing / top $ labels.
     private var spendDomain: ClosedRange<Double> {
         0...(maxSpent * 1.18)
     }
 
     var body: some View {
-        // Empty state vs chart: if/else inside body is normal SwiftUI
         if categories.isEmpty {
             if ultraCompact || compact {
                 Text("No data")
@@ -87,8 +77,6 @@ struct CategorySpendChartView: View {
         }
     }
 
-    /// Picks which chart layout to show.
-    /// @ViewBuilder allows switch to return different concrete view types.
     @ViewBuilder
     private var chart: some View {
         switch format {
@@ -114,7 +102,6 @@ struct CategorySpendChartView: View {
     }
 
     /// Apply the fixed category → color scale to any chart content.
-    /// Generic V: View means “whatever view you pass in, as long as it is a View.”
     private func applyCategoryColors<V: View>(_ content: V) -> some View {
         content.chartForegroundStyleScale(domain: categoryNames, range: paletteColors)
     }
@@ -137,7 +124,6 @@ struct CategorySpendChartView: View {
             totalSpendHeader
 
             applyCategoryColors(
-                // Chart loops categories; each item builds one BarMark
                 Chart(orderedCategories) { item in
                     BarMark(
                         x: .value("Spent", item.spent),
@@ -255,7 +241,6 @@ struct CategorySpendChartView: View {
         // Avoid divide-by-zero when computing slice shares
         let sliceTotal = max(slices.reduce(0) { $0 + $1.spent }, 0.0001)
 
-        // ZStack layers views on top of each other (back → front)
         return ZStack {
             // Colored donut only
             Chart(slices) { item in
@@ -329,8 +314,6 @@ struct CategorySpendChartView: View {
     }
 
     /// Clear mid-ring Chart used only to place annotations on true sector centers.
-    /// Generic Content: View + @ViewBuilder annotation = caller supplies per-slice UI.
-    /// @escaping means the closure may be stored and called later (required by Chart).
     private func pieLabelChart<Content: View>(
         slices: [CategorySpendSummary],
         @ViewBuilder annotation: @escaping (CategorySpendSummary) -> Content

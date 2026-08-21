@@ -6,10 +6,6 @@
 //  linked credit account so it appears under Credit cards — never “Other spend.”
 //  Default Daily Cash is 2% unless a higher reward category applies.
 //
-//  Swift note: this is an enum with no cases used as a namespace for static
-//  constants and helpers (you never write AppleCardAccount()). That pattern
-//  groups related free functions without polluting global scope.
-//
 
 import Foundation
 import SwiftData
@@ -17,7 +13,6 @@ import UIKit
 
 /// Helpers to detect, create, and maintain a local “Apple Card” BankAccount row.
 enum AppleCardAccount {
-    // static let = type-level constants shared by all call sites.
     /// Stable local id (not a Plaid account_id).
     static let accountId = "local:apple-card"
     static let itemId = "local:apple-card-item"
@@ -39,10 +34,6 @@ enum AppleCardAccount {
     }
 
     /// Insert or refresh the synthetic credit account + benefits product (2% base).
-    ///
-    /// @MainActor — must run on the main actor (UI / SwiftData context thread).
-    /// @discardableResult — callers may ignore the returned BankAccount without a warning.
-    /// FetchDescriptor + #Predicate load existing rows; insert only when missing.
     @MainActor
     @discardableResult
     static func ensureLinked(in modelContext: ModelContext) -> BankAccount {
@@ -115,7 +106,6 @@ enum AppleCardAccount {
         return account
     }
 
-    // private static var = process-wide flag so we only auto-link once per launch.
     private static var didEnsureThisSession = false
 
     /// Ensure link when any Apple Card activity exists (CSV history without re-import).
@@ -133,19 +123,16 @@ enum AppleCardAccount {
         )
         descriptor.fetchLimit = 1
         let exists = (try? modelContext.fetch(descriptor).first) != nil
-        // contains + trailing closure: true if any transaction matches Apple Card.
         let hasAppleSpend = !exists && transactions.contains {
             isAppleCard(paymentMethod: $0.paymentMethod)
         }
         if hasAppleSpend || exists {
-            // _ = means “call for side effects; discard the return value.”
             _ = ensureLinked(in: modelContext)
         }
         didEnsureThisSession = true
     }
 
     /// Unlocked Apple Card rows → product rate (2% base or higher category).
-    /// for tx in all where … filters while iterating (Swift “where” clause on for-in).
     @MainActor
     static func reapplyUnlockedMultipliers(in modelContext: ModelContext) {
         let all = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []

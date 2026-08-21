@@ -7,16 +7,6 @@
 //  A Plaid “Item” is one bank login connection (may contain multiple accounts).
 //  The access_token is secret; everything else (name, cursor, error status) is metadata.
 //
-//  SWIFT TERMS IN THIS FILE:
-//  - struct: Value type (copied when passed around); good for model data.
-//  - Codable: Encode/decode JSON for UserDefaults storage.
-//  - Identifiable: Has `id` for SwiftUI lists.
-//  - Equatable: Can use == and firstIndex(where:).
-//  - Sendable: Safe across async boundaries.
-//  - compactMap: Map + drop nils (here: skip items with missing Keychain tokens).
-//  - filter / map: Transform or keep subsets of arrays.
-//  - Key path (\.needsRelink): Short way to refer to a property for filter.
-//
 
 import Foundation
 
@@ -37,7 +27,7 @@ struct PlaidLinkedItem: Codable, Identifiable, Equatable, Sendable {
     /// Display names for accounts (optional, from Link metadata).
     var accountNames: [String]
     /// Cursor for /transactions/sync (empty = full history from start).
-    /// A cursor is an opaque string Plaid returns so the next sync only gets deltas.
+    /// Opaque string Plaid returns so the next sync only gets deltas.
     var transactionsCursor: String
     /// When the user first linked this Item.
     var linkedAt: Date
@@ -54,7 +44,6 @@ struct PlaidLinkedItem: Codable, Identifiable, Equatable, Sendable {
 
     /// True when Plaid says the user must re-authenticate (Relink).
     var needsRelink: Bool {
-        // Optional binding: only proceed if errorCode is non-nil.
         guard let code = errorCode?.uppercased() else { return false }
         return code == "ITEM_LOGIN_REQUIRED"
             || code == "ITEM_LOCKED"
@@ -67,7 +56,7 @@ struct PlaidLinkedItem: Codable, Identifiable, Equatable, Sendable {
 
 /// Load / save / update linked Plaid Items.
 ///
-/// Split storage design:
+/// Split storage:
 /// - Access tokens → Keychain (secure)
 /// - Metadata (names, cursors, errors) → UserDefaults as JSON
 enum PlaidItemStore {
@@ -76,14 +65,12 @@ enum PlaidItemStore {
     private static let accessTokenPrefix = "plaid.access."
 
     /// All linked items with access tokens loaded from Keychain.
-    /// Items whose tokens are missing from Keychain are skipped (compactMap → nil).
+    /// Items whose tokens are missing from Keychain are skipped.
     static func loadItems() -> [PlaidLinkedItem] {
-        // try? turns a throwing decode into an optional (nil on failure).
         guard let data = UserDefaults.standard.data(forKey: metadataKey),
               let metas = try? JSONDecoder().decode([ItemMeta].self, from: data) else {
             return []
         }
-        // compactMap: transform each meta; return nil to drop that element.
         return metas.compactMap { meta in
             guard let token = PlaidKeychain.get(account: accessTokenPrefix + meta.id), !token.isEmpty else {
                 return nil
@@ -104,11 +91,9 @@ enum PlaidItemStore {
 
     /// Persist all items: tokens to Keychain, metadata (no tokens) to UserDefaults.
     static func saveItems(_ items: [PlaidLinkedItem]) {
-        // Persist tokens in Keychain
         for item in items {
             try? PlaidKeychain.set(item.accessToken, account: accessTokenPrefix + item.id)
         }
-        // Metadata without tokens — map each full item to a slim ItemMeta.
         let metas = items.map {
             ItemMeta(
                 id: $0.id,
@@ -126,10 +111,9 @@ enum PlaidItemStore {
         }
     }
 
-    /// Insert or replace an item by id (upsert = update + insert).
+    /// Insert or replace an item by id.
     static func upsert(_ item: PlaidLinkedItem) {
         var items = loadItems()
-        // firstIndex(where:) returns the index of the first match, or nil.
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
             items[idx] = item
         } else {
@@ -168,35 +152,31 @@ enum PlaidItemStore {
     /// Empty every item’s cursor so the next sync re-downloads full history.
     static func resetAllCursors() {
         var items = loadItems()
-        // items.indices is a Range of valid array indexes (0..<count).
         for i in items.indices {
             items[i].transactionsCursor = ""
         }
         saveItems(items)
     }
 
-    /// Delete Keychain token and metadata for one Item.
-    /// Drops every linked Item: Keychain tokens + metadata.
+    /// Drop every linked Item: Keychain tokens + metadata.
     static func removeAll() {
         PlaidKeychain.deleteAll()
         UserDefaults.standard.removeObject(forKey: metadataKey)
     }
 
+    /// Delete Keychain token and metadata for one Item.
     static func remove(itemID: String) {
         PlaidKeychain.delete(account: accessTokenPrefix + itemID)
-        // filter keeps only items whose id is NOT the one being removed.
         let items = loadItems().filter { $0.id != itemID }
-        // Also drop any orphan metadata if token missing
         saveItems(items)
     }
 
-    /// Convenience: does the user have at least one linked bank?
+    /// True when the user has at least one linked bank.
     static var hasLinkedItems: Bool {
         !loadItems().isEmpty
     }
 
     /// Items that need Relink (login expired / permission revoked).
-    /// `\ .needsRelink` is a key path — shorthand for `{ $0.needsRelink }`.
     static var itemsNeedingRelink: [PlaidLinkedItem] {
         loadItems().filter(\.needsRelink)
     }
@@ -204,7 +184,6 @@ enum PlaidItemStore {
     // MARK: - Private metadata (no secrets)
 
     /// Metadata only (no secret access token).
-    /// Private nested struct: only PlaidItemStore can use it.
     private struct ItemMeta: Codable {
         var id: String
         var institutionName: String

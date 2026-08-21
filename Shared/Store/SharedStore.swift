@@ -3,58 +3,37 @@
 //  Finance Wizard
 //
 //  Shared SwiftData configuration + filter/sort helpers used by app and widget.
-//
-//  Big picture for learners:
-//  • The iOS app and the home-screen widget are separate processes. They share
-//    one on-disk store via an App Group container (a folder both can read).
-//  • SharedStore opens that store (ModelContainer) and loads snapshots.
-//  • TransactionAnalytics is pure math on arrays — no disk I/O — so the app’s
-//    @Query results and the widget’s fetch both use the same totals logic.
+//  App and widget are separate processes; they share one on-disk store via an
+//  App Group container. Analytics is pure math on arrays so both use the same totals.
 //
 
 import Foundation
 import SwiftData
 
-// MARK: - Summary value types (structs)
-//
-// struct = value type. Lightweight data bags for UI and widgets. They are not
-// @Model types, so they are not saved as their own tables — just temporary
-// values returned from analytics helpers.
-//
-// Identifiable requires an `id` so SwiftUI ForEach can tell rows apart.
+// MARK: - Summary value types
 
 /// One card's total spending for lists / widget breakdown.
 struct CardSpendSummary: Identifiable {
-    // Identifiable needs a stable id — use the card name
     var id: String { cardName }
-    // Payment method string from transactions (e.g. "Chase Freedom")
     let cardName: String
-    // Total spent on this card as a positive number (easier to read)
+    /// Positive dollars spent on this card.
     let spent: Double
-    // How many transactions on this card (in the current filter)
     let transactionCount: Int
 }
 
 /// One budget category’s total for charts.
 struct CategorySpendSummary: Identifiable {
-    // Stable id = category name
     var id: String { category }
-    // Budget category (Dining, Gas (Car), …)
     let category: String
-    // Positive dollars spent in this category
+    /// Positive dollars spent in this category.
     let spent: Double
-    // How many transactions in this category
     let transactionCount: Int
 }
 
 /// Chart layout options (app + category widget).
-/// Raw-value String enum + CaseIterable → easy pickers and UserDefaults storage.
 enum ChartFormat: String, CaseIterable, Identifiable, Sendable {
-    // Default: bars grow left → right, categories on Y axis
     case horizontalBar
-    // Bars grow bottom → top, categories on X axis
     case verticalBar
-    // Pie / donut style (sector marks)
     case pie
 
     var id: String { rawValue }
@@ -77,7 +56,6 @@ enum ChartFormat: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Snapshot for category charts (app screen + category widget).
-/// Bundles the slice list plus metadata (period, empty state, message).
 struct CategorySpendSnapshot {
     let categories: [CategorySpendSummary]
     let totalSpend: Double
@@ -88,7 +66,6 @@ struct CategorySpendSnapshot {
 }
 
 /// One checking/savings (or other cash) account for the balances widget.
-/// Sendable = safe to pass into concurrent widget timeline code.
 struct DepositBalanceRow: Identifiable, Sendable {
     var id: String { accountId }
     let accountId: String
@@ -117,16 +94,12 @@ struct DepositBalancesSnapshot: Sendable {
 /// Which calendar window totals use.
 /// week / month use Calendar.dateInterval; all means no date filter.
 enum SnapshotPeriod: String, CaseIterable, Identifiable, Sendable {
-    // Calendar week containing `referenceDate` (locale-aware week start → end)
     case week
-    // Calendar month containing `referenceDate` (1st → last day)
     case month
-    // No date filter — every saved transaction
     case all
 
     var id: String { rawValue }
 
-    // Short label for period pickers (not a specific month name)
     var displayName: String {
         switch self {
         case .week: return "This week"
@@ -136,7 +109,6 @@ enum SnapshotPeriod: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// Header label for the active filter (e.g. "June 2026", "This month", "Jul 20–26").
-    /// Default args (referenceDate: Date = Date()) mean callers can omit them.
     func filterLabel(
         referenceDate: Date = Date(),
         now: Date = Date(),
@@ -146,7 +118,6 @@ enum SnapshotPeriod: String, CaseIterable, Identifiable, Sendable {
         case .all:
             return "All time"
         case .month:
-            // isDate(_:equalTo:toGranularity:) compares year+month only, not the day.
             if calendar.isDate(referenceDate, equalTo: now, toGranularity: .month) {
                 return "This month"
             }
@@ -168,18 +139,16 @@ enum SnapshotPeriod: String, CaseIterable, Identifiable, Sendable {
         case .all:
             return "All"
         case .month:
-            // Full month name, e.g. "July"
             let formatter = DateFormatter()
             formatter.locale = .current
             formatter.setLocalizedDateFormatFromTemplate("MMMM")
             return formatter.string(from: now)
         case .week:
-            // Compact week range in the current month context, e.g. "Jul 20–26"
             guard let interval = calendar.dateInterval(of: .weekOfYear, for: now) else {
                 return "Week"
             }
             let start = interval.start
-            // interval.end is exclusive (first moment of next week), so subtract a day
+            // interval.end is exclusive (first moment of next week)
             let end = calendar.date(byAdding: .day, value: -1, to: interval.end) ?? interval.end
             let formatter = DateFormatter()
             formatter.locale = .current
@@ -214,33 +183,23 @@ enum TransactionSort: String, CaseIterable, Identifiable, Sendable {
 
 /// Snapshot of store data the widget (and app summary) can display.
 struct FinanceSnapshot {
-    // Cards sorted by most spent first (after hide-card filter)
+    /// Cards sorted by most spent first (after hide-card filter).
     let cards: [CardSpendSummary]
-    // Period total across ALL cards (hide-card does NOT shrink this)
-    // Positive = money spent (sum of abs amounts in period)
+    /// Period total across ALL cards (hide-card does NOT shrink this). Positive = money spent.
     let totalSpend: Double
-    // Signed balance for the period across ALL cards (expenses negative in our model)
+    /// Signed period balance across ALL cards (expenses are negative in our model).
     let balance: Double
-    // How many transactions are in the period (all cards)
     let transactionCount: Int
-    // Which period was used
     let period: SnapshotPeriod
-    // True if we could not open the store or nothing in the period
     let isEmptyOrError: Bool
-    // Optional short status text
     let message: String?
 }
 
 // MARK: - Pure helpers (work on any array — app @Query or widget fetch)
-//
-// enum TransactionAnalytics is a namespace: only static methods and constants.
-// Nothing here opens SwiftData; pass in [Transaction] you already loaded.
-// That keeps unit tests and widgets simple.
 
 /// Filter, sort, and aggregate expense transactions for charts and widgets.
 enum TransactionAnalytics {
     /// Canonical label for credit-card bill payments (not real spend).
-    /// nonisolated so background subscription heuristics can call exclusion helpers.
     nonisolated static let creditCardPaymentCategory = "Credit Card Payment"
 
     /// Categories excluded from Total Spend, charts, and card spend rollups.
@@ -249,7 +208,6 @@ enum TransactionAnalytics {
     }
 
     /// String form so callers without a full Transaction can still check.
-    /// nonisolated: pure string check safe off the main actor (subscription detect).
     nonisolated static func isExcludedFromSpendCategory(_ category: String) -> Bool {
         let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return c == creditCardPaymentCategory.lowercased()
@@ -259,24 +217,19 @@ enum TransactionAnalytics {
     }
 
     /// Rows that count toward spend / utilization of budget categories.
-    /// filter { !… } keeps only rows that are NOT excluded.
     static func spendOnly(_ transactions: [Transaction]) -> [Transaction] {
         transactions.filter { !isExcludedFromSpend($0) }
     }
 
-    // Normalize empty payment method strings
     static func cardName(for transaction: Transaction) -> String {
         transaction.paymentMethod.isEmpty ? "Unknown" : transaction.paymentMethod
     }
 
-    // First moment of the week / month containing `now`, or nil for “all”
     static func startDate(for period: SnapshotPeriod, now: Date = Date()) -> Date? {
         dateInterval(for: period, referenceDate: now)?.start
     }
 
     /// Inclusive start / exclusive end for week or month; nil for all-time.
-    /// `referenceDate` picks which week/month (any day inside that period works).
-    /// DateInterval is Foundation’s start + end pair; end is exclusive.
     static func dateInterval(
         for period: SnapshotPeriod,
         referenceDate: Date = Date(),
@@ -298,7 +251,6 @@ enum TransactionAnalytics {
     }
 
     /// Month starts that appear in the data (newest first), always including the current month.
-    /// map(\.date) is a key path: pulls .date from every transaction into [Date].
     static func availableMonthStarts(
         in transactions: [Transaction],
         now: Date = Date(),
@@ -308,7 +260,6 @@ enum TransactionAnalytics {
     }
 
     /// Month starts from any date list (payments, income, etc.).
-    /// Set of DateComponents collapses many days into unique year+month pairs.
     static func availableMonthStarts(
         from dates: [Date],
         now: Date = Date(),
@@ -320,16 +271,12 @@ enum TransactionAnalytics {
         }
         components.insert(calendar.dateComponents([.year, .month], from: now))
 
-        // compactMap drops nils if calendar.date(from:) fails for a component set
         return components
             .compactMap { calendar.date(from: $0) }
             .sorted(by: >)
     }
 
-    // Keep transactions in the selected period (does not hide cards).
-    // For month/week, only rows inside that calendar interval are kept
-    // (so “June” does not accidentally include July).
-    // guard let … else return all when period is .all (interval is nil).
+    /// Keep transactions in the selected period (does not hide cards).
     static func inPeriod(
         _ transactions: [Transaction],
         period: SnapshotPeriod,
@@ -341,14 +288,12 @@ enum TransactionAnalytics {
         return transactions.filter { $0.date >= interval.start && $0.date < interval.end }
     }
 
-    // Drop transactions whose card is in the hide list
-    // Set<String> = unordered unique collection; .contains is fast.
+    /// Drop transactions whose card is in the hide list.
     static func excludingCards(_ transactions: [Transaction], excludedCards: Set<String>) -> [Transaction] {
         guard !excludedCards.isEmpty else { return transactions }
         return transactions.filter { !excludedCards.contains(cardName(for: $0)) }
     }
 
-    // Filter by period, optional card hide, then sort — pipeline of pure steps
     static func filter(
         _ transactions: [Transaction],
         period: SnapshotPeriod,
@@ -361,8 +306,6 @@ enum TransactionAnalytics {
         return sorted(byCard, by: sort)
     }
 
-    // Sort a list without changing membership
-    // sorted(by:) returns a new array; original is unchanged (value semantics for arrays).
     static func sorted(_ transactions: [Transaction], by sort: TransactionSort) -> [Transaction] {
         switch sort {
         case .dateNewest:
@@ -370,7 +313,6 @@ enum TransactionAnalytics {
         case .dateOldest:
             return transactions.sorted { $0.date < $1.date }
         case .amountLargest:
-            // Largest magnitude first (biggest expense or income)
             return transactions.sorted { abs($0.amount) > abs($1.amount) }
         case .amountSmallest:
             return transactions.sorted { abs($0.amount) < abs($1.amount) }
@@ -381,33 +323,27 @@ enum TransactionAnalytics {
         }
     }
 
-    // Positive dollars spent (excludes credit-card bill payments, etc.)
-    // reduce(0) { $0 + abs($1.amount) } folds the list into one sum.
+    /// Positive dollars spent (excludes credit-card bill payments).
     static func totalSpend(in transactions: [Transaction]) -> Double {
         spendOnly(transactions).reduce(0) { $0 + abs($1.amount) }
     }
 
-    // Signed balance of spend rows only (bill payments excluded)
+    /// Signed balance of spend rows only (bill payments excluded).
     static func balance(in transactions: [Transaction]) -> Double {
         spendOnly(transactions).reduce(0) { $0 + $1.amount }
     }
 
-    // Unique card names, sorted A–Z
-    // Set(…) then .sorted() → unique + alphabetical
     static func paymentMethods(in transactions: [Transaction]) -> [String] {
         Set(transactions.map { cardName(for: $0) }).sorted()
     }
 
-    // Normalize empty category strings
     static func categoryName(for transaction: Transaction) -> String {
         transaction.category.isEmpty ? "Uncategorized" : transaction.category
     }
 
-    // Per-category spend for charts (period should already be applied by caller).
-    // When limited, leftover spend is rolled into "Other" so pie slices always
-    // sum to the same total shown in the center.
-    //
-    // Dictionaries spent / counts use default: 0 so first touch starts at zero.
+    /// Per-category spend for charts (period should already be applied by caller).
+    /// When limited, leftover spend is rolled into "Other" so pie slices always
+    /// sum to the same total shown in the center.
     static func categorySummaries(
         from transactions: [Transaction],
         categoryLimit: Int? = nil
@@ -420,7 +356,6 @@ enum TransactionAnalytics {
             counts[cat, default: 0] += 1
         }
 
-        // map on Dictionary yields (key, value) pairs; we build summary structs
         let sorted = spent.map { name, amount in
             CategorySpendSummary(
                 category: name,
@@ -435,20 +370,16 @@ enum TransactionAnalytics {
 
     /// Keep the top spend rows; roll the rest into a single "Other" bucket.
     /// Used for bar charts (raw categories) and pie (after color-group merge).
-    /// categoryLimit is optional (Int?) — nil means “no limit, return all.”
     static func limitCategorySummaries(
         _ items: [CategorySpendSummary],
         to categoryLimit: Int?
     ) -> [CategorySpendSummary] {
-        // Already sorted highest → lowest by callers; re-sort to be safe
         let sorted = items.sorted { $0.spent > $1.spent }
 
         guard let categoryLimit, sorted.count > categoryLimit else {
             return sorted
         }
 
-        // Keep top (limit - 1) rows; merge the rest into Other
-        // Array.prefix / dropFirst slice without mutating the original
         let keepCount = max(1, categoryLimit - 1)
         let head = Array(sorted.prefix(keepCount))
         let tail = sorted.dropFirst(keepCount)
@@ -459,7 +390,6 @@ enum TransactionAnalytics {
             return Array(sorted.prefix(categoryLimit))
         }
 
-        // If "Other" is already in the head, fold the tail into that row
         if let otherIndex = head.firstIndex(where: {
             $0.category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "other"
         }) {
@@ -473,7 +403,6 @@ enum TransactionAnalytics {
             return merged.sorted { $0.spent > $1.spent }
         }
 
-        // + concatenates two arrays
         return head + [
             CategorySpendSummary(
                 category: "Other",
@@ -483,8 +412,6 @@ enum TransactionAnalytics {
         ]
     }
 
-    // Full category chart snapshot for a period.
-    // Early returns build an “empty state” snapshot with a helpful message.
     static func makeCategorySnapshot(
         from allTransactions: [Transaction],
         period: SnapshotPeriod,
@@ -502,7 +429,6 @@ enum TransactionAnalytics {
             )
         }
 
-        // PeriodSpendIndex pre-filters spend rows for the period (defined elsewhere)
         let index = PeriodSpendIndex.build(
             transactions: allTransactions,
             period: period,
@@ -521,7 +447,6 @@ enum TransactionAnalytics {
         }
 
         let categories = categorySummaries(from: spendRows, categoryLimit: categoryLimit)
-        // Total = sum of slices (includes Other) so the pie always adds up
         let sliceTotal = categories.reduce(0.0) { $0 + $1.spent }
 
         return CategorySpendSnapshot(
@@ -534,14 +459,12 @@ enum TransactionAnalytics {
         )
     }
 
-    // Per-card spend for a transaction set (already period-filtered as needed)
-    // excludedCards: omit from the breakdown only (not from totalSpend callers)
+    /// Per-card spend (already period-filtered). `excludedCards` omits from the breakdown only.
     static func cardSummaries(
         from transactions: [Transaction],
         excludedCards: Set<String> = [],
         cardLimit: Int? = nil
     ) -> [CardSpendSummary] {
-        // Only real spend rows (not bill payments), then hide-card filter
         let visible = excludingCards(spendOnly(transactions), excludedCards: excludedCards)
 
         var spent: [String: Double] = [:]
@@ -561,17 +484,13 @@ enum TransactionAnalytics {
         }
         .sorted { $0.spent > $1.spent }
 
-        // if let cardLimit unwraps the optional limit only when set
         if let cardLimit {
             list = Array(list.prefix(cardLimit))
         }
         return list
     }
 
-    // Build a widget/app summary:
-    // - totalSpend / balance / transactionCount = ALL cards in period
-    // - cards list = period rows minus excluded cards
-    // (Hide-card affects the breakdown list only, not the headline total.)
+    /// Widget/app summary: headline totals include ALL cards; `cards` respects hide-card.
     static func makeSnapshot(
         from allTransactions: [Transaction],
         period: SnapshotPeriod,
@@ -615,7 +534,6 @@ enum TransactionAnalytics {
 
         return FinanceSnapshot(
             cards: cards,
-            // Full period total — hide-card does not change this; bill payments excluded
             totalSpend: index.totalSpend,
             balance: index.spendBalance,
             transactionCount: index.spendTransactions.count,
@@ -627,19 +545,12 @@ enum TransactionAnalytics {
 }
 
 // MARK: - Store open / widget load
-//
-// SharedStore owns App Group constants and ModelContainer setup.
-// ModelContainer = SwiftData’s connection to the on-disk (or in-memory) database.
-// ModelContext = a “workspace” for fetch / insert / save against that container.
-// Schema lists every @Model type that lives in this store.
 
 /// Opens the shared App Group SwiftData store and loads widget/app snapshots.
 enum SharedStore {
-    // Must match App Groups entitlement on BOTH app and widget targets
-    /// nonisolated: logo cache / disk helpers may read this off the main actor.
+    /// Must match App Groups entitlement on both app and widget targets.
     nonisolated static let appGroupID = "group.net.roberth.FinanceWizard"
 
-    // File name for the SwiftData store inside the App Group container
     static let storeName = "FinanceTransactions"
 
     /// Every SwiftData `@Model` in the App Group store.
@@ -665,11 +576,8 @@ enum SharedStore {
     }
 
     /// Build a ModelContainer both app and widget can open.
-    /// throws: callers use try / do-catch because opening disk can fail.
-    /// inMemory: true uses RAM only (great for previews and tests — nothing on disk).
     static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
-        // Expenses + income share one App Group store; keep them as separate models
-        // so spend analytics never accidentally include income.
+        // Expenses + income share one App Group store as separate models.
         let schema = Self.schema
 
         if inMemory {
@@ -681,7 +589,6 @@ enum SharedStore {
             return try ModelContainer(for: schema, configurations: [configuration])
         }
 
-        // groupContainer: .identifier(appGroupID) points SwiftData at the shared folder
         let configuration = ModelConfiguration(
             storeName,
             schema: schema,
@@ -701,15 +608,12 @@ enum SharedStore {
         }
     }
 
-    // Remove FinanceTransactions.store (+ WAL/SHM) from the App Group container.
-    // SQLite (under SwiftData) may create sidecar files (-wal, -shm, -journal).
-    // private = only SharedStore can call this recovery helper.
+    /// Remove FinanceTransactions.store (+ WAL/SHM) from the App Group container.
     private static func deletePersistentStoreFiles() {
         guard let root = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupID
         ) else { return }
 
-        // URL.appendingPathComponent builds nested paths safely
         let support = root
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Application Support", isDirectory: true)
@@ -724,7 +628,6 @@ enum SharedStore {
             support.appendingPathComponent("\(storeName).store-journal")
         ]
 
-        // Also sweep any file that starts with the store name (covers -shm/-wal variants)
         if let files = try? FileManager.default.contentsOfDirectory(
             at: support,
             includingPropertiesForKeys: nil
@@ -739,13 +642,10 @@ enum SharedStore {
         }
     }
 
-    // Unique payment method names currently in the store
-    // do/catch returns [] on any failure so UI pickers never crash.
     static func allPaymentMethods() -> [String] {
         do {
             let container = try makeContainer()
             let context = ModelContext(container)
-            // FetchDescriptor with no predicate = “all rows of this type”
             let transactions = try context.fetch(FetchDescriptor<Transaction>())
             return TransactionAnalytics.paymentMethods(in: transactions)
         } catch {
@@ -753,7 +653,6 @@ enum SharedStore {
         }
     }
 
-    // Widget entry point: open store, then same analytics as the app
     static func loadSnapshot(
         period: SnapshotPeriod = .month,
         excludedCards: Set<String> = [],
@@ -782,9 +681,7 @@ enum SharedStore {
         }
     }
 
-    // Category chart widget / shared load.
-    // Pass categoryLimit: nil for “all categories” (pie loads full data, then
-    // merges by color and applies the family limit on the final slices).
+    /// Category chart widget / shared load. `categoryLimit: nil` = all categories (pie path).
     static func loadCategorySnapshot(
         period: SnapshotPeriod = .month,
         categoryLimit: Int? = 8
@@ -816,7 +713,6 @@ enum SharedStore {
             let container = try makeContainer()
             let context = ModelContext(container)
             let all = try context.fetch(FetchDescriptor<BankAccount>())
-            // filter(\.isDepository) uses a key path — same as { $0.isDepository }
             let deposit = all.filter(\.isDepository)
 
             if deposit.isEmpty {
@@ -832,7 +728,6 @@ enum SharedStore {
                 )
             }
 
-            // map transforms each BankAccount into a lightweight DepositBalanceRow
             let rows: [DepositBalanceRow] = deposit
                 .map { account in
                     DepositBalanceRow(
@@ -844,15 +739,12 @@ enum SharedStore {
                         mask: account.mask
                     )
                 }
-                // Highest balances first so the widget shows the important accounts
                 .sorted { $0.balance > $1.balance }
 
             let limited = Array(rows.prefix(accountLimit))
-            // Three reduce passes split totals by DepositoryKind
             let checking = rows.filter { $0.kind == .checking }.reduce(0.0) { $0 + $1.balance }
             let savings = rows.filter { $0.kind == .savings }.reduce(0.0) { $0 + $1.balance }
             let other = rows.filter { $0.kind == .other }.reduce(0.0) { $0 + $1.balance }
-            // compactMap(\.lastSyncedAt) drops nils; .max() is the most recent date
             let lastSync = deposit.compactMap(\.lastSyncedAt).max()
 
             return DepositBalancesSnapshot(

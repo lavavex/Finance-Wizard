@@ -13,19 +13,12 @@
 //  2) CardBenefitsProfile: one card’s rates + rate resolution helpers
 //  3) CardBenefitsStore: UserDefaults load/save, product apply, Sync multipliers, migrations
 //
-//  Learning notes:
-//  - Codable lets structs encode/decode to JSON for UserDefaults storage.
-//  - mutating func can change properties on a struct (value type) when you own a var copy.
-//  - Optional arrays ([T]?) often mean “omit when empty” for cleaner JSON.
-//  - Computed get/set properties (boosts / partnerBoosts) wrap optionals with nicer APIs.
-//
 
 import Foundation
 
 // MARK: - Models
 
 /// Whether the card earns points (multipliers like 3x) or cash back (percents like 3%).
-/// Codable + CaseIterable: can save to JSON and loop all cases in pickers.
 enum RewardKind: String, Codable, CaseIterable, Identifiable {
     case points
     case cashback
@@ -49,7 +42,6 @@ enum RewardKind: String, Codable, CaseIterable, Identifiable {
 }
 
 /// One perk line on a card (lounge access, annual credit, etc.).
-/// UUID().uuidString invents a unique id when the caller does not supply one.
 struct CardBenefitItem: Codable, Equatable, Identifiable, Hashable {
     var id: String
     var title: String
@@ -145,7 +137,6 @@ struct MerchantBoostPartner: Codable, Equatable, Identifiable, Hashable, Sendabl
     }
 
     /// Longest matching needle in the title, or nil if none match.
-    /// max(by:) picks the needle with the greatest character count.
     func matches(title: String) -> String? {
         let t = title.lowercased()
         return matchNeedles
@@ -190,17 +181,16 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
     /// Rotating / promo boosts with optional end date (decoded optional for older profiles).
     var temporaryBoosts: [TemporaryBoost]?
 
-    /// Helpers that build the dictionary keys used in UserDefaults.
     static func accountKey(_ accountId: String) -> String { "account:\(accountId)" }
     static func methodKey(_ method: String) -> String { "method:\(method)" }
 
-    /// Friendly wrapper: never nil when reading; writes nil when the list is empty.
+    /// Never nil when reading; writes nil when empty so JSON omits the key.
     var boosts: [TemporaryBoost] {
         get { temporaryBoosts ?? [] }
         set { temporaryBoosts = newValue.isEmpty ? nil : newValue }
     }
 
-    /// Same pattern for merchant partners.
+    /// Never nil when reading; writes nil when empty so JSON omits the key.
     var partnerBoosts: [MerchantBoostPartner] {
         get { merchantBoosts ?? [] }
         set { merchantBoosts = newValue.isEmpty ? nil : newValue }
@@ -239,7 +229,6 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
     }
 
     /// Fold legacy merchantMultipliers into structured partners (one chip per needle group later).
-    /// mutating = this method changes the struct’s stored properties.
     mutating func migrateLegacyMerchantMultipliersIfNeeded() {
         guard let legacy = merchantMultipliers, !legacy.isEmpty else { return }
         var partners = partnerBoosts
@@ -693,7 +682,6 @@ enum CardBenefitsStore {
     private static let currentMigrationVersion = 6
     /// In-memory profiles after migration — avoid re-migrating + disk I/O on every tile.
     private static var memoryProfiles: [String: CardBenefitsProfile]?
-    /// NSLock: simple mutual exclusion so concurrent reads/writes of memoryProfiles stay safe.
     private static let memoryLock = NSLock()
 
     /// Look up a saved profile by account id (preferred) or payment method; empty if none.
@@ -722,7 +710,6 @@ enum CardBenefitsStore {
     }
 
     /// Thread-safe in-memory map; loads from disk on first use.
-    /// defer { unlock } runs when the function exits (even on early return).
     private static func cachedProfiles() -> [String: CardBenefitsProfile] {
         memoryLock.lock()
         defer { memoryLock.unlock() }
@@ -748,7 +735,6 @@ enum CardBenefitsStore {
         var changed = false
         for (key, profile) in map {
             let migrated = migrateIfNeeded(profile)
-            // Equatable: != compares full profile contents
             if migrated != profile {
                 map[key] = migrated
                 changed = true
@@ -773,7 +759,6 @@ enum CardBenefitsStore {
     }
 
     /// Apply a catalog product onto a profile key, rename the card, and persist.
-    /// @discardableResult = callers may ignore the returned profile without a compiler warning.
     @discardableResult
     static func applyProduct(
         _ product: CardProductPreset,
@@ -889,7 +874,6 @@ enum CardBenefitsStore {
 
     /// Multiplier to store on a Transaction for Sync (points x, or cash-back % as entered).
     /// Returns 0 for non-rewards accounts (plain checking) so they never earn points.
-    /// first(where:) + ?? falls back to payment-method matching when accountId is missing.
     static func resolvedMultiplier(
         accountId: String?,
         paymentMethod: String,
@@ -1116,13 +1100,19 @@ enum CardBenefitsStore {
     }
 
     // MARK: - Private disk I/O
-    // JSONDecoder/Encoder + UserDefaults. try? turns throws into optional failures.
 
     /// Drop the in-memory profile cache (call after replacing UserDefaults wholesale).
     static func resetMemoryCache() {
         memoryLock.lock()
         memoryProfiles = nil
         memoryLock.unlock()
+    }
+
+    /// Remove saved card-benefit profiles (Debug menu). Next read recreates defaults via migrate.
+    static func clearAllProfiles() {
+        UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: migrationVersionKey)
+        resetMemoryCache()
     }
 
     /// Decode the profile map from UserDefaults, or empty if missing/corrupt.

@@ -2,17 +2,15 @@
 //  SubscriptionsView.swift
 //  Finance Wizard
 //
-//  Blank starter for tracking subscriptions / recurring transactions.
+//  Recurring charges tab: detect subscriptions, mark Not Recurring vs Cancelled.
 //
 
 import SwiftUI
 import SwiftData
 
 struct SubscriptionsView: View {
-    // @Query = every Transaction from the database; refreshes if they change.
     @Query private var transactions: [Transaction]
-    
-    // @State = this screen owns the value; the UI updates when it changes.
+
     @State private var candidates: [SubscriptionCandidate] = []
     @State private var ended: [SubscriptionCandidate] = []
     @State private var isScanning = true
@@ -23,7 +21,7 @@ struct SubscriptionsView: View {
     @State private var path = NavigationPath()
 
     @Environment(\.modelContext) private var modelContext
-    
+
     private var totalMonthly: Double {
         candidates.reduce(0) { $0 + $1.estimatedMonthly }
     }
@@ -49,7 +47,7 @@ struct SubscriptionsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                
+
                 Section {
                     if isScanning && candidates.isEmpty {
                         ProgressView("Scanning...")
@@ -83,7 +81,6 @@ struct SubscriptionsView: View {
                     }
                 }
             }
-            // .navigationTitle hangs off List (the `}` above), not as its own line in NavigationStack.
             .navigationTitle("Recurring Charges")
             .navigationDestination(for: String.self) { id in
                 if let item = candidates.first(where: { $0.id == id }) {
@@ -104,7 +101,7 @@ struct SubscriptionsView: View {
         }
         .animation(.easeOut(duration: 0.4), value: isSpinning)
     }
-    
+
     private func recurringDetail(_ item: SubscriptionCandidate, showCancelledButton: Bool) -> some View {
         // Skip the expensive charge scan while the overlay is up so each
         // SwiftData write does not rebuild Times Seen + the charge list.
@@ -168,9 +165,9 @@ struct SubscriptionsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            
+
             Spacer(minLength: 8)
-            
+
             VStack(alignment: .trailing, spacing: 2) {
                 MoneyText(item.typicalAmount)
                     .font(.body.weight(.semibold))
@@ -233,8 +230,7 @@ struct SubscriptionsView: View {
         .background(.black.opacity(0.4))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
-    
-    // @MainActor = update UI state on the main thread. async = allowed to pause (await).
+
     @MainActor
     private func detectGroups() async -> (active: [SubscriptionCandidate], ended: [SubscriptionCandidate]) {
         await logWork("Snapshotting \(transactions.count) transactions")
@@ -268,7 +264,7 @@ struct SubscriptionsView: View {
         ended = groups.ended
         isScanning = false
     }
-    
+
     private func matchingTransactions(for item: SubscriptionCandidate) -> [Transaction] {
         transactions
             .filter { tx in
@@ -280,7 +276,7 @@ struct SubscriptionsView: View {
             }
             .sorted { $0.date > $1.date }
     }
-    
+
     private func nextChargeDate(for item: SubscriptionCandidate) -> Date? {
         let cal = Calendar.current
         switch item.cadence {
@@ -293,6 +289,7 @@ struct SubscriptionsView: View {
         }
     }
 
+    /// Recurring radar: `"none"` hides the vendor; `"cancelled"` keeps it under Ended.
     @MainActor
     private func markNotRecurring(_ item: SubscriptionCandidate) async {
         await applyOverride("none", on: item)
@@ -353,4 +350,3 @@ struct SubscriptionsView: View {
 #Preview {
     SubscriptionsView()
 }
-

@@ -2,15 +2,9 @@
 //  CategorySpendWidget.swift
 //  Widget
 //
-//  Separate widget: spend by category charts (default horizontal bars).
-//  No “Categories” title — pie has total in the center; bars use SF Symbol labels.
-//
-//  SWIFT TERMS IN THIS FILE:
-//  - AppEnum / WidgetConfigurationIntent / @Parameter: Edit Widget options.
-//  - AppIntentTimelineProvider: Timeline that respects the user’s config intent.
-//  - Charts: Swift Charts framework used by CategorySpendChartView.
-//  - typealias Intent: Names the Intent type this provider is paired with.
-//  - Optional Int? pieSliceLimit: nil means “no extra limit” for bars path.
+//  Spend-by-category widget (default horizontal bars).
+//  Pie shows total in the center; bars use SF Symbol labels. No title chrome.
+//  Timeline refreshes about every 15 minutes.
 //
 
 import WidgetKit
@@ -20,7 +14,6 @@ import Charts
 
 // MARK: - Configuration
 
-/// Chart style choices for the category spend widget (picker in Edit Widget).
 enum CategoryChartStyleOption: String, AppEnum {
     case horizontalBar
     case verticalBar
@@ -38,7 +31,6 @@ enum CategoryChartStyleOption: String, AppEnum {
         ]
     }
 
-    /// Map UI option → shared chart format used by CategorySpendChartView.
     var chartFormat: ChartFormat {
         switch self {
         case .horizontalBar: return .horizontalBar
@@ -48,7 +40,6 @@ enum CategoryChartStyleOption: String, AppEnum {
     }
 }
 
-/// Edit Widget options: time range + chart style.
 struct CategorySpendConfigIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource { "Spend by Category" }
     static var description: IntentDescription {
@@ -64,7 +55,6 @@ struct CategorySpendConfigIntent: WidgetConfigurationIntent {
 
 // MARK: - Timeline
 
-/// One category-spend snapshot for a given chart format.
 struct CategorySpendEntry: TimelineEntry {
     let date: Date
     let snapshot: CategorySpendSnapshot
@@ -73,9 +63,7 @@ struct CategorySpendEntry: TimelineEntry {
     var pieSliceLimit: Int? = nil
 }
 
-/// Builds CategorySpendEntry values from SharedStore using the user’s intent.
 struct CategorySpendProvider: AppIntentTimelineProvider {
-    /// Links this provider to CategorySpendConfigIntent.
     typealias Intent = CategorySpendConfigIntent
 
     func placeholder(in context: Context) -> CategorySpendEntry {
@@ -109,7 +97,6 @@ struct CategorySpendProvider: AppIntentTimelineProvider {
     }
 
     private func makeEntry(for configuration: CategorySpendConfigIntent, family: WidgetFamily) -> CategorySpendEntry {
-        // How many bars / pie slices this widget size can show
         let limit: Int
         switch family {
         case .systemSmall: limit = 6
@@ -118,10 +105,8 @@ struct CategorySpendProvider: AppIntentTimelineProvider {
         }
 
         let chartFormat = configuration.chartStyle.chartFormat
-        // Pie merges budget categories into Apple Card color groups. Load *all*
-        // raw categories so each color group can form its own slice; the chart
-        // then applies `limit` to the merged slices. Bars still pre-limit.
-        // Ternary: pie gets nil (no pre-limit); bars pass `limit`.
+        // Pie merges into Apple Card color groups, then applies `limit` to
+        // merged slices. Bars pre-limit raw categories.
         let snapshot = SharedStore.loadCategorySnapshot(
             period: configuration.period.snapshotPeriod,
             categoryLimit: chartFormat == .pie ? nil : limit
@@ -137,7 +122,6 @@ struct CategorySpendProvider: AppIntentTimelineProvider {
 
 // MARK: - View
 
-/// Draws the category chart or an empty/error message.
 struct CategorySpendWidgetView: View {
     var entry: CategorySpendEntry
     @Environment(\.widgetFamily) private var family
@@ -152,13 +136,10 @@ struct CategorySpendWidgetView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
-                // Chart fills the widget — no “Categories” title
-                // Pie: total in the donut hole; bars: SF Symbol labels on the category axis
                 CategorySpendChartView(
                     categories: entry.snapshot.categories,
                     totalSpend: entry.snapshot.totalSpend,
                     format: entry.chartFormat,
-                    // compact/ultraCompact tweak chart typography for widget sizes.
                     compact: !isSmall,
                     ultraCompact: isSmall,
                     pieSliceLimit: entry.pieSliceLimit
@@ -172,7 +153,6 @@ struct CategorySpendWidgetView: View {
 
 // MARK: - Widget definition
 
-/// Spend-by-category widget with configurable period and chart style.
 struct CategorySpendWidget: Widget {
     let kind: String = "CategorySpendWidget"
 

@@ -8,7 +8,7 @@
 	<!-- Export compliance: app does not use custom/non-exempt encryption -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<!-- Static system splash (before SwiftUI loads) — brand blue from asset catalog -->
+	<!-- Static system splash (before SwiftUI loads) — system background (light/dark) -->
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

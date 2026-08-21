@@ -3,7 +3,6 @@
 //  Finance Wizard
 //
 //  One-pass accounts tab model + list rows (credit / checking / orphan spend).
-//  Teaches: plain structs as view models, static factory methods, reduce, Set claiming, View rows.
 //
 
 import SwiftUI
@@ -31,7 +30,6 @@ struct AccountsBoard {
     var otherSpendRows: [UnifiedCardRow] = []
 
     /// Single pass over accounts + transactions + payments → fully populated board.
-    /// static: call as AccountsBoard.build(...) without an instance.
     static func build(
         accounts: [BankAccount],
         transactions: [Transaction],
@@ -40,10 +38,8 @@ struct AccountsBoard {
         referenceDate: Date
     ) -> AccountsBoard {
         var board = AccountsBoard()
-        // Key-path filters: \.isCredit is short for { $0.isCredit }.
         let creditAccounts = accounts.filter(\.isCredit)
         let depositoryAccounts = accounts.filter(\.isDepository)
-        // PeriodSpendIndex pre-aggregates spend by payment method for this period.
         let index = PeriodSpendIndex.build(
             transactions: transactions,
             period: period,
@@ -57,16 +53,12 @@ struct AccountsBoard {
         )
         board.totalPaidInPeriod = CreditAnalytics.totalPaid(in: board.periodPayments)
 
-        // reduce folds an array into one value: here, sum of credit balances (floor at 0).
         board.totalOwed = creditAccounts.reduce(0) { $0 + max(0, $1.currentBalance) }
-        // compactMap unwraps optionals and drops nils, then reduce sums limits.
         board.totalLimit = creditAccounts.compactMap(\.creditLimit).reduce(0, +)
         if board.totalLimit > 0 {
-            // Clamp utilization into 0…1 with min/max.
             board.totalUtilization = min(max(board.totalOwed / board.totalLimit, 0), 1)
         }
         board.totalMinimumDue = creditAccounts.compactMap(\.minimumPaymentAmount).reduce(0, +)
-        // .min() on dates finds the earliest due date.
         board.soonestDueDate = creditAccounts.compactMap(\.nextPaymentDueDate).min()
         board.anyOverdue = creditAccounts.contains { $0.isOverdue == true }
 
@@ -83,7 +75,7 @@ struct AccountsBoard {
                 return day <= horizon
             }
             .sorted {
-                // Sort by due date; missing dates sort last via distantFuture.
+                // Missing dates sort last.
                 ($0.nextPaymentDueDate ?? .distantFuture) < ($1.nextPaymentDueDate ?? .distantFuture)
             }
 
@@ -99,7 +91,6 @@ struct AccountsBoard {
             let methods = account.matchingPaymentMethods(in: pool)
             for m in methods { claimed.insert(m) }
             let totals = index.totals(for: methods)
-            // ?? provides a fallback display name when methods is empty.
             let primary = methods.sorted().first ?? account.plaidDisplayName
             let paid = CreditAnalytics.totalPaid(
                 in: paymentsMatching(
@@ -128,7 +119,7 @@ struct AccountsBoard {
             ($0.availableBalance ?? $0.currentBalance) > ($1.availableBalance ?? $1.currentBalance)
         }) {
             let methods = account.matchingPaymentMethods(in: pool)
-            // subtracting: only count spend not already claimed by a credit card row.
+            // Only count spend not already claimed by a credit card row.
             let own = methods.subtracting(claimed)
             for m in methods { claimed.insert(m) }
             let totals = index.totals(for: own)
@@ -154,7 +145,6 @@ struct AccountsBoard {
             .filter { !AppleCardAccount.isAppleCard(paymentMethod: $0) }
             .sorted()
         for method in orphanMethods {
-            // Dictionary lookup returns optional; ?? .init provides zeros if missing.
             let entry = index.spendByMethod[method] ?? .init(spend: 0, count: 0)
             guard entry.spend > 0 || entry.count > 0 else { continue }
             board.otherSpendRows.append(
@@ -267,7 +257,6 @@ struct UpcomingBillRow: View {
             }
         }
         .padding(.vertical, 2)
-        // combine treats the whole row as one VoiceOver element.
         .accessibilityElement(children: .combine)
     }
 }
@@ -280,22 +269,19 @@ struct TotalPaidDisclosure: View {
     let payments: [CreditCardPayment]
     let periodLabel: String
     var institutionId: String?
-    // Optional function type: (payment) -> institutionId? for per-row logos.
     var resolveInstitutionId: ((CreditCardPayment) -> String?)? = nil
 
     var body: some View {
-        // DisclosureGroup is a collapsible section (tap the label to expand children).
         DisclosureGroup {
             if payments.isEmpty {
                 Text("No card bill payments in \(periodLabel.lowercased()).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                // Explicit id: because CreditCardPayment may not be Identifiable in this ForEach.
+                // Explicit id: CreditCardPayment may not be Identifiable in this ForEach.
                 ForEach(payments, id: \.transactionId) { payment in
                     CreditPaymentRow(
                         payment: payment,
-                        // Optional call: resolveInstitutionId?(payment) returns nil if the closure is nil.
                         institutionId: resolveInstitutionId?(payment) ?? institutionId
                     )
                     .padding(.vertical, 2)
@@ -322,7 +308,6 @@ struct TotalPaidDisclosure: View {
 // MARK: - Row model
 
 /// One account (or orphan method) ready to display and navigate to CardDetailView.
-/// Identifiable so ForEach can track rows as the list updates.
 struct UnifiedCardRow: Identifiable {
     let id: String
     let displayName: String
@@ -334,7 +319,7 @@ struct UnifiedCardRow: Identifiable {
     var bankAccount: BankAccount? = nil
     let paidInPeriod: Double
 
-    // Computed convenience: prefer credit, else depository, for logo lookups.
+    // Prefer credit, else depository, for logo lookups.
     var institutionId: String? {
         creditAccount?.institutionId ?? bankAccount?.institutionId
     }
@@ -368,7 +353,6 @@ struct UnifiedCardLabel: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     } else {
-                        // Multi-line ternary inside Text for orphan methods.
                         Text(row.transactionCount > 0
                              ? "\(row.transactionCount) purchases"
                              : "No purchases this period")
@@ -377,7 +361,7 @@ struct UnifiedCardLabel: View {
                     }
                 }
                 Spacer(minLength: 8)
-                // Trailing metrics differ by account type: credit balance, checking available, or spend.
+                // Trailing metrics: credit balance, checking available, or spend.
                 if let account = row.creditAccount {
                     VStack(alignment: .trailing, spacing: 2) {
                         MoneyText(max(0, account.currentBalance))
@@ -411,7 +395,6 @@ struct UnifiedCardLabel: View {
                 }
             }
 
-            // Utilization bar only for credit accounts that have a ratio.
             if let util = row.creditAccount?.utilization {
                 UtilizationBar(value: util, label: nil)
             }
@@ -433,7 +416,6 @@ struct UnifiedCardLabel: View {
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.red)
                         } else {
-                            // FormatStyle date formatting (abbreviated month/day).
                             Text("Due \(due.formatted(date: .abbreviated, time: .omitted))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -447,7 +429,6 @@ struct UnifiedCardLabel: View {
                 }
             }
 
-            // Footer: spend count and paid-in-period.
             HStack {
                 MoneyText(row.spent, prefix: "Spend ")
                     .font(.caption)
