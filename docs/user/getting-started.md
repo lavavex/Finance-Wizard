@@ -15,7 +15,7 @@ Finance Wizard keeps your bank data **on this device**. You connect banks with *
 - An **Apple ID** (for TestFlight)
 - A free **[Plaid developer account](https://dashboard.plaid.com)** if you want to link banks
   - **Sandbox** — fake test banks (good for trying the app)
-  - **Development / Production** — real banks, if Plaid has enabled those for your account
+  - **Production** — real banks, if Plaid has enabled Production on your account
 
 ## 1. Install from TestFlight
 
@@ -40,7 +40,7 @@ Without keys, the app can’t talk to Plaid or open Link.
 
 1. Sign up at [dashboard.plaid.com](https://dashboard.plaid.com).
 2. Open **Developers → Keys**.
-3. Copy **client_id** and the **secret** that matches the environment you will use (Sandbox secret with Sandbox, and so on).
+3. Copy **client_id** and the **secret** that matches the environment you will use (Sandbox secret with Sandbox, Production secret with Production).
 4. In the app: **Settings**.
 5. Under **Plaid account**, paste **client_id** and **secret**, pick **Environment**, tap **Save credentials**.
 

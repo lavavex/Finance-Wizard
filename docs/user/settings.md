@@ -13,7 +13,7 @@ Plaid keys and banks are required to pull transactions. See [Getting started](ge
 |-------|----------------|
 | **client_id** | From [Plaid Dashboard → Keys](https://dashboard.plaid.com/developers/keys) |
 | **secret** | The secret for the **same** environment you pick below |
-| **Environment** | Sandbox (test banks), Development, or Production |
+| **Environment** | **Sandbox** (test banks) or **Production** (real banks; Plaid must enable Production on your account) |
 | **Save credentials** | Stores keys on this iPhone (secret in the Keychain) |
 
 ## Linked banks
