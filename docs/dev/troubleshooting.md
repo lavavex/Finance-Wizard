@@ -67,7 +67,7 @@ Flag is `settings.onboardingCompleted`. **Settings → Developer → Debug → R
 
 ### Splash logo does not match Welcome
 
-Both use **`AppIconImage`**, not `SplashLogo` and not `Image("AppIcon")` (`.appiconset` is not a loadable `Image`).
+Both use **`AppIconImage`**. `Image("AppIcon")` does not load an `.appiconset`. The old `SplashLogo` imageset was removed.
 
 ## Widget empty (simulator)
 

@@ -28,6 +28,7 @@ For people building, debugging, or changing the code.
 | Page | What it covers |
 |------|----------------|
 | [Development](dev/development.md) | Xcode, signing, App Groups, GitHub PRs |
+| [How it works](dev/how-it-works.md) | End-to-end map with file names |
 | [Architecture](dev/architecture.md) | Targets, folders, launch tree, data flow |
 | [Onboarding (implementation)](dev/onboarding.md) | Splash, gate, `settings.onboardingCompleted` |
 | [Data model](dev/data-model.md) | SwiftData models, amounts, App Group |
