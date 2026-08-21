@@ -91,11 +91,14 @@ struct OnboardingView: View {
                 } label: {
                     Text("Get Started")
                         .frame(maxWidth: .infinity)
-                        .colorInvert()
                 }
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
                 .controlSize(.large)
+                // AccentColor is ink (dark in Light, light in Dark). borderedProminent
+                // often keeps a light label, which vanishes on the Dark fill. Canvas
+                // color contrasts both schemes; .colorInvert() only “fixes” one.
+                .foregroundStyle(Color(.systemBackground))
                 .padding(.horizontal, 40)
                 .padding(.bottom, 8)
             } else {

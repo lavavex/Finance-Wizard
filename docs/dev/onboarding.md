@@ -35,7 +35,7 @@ Both use **`AppIconImage`** (a loadable imageset copied from the App Icon). `Ima
 
 Welcome waits **1.6s** before lifting so the splash overlay has already faded. Replay onboarding (no splash) still uses that delay, then lifts.
 
-No painted canvas: titles use `.primary`, supporting copy `.secondary`. Accent follows `AccentColor`.
+No painted canvas: titles use `.primary`, supporting copy `.secondary`. `AccentColor` is ink (near-black in Light, near-white in Dark). **Get Started** is `.borderedProminent` (capsule). The default prominent label is often light in both schemes, so the title is `Color(.systemBackground)` — canvas color, which contrasts the ink fill. `.colorInvert()` only reads correctly in one scheme.
 
 ## Welcome copy
 

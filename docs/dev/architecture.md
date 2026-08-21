@@ -18,6 +18,10 @@ The app embeds the widget extension (Embed Foundation Extensions build phase). T
 
 App Group (shared store): `group.net.roberth.FinanceWizard`
 
+## UI
+
+Prefer **native iOS**: SwiftUI system controls, SF Symbols, system materials. If SwiftUI has no equivalent, wrap the system UIKit control (`UIViewRepresentable`) instead of a custom or third-party widget.
+
 ## Source folders
 
 Xcode uses **folder-synced** groups for `FinanceWizard/`, `Shared/`, and `Widget/` — new files under those trees join the target automatically.

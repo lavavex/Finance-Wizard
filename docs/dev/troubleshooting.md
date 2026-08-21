@@ -69,6 +69,12 @@ Flag is `settings.onboardingCompleted`. **Settings → Developer → Debug → R
 
 Both use **`AppIconImage`**. `Image("AppIcon")` does not load an `.appiconset`. The old `SplashLogo` imageset was removed.
 
+### Get Started title is the wrong color
+
+`AccentColor` is ink (dark in Light, light in Dark). `.borderedProminent` often keeps a **light** label in both schemes, so Light looks fine and Dark vanishes (white on white). `.colorInvert()` on the title only “fixes” Dark and breaks Light.
+
+Set the button’s `.foregroundStyle` to `Color(.systemBackground)` (canvas color) after the prominent style.
+
 ## Widget empty (simulator)
 
 1. Run the **app**, Sync, then add the widget.
