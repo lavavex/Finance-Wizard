@@ -47,7 +47,7 @@ A free [Plaid](https://dashboard.plaid.com) account is enough to start (Sandbox 
 
 ## Development
 
-Thanks for taking a look. Start with the [developer docs](docs/dev/index.md) and [how it works](docs/dev/how-it-works.md). Agent rules: [`AGENTS.md`](AGENTS.md).
+Thanks for taking a look. Start with the [developer docs](docs/dev/index.md) and [how it works](docs/dev/how-it-works.md).
 
 Not affiliated with Plaid or Apple Card — only your own Plaid keys and Apple platforms.
 

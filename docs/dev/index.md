@@ -20,4 +20,4 @@ Guides for building, debugging, and changing Finance Wizard.
 | [Troubleshooting](troubleshooting.md) | Xcode, console, App Group, Welcome |
 | [Publishing this wiki](github-pages.md) | GitHub Pages |
 
-End-user TestFlight steps: [User docs](../user/index.md). Agent rules: [`AGENTS.md`](../../AGENTS.md). Back to [Home](../index.md).
+End-user TestFlight steps: [User docs](../user/index.md). Back to [Home](../index.md).

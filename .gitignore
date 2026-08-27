@@ -25,3 +25,7 @@ ci_scripts/.last_build_number
 # Maintainer-only notes (machine paths, Gitea remotes, SSH). Tracked: docs/local/README.md
 docs/local/*
 !docs/local/README.md
+
+# Local agent instruction files (not published)
+AGENTS.md
+AGENT.md
