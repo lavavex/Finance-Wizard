@@ -154,8 +154,8 @@ Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synce
 ## Conventions used in this project
 
 - **License:** [MIT](../../LICENSE).  
-- **Comments:** short file headers + `///` for behavior and constraints. No Swift-syntax lectures. No LESSON / TYPE HERE dumps in shipping source. See `AGENTS.md`.  
-- **Docs:** every behavior change is updated in `docs/` in the same change (again `AGENTS.md`).  
+- **Comments:** short file headers + `///` for behavior and constraints. No Swift-syntax lectures. No LESSON / TYPE HERE dumps in shipping source.  
+- **Docs:** every behavior change is updated in `docs/` in the same change.  
 - Expenses from Plaid/API are **negated** when saved.  
 - Upsert by `transactionId`, never blind-replace the whole DB on Sync.  
 - Widget and app share **analytics** helpers so filters stay consistent.  
@@ -197,9 +197,9 @@ git remote add upstream git@github.com:lavavex/Finance-Wizard.git
 3. Branch from **`dev`**, commit, `git push origin your-branch`, open a pull request against **`lavavex/Finance-Wizard`** targeting **`dev`**.
 4. Do not put LAN git hosts, personal SSH keys, or machine Xcode paths in committed docs. Those belong in **`docs/local/`** (gitignored except `docs/local/README.md`).
 
-Typical ignore (see `.gitignore`): `xcuserdata/`, `DerivedData/`, `.DS_Store`, `docs/local/*` (except the README).
+Typical ignore (see `.gitignore`): `xcuserdata/`, `DerivedData/`, `.DS_Store`, `docs/local/*` (except the README), local `AGENTS.md`.
 
-See also: [GitHub Pages](github-pages.md). Agent rules: [`AGENTS.md`](../../AGENTS.md).
+See also: [GitHub Pages](github-pages.md).
 
 ## Testing Sync (Sandbox)
 

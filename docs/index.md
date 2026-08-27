@@ -38,7 +38,7 @@ For people building, debugging, or changing the code.
 | [Troubleshooting](dev/troubleshooting.md) | Build errors, console, Welcome flag |
 | [Publishing this wiki](dev/github-pages.md) | GitHub Pages from `docs/` |
 
-**[All developer docs](dev/index.md)** · Agent rules: [`AGENTS.md`](../AGENTS.md)
+**[All developer docs](dev/index.md)**
 
 ## License / privacy
 
