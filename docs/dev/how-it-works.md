@@ -137,7 +137,7 @@ Webhook worker (`workers/plaid-webhooks/`) records Plaid events; the **app does 
 
 ### Recurring
 
-`SubscriptionsView` scans local `Transaction`s with `SubscriptionAnalytics` (vendor + amount + cadence). User **Cancelled** / **Not Recurring** writes `transaction.subscriptionCadenceOverride`. Overlay GIF: `Resources/WorkingOverlay.gif` + `Shared/UI/BundleGIFView.swift`. Plaid `/transactions/recurring/get` may also fill `RecurringStream` on Sync (add-on; soft-fail).
+`SubscriptionsView` scans local `Transaction`s with `SubscriptionAnalytics` (vendor + amount + cadence). `RecurringCalendarView` wraps `UICalendarView`: dots from each candidate’s next charge date, selection via `@Binding`. User **Cancelled** / **Not Recurring** writes `transaction.subscriptionCadenceOverride`. Overlay GIF: `Resources/WorkingOverlay.gif` + `Shared/UI/BundleGIFView.swift`. Plaid `/transactions/recurring/get` may also fill `RecurringStream` on Sync (add-on; soft-fail).
 
 ### Settings
 

@@ -59,7 +59,7 @@ There are two kinds of categories: **spend** categories (Dining, Gas, …) and *
 
 ## Recurring
 
-Detected subscriptions and repeating bills (same merchant + amount on a schedule). **Active** vs **Ended** (including ones you mark **Cancelled** or **Not Recurring**). Shows next charge and estimated monthly total. Tap through to the charges.
+Detected subscriptions and repeating bills (same merchant + amount on a schedule). A **month grid** at the top marks **next charge** days; tap a day to list those charges under the calendar. **Active** vs **Ended** (including ones you mark **Cancelled** or **Not Recurring**). Shows next charge and estimated monthly total. Tap a row for the charges.
 
 ## Budget
 

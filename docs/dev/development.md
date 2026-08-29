@@ -218,6 +218,7 @@ SwiftUI `#Preview` uses in-memory `modelContainer` where possible so the canvas 
 |------|--------|
 | `Features/AI/` | Next feature. Not in the tab bar or Settings yet. |
 | `SubscriptionsView.swift` | Recurring **tab** UI; filename is historical. |
+| `RecurringCalendarView.swift` | Month grid on Recurring (`UICalendarView` wrap). |
 | `Widget/Widgets/Widget.swift` | Total Spend widget (`FinanceHomeWidget`). |
 
 ## Future extension ideas
