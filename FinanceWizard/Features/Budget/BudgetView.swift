@@ -264,8 +264,6 @@ struct BudgetView: View {
                 }
             } header: {
                 Text("Expected income")
-            } footer: {
-                Text("Amount per payday, how often it hits, and which day. Used for period expectations and future dynamic budgets.")
             }
 
             // MARK: Overall limit
@@ -286,8 +284,6 @@ struct BudgetView: View {
                 .fontWeight(.semibold)
             } header: {
                 Text("Overall")
-            } footer: {
-                Text("Optional total spend target for the month. Category limits below are independent.")
             }
 
             // MARK: Categories
@@ -315,8 +311,6 @@ struct BudgetView: View {
                 }
             } header: {
                 Text("Categories")
-            } footer: {
-                Text("Tap a category to set or clear its monthly limit. Over-budget categories show in red.")
             }
 
             // Only show “unbudgeted” when there is meaningful spend outside limited categories.
@@ -329,8 +323,6 @@ struct BudgetView: View {
                         MoneyText(snapshot.unbudgetedSpend)
                             .foregroundStyle(.secondary)
                     }
-                } footer: {
-                    Text("Spend in categories without a limit.")
                 }
             }
         }
@@ -543,8 +535,6 @@ private struct ExpectedIncomeEditorSheet: View {
                             .multilineTextAlignment(.trailing)
                             .frame(maxWidth: 140)
                     }
-                } footer: {
-                    Text("Amount you receive each payday (not the monthly total).")
                 }
 
                 Section {

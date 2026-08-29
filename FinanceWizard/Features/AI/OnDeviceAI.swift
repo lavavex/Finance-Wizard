@@ -2,12 +2,12 @@
 //  OnDeviceAI.swift
 //  Finance Wizard
 //
-//  Optional on-device AI via Apple Foundation Models. Not required to run the app.
-//  Availability is implemented; session and category suggestion are stubs.
+//  Apple Foundation Models. Availability is live; session and suggestCategory are stubs.
 //
 
 import Foundation
 import FoundationModels
+import SwiftData
 
 // MARK: - Status
 
@@ -23,10 +23,8 @@ enum OnDeviceAIAvailability: Equatable {
 
 // MARK: - Service
 
-/// App-facing entry point for on-device AI.
 enum OnDeviceAI {
 
-    /// Maps `SystemLanguageModel.default.availability` into `OnDeviceAIAvailability`.
     static func availabilityStatus() -> OnDeviceAIAvailability {
         let model = SystemLanguageModel.default
         switch model.availability {
@@ -46,29 +44,75 @@ enum OnDeviceAI {
         }
     }
 
-    /// Opens a `LanguageModelSession` when the model is available.
+    static let askInstructions = """
+        You are Finance Wizard's on-device assistant. All money facts must come from tools. \
+        Never invent amounts, merchants, or balances. Never reverse a comparison: if headline says you are ahead, do not say spending exceeded income. \
+        When getMoneySnapshot returns a headline, lead with that headline (you may add one short sentence on top categories). \
+        Credit card payments are transfers, not new spending. \
+        For overall money or why the user feels broke, call getMoneySnapshot (monthOffset 0; also -1 to compare months). \
+        Call getAccountBalances for cash or what is owed. \
+        Call getRecurringCharges for subscriptions and repeating bills. \
+        Call searchTransactions only for a named merchant or category, never for vague "any transactions to review". \
+        Be concise. Treat currency as USD unless a tool says otherwise.
+        """
+
     static func makeSession() throws -> LanguageModelSession {
-        throw OnDeviceAIError.notImplemented("makeSession")
+        switch availabilityStatus() {
+        case .available:
+            return LanguageModelSession()
+        case .unavailable(let reason), .notEnabled(let reason):
+            throw OnDeviceAIError.modelUnavailable(reason)
+        }
     }
 
-    /// Ask the on-device model for a spend category given a merchant / title.
-    ///
-    /// - Parameters:
-    ///   - title: Transaction title (e.g. "STARBUCKS #1234")
-    ///   - amount: Absolute dollars (optional context for the prompt)
-    ///   - allowedCategories: App category names (keep the model on-rails)
+    /// Chat session: developer instructions + ledger tools (Apple's tool-calling path).
+    static func makeAskSession(modelContext: ModelContext) throws -> LanguageModelSession {
+        switch availabilityStatus() {
+        case .available:
+            return LanguageModelSession(
+                tools: [
+                    MoneySnapshotTool(modelContext: modelContext),
+                    AccountBalancesTool(modelContext: modelContext),
+                    RecurringChargesTool(modelContext: modelContext),
+                    SearchTransactionsTool(modelContext: modelContext),
+                ],
+                instructions: askInstructions
+            )
+        case .unavailable(let reason), .notEnabled(let reason):
+            throw OnDeviceAIError.modelUnavailable(reason)
+        }
+    }
+
+    /// Spend category from merchant title; `allowedCategories` keeps the model on-rails.
     static func suggestCategory(
         title: String,
         amount: Double?,
         allowedCategories: [String]
     ) async throws -> String {
-        throw OnDeviceAIError.notImplemented("suggestCategory")
+        let session = try makeSession()
+        let list = allowedCategories.joined(separator: ", ")
+        let amountPart = amount.map { String(format: "%.2f", abs($0)) } ?? "unknown"
+        let prompt = """
+            Pick exactly one category from this list: \(list).
+            Merchant: \(title)
+            Amount USD: \(amountPart)
+            Reply with only the category name, nothing else.
+            """
+        let response = try await session.respond(to: prompt)
+        let raw = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'."))
+        if let exact = allowedCategories.first(where: { $0.caseInsensitiveCompare(raw) == .orderedSame }) {
+            return exact
+        }
+        if let fuzzy = allowedCategories.first(where: { raw.localizedCaseInsensitiveContains($0) }) {
+            return fuzzy
+        }
+        throw OnDeviceAIError.emptyResponse
     }
 }
 
 // MARK: - Errors
 
-/// Errors AI helpers throw so the UI can show a message.
 enum OnDeviceAIError: LocalizedError {
     case notImplemented(String)
     case modelUnavailable(String)

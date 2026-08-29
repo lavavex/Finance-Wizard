@@ -30,6 +30,7 @@ struct TransactionDetailView: View {
     @State private var saveError: String?
     @State private var didSave = false
     @State private var saveStatusMessage: String?
+    @State private var isSuggestingCategory = false
 
     @Query private var allTransactions: [Transaction]
     @Query private var bankAccounts: [BankAccount]
@@ -234,6 +235,18 @@ struct TransactionDetailView: View {
                 TextField("Category name", text: $categoryText)
                     .textInputAutocapitalization(.words)
 
+                if OnDeviceAI.availabilityStatus() == .available {
+                    Button {
+                        Task { await suggestCategoryFromModel() }
+                    } label: {
+                        Label(
+                            isSuggestingCategory ? "Suggesting…" : "Suggest with Apple Intelligence",
+                            systemImage: "apple.intelligence"
+                        )
+                    }
+                    .disabled(isSuggestingCategory)
+                }
+
                 // Dual system: general spend category vs Benefits earn bucket
                 LabeledContent("Reward category") {
                     HStack(spacing: 6) {
@@ -296,8 +309,6 @@ struct TransactionDetailView: View {
                 }
             } header: {
                 Text("Recurring")
-            } footer: {
-                Text("Mark bills so they appear under Recurring.")
             }
 
             Section {
@@ -421,6 +432,21 @@ struct TransactionDetailView: View {
     }
 
     @MainActor
+    private func suggestCategoryFromModel() async {
+        isSuggestingCategory = true
+        defer { isSuggestingCategory = false }
+        do {
+            let name = try await OnDeviceAI.suggestCategory(
+                title: transaction.title,
+                amount: transaction.amount,
+                allowedCategories: categoryOptions
+            )
+            categoryText = name
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
     private func saveEdits() async {
         let trimmedCategory = categoryText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCategory.isEmpty else {

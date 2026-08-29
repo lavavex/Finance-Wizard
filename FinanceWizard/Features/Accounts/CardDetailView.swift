@@ -227,8 +227,6 @@ struct CardDetailView: View {
                         }
                     } header: {
                         Text("Debit vs ACH rewards")
-                    } footer: {
-                        Text("Cash back can differ for card purchases vs bank transfers. Edit a transaction if the type is wrong.")
                     }
                 }
             }

@@ -34,6 +34,10 @@ Plaid keys and banks are required to pull transactions. See [Getting started](ge
 
 **Restore** default is **Safe merge** (adds missing data; doesn’t overwrite live bank tokens). **Wipe device, then restore** deletes local data first, then restores the backup.
 
+## On-device AI
+
+**Settings → On-device AI** shows whether Apple Intelligence can run on this iPhone (checks when you open Settings).
+
 ## About
 
 Version and build of the TestFlight (or App Store) binary you have installed.

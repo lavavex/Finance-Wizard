@@ -2,15 +2,11 @@
 //  DebugMenuView.swift
 //  Finance Wizard
 //
-//  Developer tools in Settings: inspect and reset local state without deleting the app.
-//  Does not change anything in the Plaid Dashboard.
-//
 
 import SwiftUI
 import SwiftData
 import WidgetKit
 
-/// Confirmation target so one dialog can serve several destructive actions.
 private enum DebugPendingAction: String, Identifiable {
     case resetCursors
     case clearVendorRules
@@ -65,7 +61,6 @@ private enum DebugPendingAction: String, Identifiable {
     }
 }
 
-/// Settings → Debug. Toggle onboarding, inspect counts, reset local stores.
 struct DebugMenuView: View {
     @Environment(\.modelContext) private var modelContext
 
@@ -111,8 +106,6 @@ struct DebugMenuView: View {
                 }
             } header: {
                 Text("Onboarding")
-            } footer: {
-                Text("Off (or Replay) shows Welcome immediately. Get Started writes the flag again.")
             }
 
             Section {
@@ -143,8 +136,6 @@ struct DebugMenuView: View {
                     .textSelection(.enabled)
             } header: {
                 Text("Plaid")
-            } footer: {
-                Text("Credentials stay in Settings → Plaid account. This panel does not show the secret.")
             }
 
             Section {
@@ -157,8 +148,6 @@ struct DebugMenuView: View {
                 Button("Reset card rewards profiles") { pending = .clearBenefits }
             } header: {
                 Text("Reset pieces")
-            } footer: {
-                Text("Each action is local. Linked banks stay linked unless you Wipe everything.")
             }
 
             Section {
@@ -167,8 +156,6 @@ struct DebugMenuView: View {
                 }
             } header: {
                 Text("Nuclear")
-            } footer: {
-                Text("Same as a wipe-then-restore with no backup: SwiftData, Plaid items, prefs, logos.")
             }
 
             if let statusMessage {
@@ -190,8 +177,6 @@ struct DebugMenuView: View {
                 }
             } header: {
                 Text("Prefs (\(preferenceKeys.count))")
-            } footer: {
-                Text("Keys under plaid., card., and settings. Secrets in Keychain are not listed.")
             }
         }
         .navigationTitle("Debug")

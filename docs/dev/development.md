@@ -17,6 +17,8 @@ title: Development
 
 The main app links Apple’s **`FoundationModels`** system framework (no extra entitlement or capability). Use it when you add AI features; nothing else is required in the project file beyond the link + iOS 26 target.
 
+The Simulator cannot run the model. For local Ask testing, run **My Mac (Designed for iPhone)** — see [Troubleshooting](troubleshooting.md#apple-intelligence-on-the-simulator).
+
 | Requirement | Notes |
 |-------------|--------|
 | **SDK / Xcode** | Xcode 26+ with iOS 26 (or newer) SDK |
@@ -28,7 +30,7 @@ The main app links Apple’s **`FoundationModels`** system framework (no extra e
 
 Docs: [Foundation Models](https://developer.apple.com/documentation/foundationmodels)
 
-**Not wired yet:** no app feature code imports or calls the model. When you implement, start from the main target only (`import FoundationModels`); keep widget free of AI unless you deliberately need it there.
+Availability is checked in Settings. **Ask** uses `makeAskSession` + tools. Keep `import FoundationModels` on the main target only; keep the widget free of AI unless you deliberately need it there.
 
 Simulator: Apple Intelligence / Foundation Models support depends on host Mac + OS; prefer a supported physical device if the model reports unavailable.
 
@@ -216,7 +218,7 @@ SwiftUI `#Preview` uses in-memory `modelContainer` where possible so the canvas 
 
 | Item | Status |
 |------|--------|
-| `Features/AI/` | Next feature. Not in the tab bar or Settings yet. |
+| `Features/AI/` | Settings availability, Ask tab, ledger tools. |
 | `SubscriptionsView.swift` | Recurring **tab** UI; filename is historical. |
 | `RecurringCalendarView.swift` | Month grid on Recurring (`UICalendarView` wrap). |
 | `Widget/Widgets/Widget.swift` | Total Spend widget (`FinanceHomeWidget`). |

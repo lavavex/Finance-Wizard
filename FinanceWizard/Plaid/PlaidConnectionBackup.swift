@@ -85,6 +85,7 @@ enum PlaidConnectionBackup {
         AppPreferenceBackup.wipe()
         CardBenefitsStore.resetMemoryCache()
         InstitutionLogoCache.wipeAllLogoFiles()
+        AskStore.wipe()
     }
 
     // MARK: Restore policy

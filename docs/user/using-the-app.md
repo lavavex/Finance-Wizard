@@ -57,6 +57,12 @@ On a credit card you can pick a **product** (so rates match the real card), edit
 
 There are two kinds of categories: **spend** categories (Dining, Gas, …) and **reward** categories (Drugstores, Travel portal, …). The app maps a purchase into a reward bucket for estimates.
 
+## Ask
+
+Center tab. On-device chat (Apple Intelligence). It looks up **totals, balances, recurring, and recent charges** when needed. Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
+
+Transaction detail: **Suggest with Apple Intelligence** picks a category from the app’s list.
+
 ## Recurring
 
 Detected subscriptions and repeating bills (same merchant + amount on a schedule). A **month grid** at the top marks **next charge** days; tap a day to list those charges under the calendar. **Active** vs **Ended** (including ones you mark **Cancelled** or **Not Recurring**). Shows next charge and estimated monthly total. Tap a row for the charges.
