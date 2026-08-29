@@ -71,6 +71,7 @@ struct IncomeExportFile: Decodable {
 private enum AppTab: Hashable {
     case transactions
     case accounts
+    case ask
     case budget
     case subscriptions
     case settings
@@ -106,6 +107,12 @@ struct ContentView: View {
             }
             .tabItem { Label("Accounts", systemImage: "building.columns") }
             .tag(AppTab.accounts)
+            
+            lazyTab(.ask) {
+                OnDeviceAIChatView()
+            }
+            .tabItem { Label("Ask", systemImage: "apple.intelligence") }
+            .tag(AppTab.ask)
 
             lazyTab(.budget) {
                 BudgetView()

@@ -2,15 +2,12 @@
 //  SettingsView.swift
 //  Finance Wizard
 //
-//  Settings screen: Plaid developer credentials, linked banks, status, and debug export.
-//
 
 import SwiftUI
 import SwiftData
 import UIKit
 import UniformTypeIdentifiers
 
-/// Main Settings screen for Plaid keys, bank links, privacy, and About.
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
 
@@ -20,7 +17,7 @@ struct SettingsView: View {
     @State private var redirectURI: String = ""
     @State private var didSave = false
     @State private var showSecret = false
-    /// Sheet payload so Relink always passes the correct Item (avoids stale `.new` mode).
+    /// Relink must capture the Item here so the sheet doesn’t fall back to `.new`.
     @State private var linkSheetRequest: LinkSheetRequest?
     @State private var linkedItems: [PlaidLinkedItem] = []
     @State private var statusMessage: String?
@@ -32,7 +29,6 @@ struct SettingsView: View {
     @State private var showDebugShare = false
     @State private var showDebugExportConfirm = false
 
-    // Full encrypted app backup / restore.
     @State private var showBackupPasswordSheet = false
     @State private var showRestorePasswordSheet = false
     @State private var showRestoreFilePicker = false
@@ -57,8 +53,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Privacy")
-                } footer: {
-                    Text("Masks dollar amounts and card last-four digits so you can share screenshots safely. Turn off when you’re done.")
                 }
 
                 // MARK: Credentials
@@ -67,7 +61,6 @@ struct SettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.body.monospaced())
-
                     HStack {
                         Group {
                             if showSecret {
@@ -111,8 +104,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Plaid account")
-                } footer: {
-                    Text("Keys stay on this device. OAuth banks (Chase, etc.) use \(PlaidCredentialsStore.defaultRedirectURI) by default — add that exact URL under Plaid Dashboard → Allowed redirect URIs. Override only if you use a Universal Link. The app still finishes Link via financewizard://…")
                 }
 
                 // MARK: Linked banks
@@ -182,7 +173,6 @@ struct SettingsView: View {
                     }
 
                     Button {
-                        // .new mode starts a brand-new bank Link flow (not update/relink).
                         linkSheetRequest = LinkSheetRequest(mode: .new)
                     } label: {
                         Label("Link bank account", systemImage: "plus.circle.fill")
@@ -190,8 +180,6 @@ struct SettingsView: View {
                     .disabled(!PlaidCredentialsStore.isConfigured)
                 } header: {
                     Text("Linked banks")
-                } footer: {
-                    Text("After linking, use Sync on Transactions. Swipe left for Relink if login expires, you want more accounts, or APR/due dates are missing (Relink adds the Liabilities product). Orange banners mean Plaid needs a Relink.")
                 }
 
                 // MARK: Sync info
@@ -236,8 +224,6 @@ struct SettingsView: View {
                     .disabled(isWorkingPlaidBackup)
                 } header: {
                     Text("Backup & restore")
-                } footer: {
-                    Text("Password-encrypted full backup: Plaid keys, bank access tokens, transactions, income, accounts, budget, nicknames, learned rules, and app prefs (anything under plaid./card./settings. plus cached logos). Default restore is Safe merge. Choose Wipe device, then restore to delete local data first — including things added after an older backup was made.")
                 }
 
                 if let statusMessage {
@@ -278,6 +264,12 @@ struct SettingsView: View {
                 } header: {
                     Text("About")
                 }
+                
+                Section {
+                    OnDeviceAIStatusView()
+                } header: {
+                    Text("On-device AI")
+                }
 
                 Section {
                     NavigationLink {
@@ -287,8 +279,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Developer")
-                } footer: {
-                    Text("Replay onboarding, inspect counts, and reset local state. Does not change the Plaid Dashboard.")
                 }
             }
             .navigationTitle("Settings")
@@ -757,13 +747,6 @@ private struct PlaidBackupPasswordSheet: View {
                     Toggle("Show password", isOn: $showPassword)
                 } header: {
                     Text("Password")
-                } footer: {
-                    switch mode {
-                    case .createBackup:
-                        Text("Choose a password of at least \(PlaidConnectionBackup.minimumPasswordLength) characters. You’ll need the same password to restore after a factory reset. This is separate from your Apple ID or bank logins. The backup includes bank tokens and all local finance data.")
-                    case .restore:
-                        Text("Enter the password you used when creating this backup. Next you’ll review exactly what will change — existing tokens stay put under Safe merge.")
-                    }
                 }
 
                 if mode == .createBackup, !confirmPassword.isEmpty, password != confirmPassword {
@@ -888,12 +871,6 @@ private struct PlaidRestorePlanSheet: View {
                     }
                 } header: {
                     Text("Connections")
-                } footer: {
-                    if policy.wipesLocalData {
-                        Text("Wipe deletes every bank token, SwiftData row, nickname, learn-rule, and cached logo on this phone, then writes the backup. Local-only data that is not in the backup is gone.")
-                    } else {
-                        Text("Safe merge never overwrites an access token that already exists on this device. Local-only banks are never deleted.")
-                    }
                 }
 
                 if !plan.isConnectionsOnly {
@@ -909,12 +886,6 @@ private struct PlaidRestorePlanSheet: View {
                         LabeledContent("Card benefits", value: "\(plan.benefitsProfileCount)")
                     } header: {
                         Text(policy.wipesLocalData ? "App data (replace)" : "App data (upsert)")
-                    } footer: {
-                        if policy.wipesLocalData {
-                            Text("Local transactions and prefs are deleted first, then the backup is written. Anything not in this file will not come back.")
-                        } else {
-                            Text("Rows are merged by id. Your category/multiplier locks on this phone are preserved. Missing local nicknames and learn-rules are filled in.")
-                        }
                     }
                 } else {
                     Section {

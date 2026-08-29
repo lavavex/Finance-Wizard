@@ -65,7 +65,7 @@ docs/                          GitHub Pages documentation
 | **Where data stays** | Inference is on-device (Apple Intelligence); still prefer minimal transaction context in prompts |
 | **Capability / entitlement** | None beyond what the system already requires for Apple Intelligence |
 
-`Features/AI/` is a skeleton (`OnDeviceAI`, unused `OnDeviceAIStatusView`). It is **not** hooked into Settings. The rest of the app builds and runs without it.
+`Features/AI/` — availability on Settings. **Ask** tab: tool calling, streaming, prewarm, persisted thread (separate store). `suggestCategory` on transaction detail.
 
 ### Why `Shared/`?
 

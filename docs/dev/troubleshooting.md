@@ -7,6 +7,14 @@ title: Troubleshooting
 
 In-app problems for testers: [User help](../user/help.md).
 
+## Apple Intelligence on the Simulator
+
+The iOS Simulator **does not** run the on-device Foundation Model. Ask / `makeSession` will fail there.
+
+**Fix:** Run the **iOS app on this Mac** (Apple silicon): Xcode destination **My Mac (Designed for iPhone)** — scheme **FinanceWizard**. Same binary as iPhone, iPhone-sized window. Apple Intelligence must be on in **System Settings** on the Mac (same as iPhone). This is not Mac Catalyst and not a Mac-native target.
+
+If that destination is missing: App target → Build Settings → **Supports Mac Designed for iPhone** = Yes (`SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD`). **Supports Mac Catalyst** stays No.
+
 ## Build errors
 
 ### Multiple commands produce `Info.plist`

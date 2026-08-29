@@ -2,29 +2,24 @@
 //  OnDeviceAIStatusView.swift
 //  Finance Wizard
 //
-//  Settings-friendly row showing whether optional on-device AI is ready.
-//
 
 import SwiftUI
 
-/// Small row/section for Settings (About or an AI section).
 struct OnDeviceAIStatusView: View {
     @State private var status: OnDeviceAIAvailability = .unavailable(reason: "Not checked yet")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("On-device AI")
-                .font(.headline)
-            Text(statusLabel)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Button("Check availability") {
+            Label {
+                Text(statusLabel)
+            } icon: {
+                Image(systemName: symbolName)
+                    .foregroundStyle(LinearGradient(colors: [.orange, .pink, .purple, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
             }
         }
-        .padding()
+        .onAppear { status = OnDeviceAI.availabilityStatus() }
     }
 
-    /// Human-readable label for `status`.
     private var statusLabel: String {
         switch status {
         case .available:
@@ -35,7 +30,16 @@ struct OnDeviceAIStatusView: View {
             return "Not enabled — \(reason)"
         }
     }
-}
+    private var symbolName: String {
+        switch status {
+        case .available:
+            return "apple.intelligence"
+        case .unavailable(_), .notEnabled(_):
+            return "apple.intelligence.badge.xmark"
+            }
+        }
+    }
+
 
 #Preview {
     OnDeviceAIStatusView()
