@@ -19,16 +19,77 @@ struct SubscriptionsView: View {
     @State private var workLog: [String] = []
     @State private var workStartedAt: Date?
     @State private var path = NavigationPath()
+    @State private var selectedDay: DateComponents? = nil
 
     @Environment(\.modelContext) private var modelContext
 
     private var totalMonthly: Double {
         candidates.reduce(0) { $0 + $1.estimatedMonthly }
     }
-
+    
+    private var chargeDays: Set<DateComponents> {
+        var days: Set<DateComponents> = []
+        for tx in candidates {
+            if let next = nextChargeDate(for: tx) {
+                days.insert(Calendar.current.dateComponents([.year, .month, .day], from: next))
+            }
+        }
+        return days
+    }
+    private var chargesOnSelectedDay: [SubscriptionCandidate] {
+        var matches: [SubscriptionCandidate] = []
+        if selectedDay == nil {
+            return matches
+        }
+        else {
+            for item in candidates {
+                if let next = nextChargeDate( for: item ) {
+                    let parts = Calendar.current.dateComponents([.year, .month, .day], from: next)
+                    if parts.year == selectedDay?.year
+                        && parts.month == selectedDay?.month
+                        && parts.day == selectedDay?.day {
+                        matches.append(item)
+                    }
+                }
+            }
+        }
+        return matches
+    }
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                Section {
+                    RecurringCalendarView(chargeDays: chargeDays, selectedDay: $selectedDay)
+                    
+                        .frame(minHeight: 240)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .padding(.vertical, -16)
+                }
+                    if selectedDay != nil {
+                        Section {
+                        if chargesOnSelectedDay.isEmpty {
+                            VStack{
+                                Image(systemName: "calendar")
+                                    .font(.largeTitle)
+                                    .padding(.bottom, 8)
+                                Text("No Recurring Charges on this Day")
+                                    .multilineTextAlignment(.center)
+                            }
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                                
+                        }
+                        else {
+                        ForEach(chargesOnSelectedDay) { item in
+                            NavigationLink(value: item.id) {
+                                subscriptionRow(item)
+                            }
+                            }
+                        }
+                    }
+                }
                 Section {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
