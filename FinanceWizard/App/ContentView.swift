@@ -71,7 +71,6 @@ struct IncomeExportFile: Decodable {
 private enum AppTab: Hashable {
     case transactions
     case accounts
-    case ask
     case budget
     case subscriptions
     case settings
@@ -83,6 +82,7 @@ struct ContentView: View {
     @State private var selectedTab: AppTab = .transactions
     /// Only build heavy tabs after the user opens them (first switch is still work; launch is not).
     @State private var loadedTabs: Set<AppTab> = [.transactions]
+    @State private var showAsk = false
 
     /// Custom Binding so selecting a tab also marks it “loaded” before assignment.
     private var tabSelection: Binding<AppTab> {
@@ -107,12 +107,6 @@ struct ContentView: View {
             }
             .tabItem { Label("Accounts", systemImage: "building.columns") }
             .tag(AppTab.accounts)
-            
-            lazyTab(.ask) {
-                OnDeviceAIChatView()
-            }
-            .tabItem { Label("Ask", systemImage: "apple.intelligence") }
-            .tag(AppTab.ask)
 
             lazyTab(.budget) {
                 BudgetView()
@@ -137,6 +131,22 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: PlaidConnectionBackup.openFileNotification)) { _ in
             loadedTabs.insert(.settings)
             selectedTab = .settings
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                showAsk = true
+            } label: {
+                Image(systemName: "apple.intelligence")
+                    .font(.title)
+                    .foregroundStyle(LinearGradient(colors: [.orange, .pink, .purple, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+            .accessibilityLabel("Ask")
+            .buttonStyle(.glass)
+            .padding(.trailing, 20)
+            .padding(.bottom, 60)
+        }
+        .sheet(isPresented: $showAsk) {
+            OnDeviceAIChatView()
         }
     }
 

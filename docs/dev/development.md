@@ -218,7 +218,7 @@ SwiftUI `#Preview` uses in-memory `modelContainer` where possible so the canvas 
 
 | Item | Status |
 |------|--------|
-| `Features/AI/` | Settings availability, Ask tab, ledger tools. |
+| `Features/AI/` | Settings availability, Ask overlay + sheet, ledger tools. |
 | `SubscriptionsView.swift` | Recurring **tab** UI; filename is historical. |
 | `RecurringCalendarView.swift` | Month grid on Recurring (`UICalendarView` wrap). |
 | `Widget/Widgets/Widget.swift` | Total Spend widget (`FinanceHomeWidget`). |

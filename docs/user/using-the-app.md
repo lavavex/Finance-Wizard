@@ -59,7 +59,7 @@ There are two kinds of categories: **spend** categories (Dining, Gas, …) and *
 
 ## Ask
 
-Center tab. On-device chat (Apple Intelligence). It looks up **totals, balances, recurring, and recent charges** when needed. Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
+Circular **Ask** button, bottom-right, above the tab bar (not a sixth tab — that would open iOS **More**). On-device chat (Apple Intelligence). It looks up **totals, balances, recurring, and recent charges** when needed. Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
 
 Transaction detail: **Suggest with Apple Intelligence** picks a category from the app’s list.
 

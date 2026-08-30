@@ -20,6 +20,7 @@ struct OnDeviceAIChatView: View {
 
     @State private var draft = ""
     @State private var messages: [AskBubble] = []
+    @FocusState private var composerFocused: Bool
     @State private var followUps: [String] = []
     @State private var promptIndex = 0
     @State private var session: LanguageModelSession?
@@ -61,6 +62,8 @@ struct OnDeviceAIChatView: View {
         VStack(spacing: 0) {
             if messages.isEmpty {
                 Spacer()
+                    .contentShape(Rectangle())
+                    .onTapGesture { composerFocused = false }
             } else {
                 ScrollViewReader { proxy in
                     List {
@@ -74,6 +77,9 @@ struct OnDeviceAIChatView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        composerFocused = false
+                    })
                     .onChange(of: messages.last?.text) { _, _ in
                         if let last = messages.last?.id {
                             withAnimation { proxy.scrollTo(last, anchor: .bottom) }
@@ -112,6 +118,7 @@ struct OnDeviceAIChatView: View {
                 TextField("", text: $draft, axis: .vertical)
                     .lineLimit(1...4)
                     .writingToolsBehavior(.complete)
+                    .focused($composerFocused)
             }
             Button {
                 send(draft)
@@ -139,6 +146,7 @@ struct OnDeviceAIChatView: View {
     private func send(_ raw: String) {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
+        composerFocused = false
         draft = ""
         followUps = []
         let user = AskBubble(id: UUID(), isUser: true, text: text)

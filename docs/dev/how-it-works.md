@@ -166,4 +166,4 @@ Config intents: `Widget/AppIntent.swift`. Widgets never call Plaid; they only re
 
 ## Not wired yet (keep)
 
-`FinanceWizard/Features/AI/` — availability on **Settings → On-device AI**. **Ask** tab: `makeAskSession` + ledger tools (structured `@Generable` results), `streamResponse` into bubbles, `prewarm` on appear, follow-up chips, Writing Tools on the composer, thread persisted in a **separate** `AskChat` SwiftData store. New session after a long transcript. Transaction detail can **Suggest with Apple Intelligence**. App icon source: `FinanceWizard/Mika.icon/` (Icon Composer).
+`FinanceWizard/Features/AI/` — availability on **Settings → On-device AI**. **Ask** is a circular overlay on `ContentView` (not a tab — six tabs trigger iOS **More**). Sheet presents `OnDeviceAIChatView`: `makeAskSession` + ledger tools (structured `@Generable` results), `streamResponse` into bubbles, `prewarm` on appear, follow-up chips, Writing Tools on the composer, thread persisted in a **separate** `AskChat` SwiftData store. New session after a long transcript. Transaction detail can **Suggest with Apple Intelligence**. App icon source: `FinanceWizard/Mika.icon/` (Icon Composer).
