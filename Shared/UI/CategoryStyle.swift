@@ -49,6 +49,9 @@ enum CategoryStyle {
         if isCreditCardPaymentCategory(category) {
             return creditPayment
         }
+        if matches(normalize(category), ["loan"]) {
+            return services
+        }
         // Map fine-grained names into the 7 Apple Card color buckets, then pick the Color
         switch colorGroup(for: category) {
         case .foodAndDrink: return foodAndDrink
@@ -64,7 +67,7 @@ enum CategoryStyle {
 
     /// Bill-pay style categories that should not look like ordinary spend.
     static func isCreditCardPaymentCategory(_ category: String) -> Bool {
-        TransactionAnalytics.isExcludedFromSpendCategory(category)
+        TransactionAnalytics.isCreditCardPaymentCategory(category)
     }
 
     /// SF Symbol for a category (same mapping as before, kept here for one import site)
@@ -128,6 +131,12 @@ enum CategoryStyle {
             return "gift.fill"
         case let c where matches(c, ["fees", "bank fees", "atm"]):
             return "building.columns.fill"
+        case let c where matches(c, ["loan", "my loan", "my chase loan"]):
+            return "banknote"
+        case let c where matches(c, ["refund", "statement credit"]):
+            return "arrow.uturn.backward.circle.fill"
+        case let c where matches(c, ["installment", "installments"]):
+            return "calendar.badge.clock"
         case let c where matches(c, ["coffee"]):
             return "cup.and.saucer.fill"
         // Income categories (GET /api/income — Payroll, Direct Deposit, Interest, Refund, Other Income)
@@ -227,7 +236,7 @@ enum CategoryStyle {
             "subscriptions", "subscription", "services", "service",
             "home internet", "internet", "utilities", "utility",
             "car insurance", "insurance", "phone", "telecom",
-            "housing", "rent", "mortgage", "education", "fees", "bank fees"
+            "housing", "rent", "mortgage", "education", "fees", "bank fees", "loan"
         ]) { return .services }
 
         if matches(c, [

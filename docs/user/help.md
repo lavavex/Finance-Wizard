@@ -59,11 +59,19 @@ Sync in the app first, then add the widget. If it stays empty, delete it and add
 
 They are different plan **types** on the card (Accounts → card → **Payoff plans**):
 
-- **My Loan** — lump sum against the card limit; set the fixed payment, APR, and term.
+- **My Loan** — Chase adds a charge on the card (e.g. “My Chase Loan TO 2667”). Open that row → **My Loan…**, or Accounts → card → **Add payoff plan** → **Choose loan charge**. Then set the fixed payment, APR, and term. It is not a card bill payment.
 - **Pay Over Time** — one purchase in installments. Open that charge → **Pay over time…** (or add the plan on the card and pick Pay Over Time). Optional monthly fee does not reduce remaining.
 - **Promo APR** — set **remaining** to the promo balance and an **end / promo date**. The form can suggest a monthly payment to finish by that date.
 
 **Record this month’s payment** on the plan after you pay. This does not send money to the bank; it only updates remaining in the app.
+
+### Total paid looks twice as high as I actually sent
+
+The bank lists the payment on checking **and** on the card. Accounts → Total paid keeps one. Pull down to **Sync** if an older double-count is still showing.
+
+### A travel credit or store refund showed up as income
+
+Those are card credits, not paychecks. Sync files them as **Refund** (not Total Income). A loan disbursement into checking is **Loan**, not earnings. Payroll and other deposits to checking stay income.
 
 ### Phone or electric bill doesn’t show on Recurring
 

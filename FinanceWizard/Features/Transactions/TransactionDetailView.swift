@@ -32,6 +32,7 @@ struct TransactionDetailView: View {
     @State private var saveStatusMessage: String?
     @State private var isSuggestingCategory = false
     @State private var showPayoffEditor = false
+    @State private var payoffEditorKind: PayoffPlanKind = .payOverTime
 
     @Query private var allTransactions: [Transaction]
     @Query private var bankAccounts: [BankAccount]
@@ -110,10 +111,21 @@ struct TransactionDetailView: View {
         payoffPlans.first { $0.linkedTransactionId == transaction.transactionId }
     }
 
-    private var canCreatePayOverTime: Bool {
-        !TransactionAnalytics.isExcludedFromSpendCategory(
-            categoryText.isEmpty ? transaction.category : categoryText
-        )
+    private var suggestedPayoffKind: PayoffPlanKind? {
+        if PayoffPlanRecognition.looksLikeLoanDisbursement(title: transaction.title) {
+            return .myLoan
+        }
+        if PayoffPlanRecognition.looksLikeInstallmentBillingTitle(transaction.title) {
+            return .payOverTime
+        }
+        let category = categoryText.isEmpty ? transaction.category : categoryText
+        if TransactionAnalytics.isCreditCardPaymentCategory(category) {
+            return nil
+        }
+        if TransactionAnalytics.isExcludedFromSpendCategory(category) {
+            return nil
+        }
+        return .payOverTime
     }
 
     private var benefitsProfile: CardBenefitsProfile {
@@ -325,23 +337,28 @@ struct TransactionDetailView: View {
                 Text("Choose Monthly or Yearly for bills whose amount changes, like phone and electric.")
             }
 
-            if canCreatePayOverTime {
+            if linkedPayoffPlan != nil || suggestedPayoffKind != nil {
                 Section {
                     if let plan = linkedPayoffPlan {
                         NavigationLink {
                             PayoffPlanEditorView(existing: plan)
                         } label: {
-                            LabeledContent("Pay Over Time", value: plan.name)
+                            LabeledContent(plan.kind.displayName, value: plan.name)
                         }
-                    } else {
-                        Button("Pay over time…") {
+                    } else if let kind = suggestedPayoffKind {
+                        Button(kind == .myLoan ? "My Loan…" : "Pay over time…") {
+                            payoffEditorKind = kind
                             showPayoffEditor = true
                         }
                     }
                 } header: {
                     Text("Installments")
                 } footer: {
-                    Text("Chase Pay Over Time (and similar) for this purchase. My Loan is added from the card, not from a single charge.")
+                    if suggestedPayoffKind == .myLoan || linkedPayoffPlan?.kind == .myLoan {
+                        Text("This charge is the My Loan disbursement on the card. Set payment, APR, and term on the plan.")
+                    } else {
+                        Text("Chase Pay Over Time (and similar) for this purchase. My Loan is a separate type — pick its card charge from the plan.")
+                    }
                 }
             }
 
@@ -379,7 +396,7 @@ struct TransactionDetailView: View {
         .sheet(isPresented: $showPayoffEditor) {
             NavigationStack {
                 PayoffPlanEditorView(
-                    defaultKind: .payOverTime,
+                    defaultKind: payoffEditorKind,
                     defaultName: transaction.title,
                     defaultAccountId: linkedAccount?.accountId,
                     defaultPaymentMethod: transaction.paymentMethod,

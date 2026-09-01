@@ -495,6 +495,11 @@ enum PlaidSyncEngine {
             ?? tx.original_description
             ?? "Transaction"
 
+        if abs(tx.amount) < 0.005 {
+            _ = deleteLocal(transactionID: tx.transaction_id, modelContext: modelContext)
+            return
+        }
+
         guard let date = parseDate(tx.date) else { return }
         // Prefer authorized date for display; keep posted `date` as bank settle day.
         let authorizedDate = tx.authorized_date.flatMap(parseDate)
@@ -579,6 +584,24 @@ enum PlaidSyncEngine {
                 modelContext: modelContext
             )
             report.incomeUpserted += 1
+
+        case .adjustment:
+            deleteIncomeOnly(transactionID: tx.transaction_id, modelContext: modelContext)
+            deleteCreditPaymentOnly(transactionID: tx.transaction_id, modelContext: modelContext)
+            let pfc = tx.personal_finance_category?.detailed
+            let category = PayoffPlanRecognition.looksLikeLoanDisbursement(title: title, pfc: pfc)
+                ? KnownCategory.loan.rawValue
+                : KnownCategory.refund.rawValue
+            upsertAdjustment(
+                tx: tx,
+                title: title,
+                date: date,
+                authorizedDate: authorizedDate,
+                paymentMethod: paymentMethod,
+                category: category,
+                modelContext: modelContext
+            )
+            report.expensesUpserted += 1
         }
     }
 
@@ -606,10 +629,14 @@ enum PlaidSyncEngine {
         )
         descriptor.fetchLimit = 1
 
-        let defaultCategory = PlaidCategoryMapper.expenseCategory(from: tx.personal_finance_category)
+        let defaultCategory = PlaidCategoryMapper.expenseCategory(
+            from: tx.personal_finance_category,
+            title: title
+        )
+        let isMyLoan = PayoffPlanRecognition.looksLikeLoanDisbursement(title: title)
         // Vendor learn-rule may override category and multiplier.
-        let rule = VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod)
-        let mappedCategory = rule?.category ?? defaultCategory
+        let rule = isMyLoan ? nil : VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod)
+        let mappedCategory = isMyLoan ? KnownCategory.loan.rawValue : (rule?.category ?? defaultCategory)
         let channel = tx.payment_channel
         let inferredRail = PaymentRail.infer(plaidChannel: channel, title: title)
         let bankAccount = allAccounts.first { $0.accountId == accountId }
@@ -645,6 +672,26 @@ enum PlaidSyncEngine {
             existing.paymentMethod = paymentMethod
             existing.plaidPaymentChannel = channel
             applyEnrichment(to: existing, from: tx, authorizedDate: authorizedDate, isPending: pending)
+            // Purchases Plaid tagged as CREDIT_CARD_PAYMENT (e.g. Best Buy in-store).
+            if TransactionAnalytics.isCreditCardPaymentCategory(existing.category),
+               !PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(title) {
+                existing.category = mappedCategory
+                existing.categoryLocked = false
+                existing.multiplierLocked = false
+                existing.overrideSource = nil
+                deleteCreditPaymentOnly(transactionID: targetId, modelContext: modelContext)
+            }
+            if isMyLoan {
+                // Reclassify old “bill pay” filings of My Chase Loan.
+                existing.category = KnownCategory.loan.rawValue
+                existing.categoryLocked = true
+                existing.multiplier = 0
+                existing.multiplierLocked = true
+                if existing.overrideSource == "credit-payment"
+                    || existing.overrideSource == "legacy-credit-payment" {
+                    existing.overrideSource = "my-loan"
+                }
+            }
             // Locks: user edits win over automatic re-classification on later syncs.
             if !existing.isPaymentRailLocked {
                 existing.paymentRail = inferredRail.rawValue
@@ -682,13 +729,71 @@ enum PlaidSyncEngine {
                 date: date,
                 category: mappedCategory,
                 paymentMethod: paymentMethod,
-                multiplier: mappedMultiplier,
-                categoryLocked: false,
-                multiplierLocked: false,
-                overrideSource: rule != nil ? "rule" : (railMultiplier != nil ? "account-rail" : nil),
+                multiplier: isMyLoan ? 0 : mappedMultiplier,
+                categoryLocked: isMyLoan,
+                multiplierLocked: isMyLoan,
+                overrideSource: isMyLoan ? "my-loan" : (rule != nil ? "rule" : (railMultiplier != nil ? "account-rail" : nil)),
                 plaidPaymentChannel: channel,
                 paymentRail: inferredRail.rawValue,
                 paymentRailLocked: false,
+                authorizedDate: authorizedDate,
+                pendingTransactionId: tx.pending_transaction_id,
+                plaidAccountId: tx.account_id,
+                merchantEntityId: tx.resolvedMerchantEntityID,
+                merchantName: tx.merchant_name,
+                logoURL: tx.resolvedLogoURL,
+                website: tx.resolvedWebsite,
+                pfcConfidence: tx.personal_finance_category?.confidence_level,
+                isPending: pending
+            )
+            modelContext.insert(row)
+        }
+    }
+
+    /// Card refund / loan proceeds: visible ledger row, excluded from spend and income.
+    @MainActor
+    private static func upsertAdjustment(
+        tx: PlaidTransaction,
+        title: String,
+        date: Date,
+        authorizedDate: Date?,
+        paymentMethod: String,
+        category: String,
+        modelContext: ModelContext
+    ) {
+        let targetId = tx.transaction_id
+        var descriptor = FetchDescriptor<Transaction>(
+            predicate: #Predicate<Transaction> { row in
+                row.transactionId == targetId
+            }
+        )
+        descriptor.fetchLimit = 1
+        let amount = abs(tx.amount)
+        let pending = tx.pending ?? false
+        if let existing = try? modelContext.fetch(descriptor).first {
+            existing.title = title
+            existing.amount = amount
+            existing.date = date
+            existing.paymentMethod = paymentMethod
+            existing.category = category
+            existing.categoryLocked = true
+            existing.multiplier = 0
+            existing.multiplierLocked = true
+            existing.overrideSource = "adjustment"
+            applyEnrichment(to: existing, from: tx, authorizedDate: authorizedDate, isPending: pending)
+        } else {
+            let row = Transaction(
+                transactionId: targetId,
+                title: title,
+                amount: amount,
+                date: date,
+                category: category,
+                paymentMethod: paymentMethod,
+                multiplier: 0,
+                categoryLocked: true,
+                multiplierLocked: true,
+                overrideSource: "adjustment",
+                plaidPaymentChannel: tx.payment_channel,
                 authorizedDate: authorizedDate,
                 pendingTransactionId: tx.pending_transaction_id,
                 plaidAccountId: tx.account_id,
@@ -1413,11 +1518,51 @@ enum PlaidSyncEngine {
         var fixed = 0
         if let expenses = try? modelContext.fetch(FetchDescriptor<Transaction>()) {
             for row in expenses {
+                if abs(row.amount) < 0.005
+                    || row.title.lowercased().contains("daily cash adjustment") {
+                    modelContext.delete(row)
+                    fixed += 1
+                    continue
+                }
                 let lower = row.title.lowercased()
+                if PayoffPlanRecognition.looksLikeInstallmentBillingTitle(row.title),
+                   !TransactionAnalytics.isExcludedFromSpendCategory(row.category)
+                    || row.category.caseInsensitiveCompare(TransactionAnalytics.installmentCategory) != .orderedSame {
+                    row.category = TransactionAnalytics.installmentCategory
+                    row.categoryLocked = true
+                    row.multiplier = 0
+                    row.multiplierLocked = true
+                    fixed += 1
+                    continue
+                }
+                if !row.isCategoryLocked {
+                    let refined = TitleCategoryHints.refine(category: row.category, title: row.title)
+                    if refined != row.category {
+                        row.category = refined
+                        fixed += 1
+                    }
+                }
+                if let known = KnownCategory.canonicalName(for: row.category),
+                   known != row.category,
+                   !row.isCategoryLocked {
+                    row.category = known
+                    fixed += 1
+                }
+                // Only real bill-pay titles/categories — not Loan / Refund / Installment.
                 if PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower)
-                    || TransactionAnalytics.isExcludedFromSpendCategory(row.category) {
-                    // Promote to proper bill-payment category + CreditCardPayment row
-                    if !TransactionAnalytics.isExcludedFromSpendCategory(row.category) {
+                    || TransactionAnalytics.isCreditCardPaymentCategory(row.category) {
+                    if TransactionAnalytics.isCreditCardPaymentCategory(row.category),
+                       !PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower) {
+                        row.category = TitleCategoryHints.fromTitleKeywords(row.title)
+                            ?? KnownCategory.shopping.rawValue
+                        row.categoryLocked = false
+                        row.multiplierLocked = false
+                        row.overrideSource = nil
+                        deleteCreditPaymentOnly(transactionID: row.transactionId, modelContext: modelContext)
+                        fixed += 1
+                        continue
+                    }
+                    if !TransactionAnalytics.isCreditCardPaymentCategory(row.category) {
                         row.category = TransactionAnalytics.creditCardPaymentCategory
                         row.categoryLocked = true
                         row.multiplier = 0
@@ -1429,7 +1574,6 @@ enum PlaidSyncEngine {
                     continue
                 }
                 if PlaidCategoryMapper.looksLikeNonSpendTitle(row.title) {
-                    // Other transfers: drop from expense stream
                     modelContext.delete(row)
                     fixed += 1
                 }
@@ -1438,7 +1582,56 @@ enum PlaidSyncEngine {
         if let income = try? modelContext.fetch(FetchDescriptor<Income>()) {
             for row in income {
                 let lower = row.source.lowercased()
-                // Bill pays mis-filed as "Other Income" (credit-side amount < 0 without account type).
+                let pfc = row.pfc
+                if PayoffPlanRecognition.looksLikeLoanDisbursement(title: row.source, pfc: pfc) {
+                    let method = row.accountDisplay
+                    let id = row.transactionId
+                    let title = row.source
+                    let amount = abs(row.amount)
+                    let date = row.date
+                    modelContext.delete(row)
+                    ensureAdjustmentFromParts(
+                        transactionId: id,
+                        title: title,
+                        amount: amount,
+                        date: date,
+                        paymentMethod: method,
+                        category: KnownCategory.loan.rawValue,
+                        modelContext: modelContext
+                    )
+                    fixed += 1
+                    continue
+                }
+                if incomeLooksLikeCardAccount(row) {
+                    let method = row.accountDisplay
+                    let id = row.transactionId
+                    let title = row.source
+                    let amount = abs(row.amount)
+                    let date = row.date
+                    modelContext.delete(row)
+                    if PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower) {
+                        ensureCreditPaymentFromParts(
+                            transactionId: id,
+                            title: title,
+                            amount: amount,
+                            date: date,
+                            paymentMethod: method,
+                            modelContext: modelContext
+                        )
+                    } else {
+                        ensureAdjustmentFromParts(
+                            transactionId: id,
+                            title: title,
+                            amount: amount,
+                            date: date,
+                            paymentMethod: method,
+                            category: KnownCategory.refund.rawValue,
+                            modelContext: modelContext
+                        )
+                    }
+                    fixed += 1
+                    continue
+                }
                 if PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower)
                     || PlaidCategoryMapper.looksLikeNonSpendTitle(row.source) {
                     let id = row.transactionId
@@ -1447,7 +1640,6 @@ enum PlaidSyncEngine {
                     let date = row.date
                     let method = row.accountDisplay
                     modelContext.delete(row)
-                    // Promote to credit payment tracking + excluded spend row
                     ensureCreditPaymentFromParts(
                         transactionId: id,
                         title: title,
@@ -1461,6 +1653,59 @@ enum PlaidSyncEngine {
             }
         }
         return fixed
+    }
+
+    private static func incomeLooksLikeCardAccount(_ row: Income) -> Bool {
+        let n = (row.accountName ?? "") + " " + (row.sourceInstitution ?? "")
+        return CardIssuerCatalog.looksLikeCreditAccountName(n)
+            || n.lowercased().contains("credit card")
+            || n.lowercased().contains("apple card")
+    }
+
+    /// Visible Loan / Refund row converted from mis-filed Income.
+    @MainActor
+    private static func ensureAdjustmentFromParts(
+        transactionId: String,
+        title: String,
+        amount: Double,
+        date: Date,
+        paymentMethod: String,
+        category: String,
+        modelContext: ModelContext
+    ) {
+        let targetId = transactionId
+        var txDesc = FetchDescriptor<Transaction>(
+            predicate: #Predicate<Transaction> { t in
+                t.transactionId == targetId
+            }
+        )
+        txDesc.fetchLimit = 1
+        if let existing = try? modelContext.fetch(txDesc).first {
+            existing.title = title
+            existing.amount = abs(amount)
+            existing.date = date
+            existing.paymentMethod = paymentMethod
+            existing.category = category
+            existing.categoryLocked = true
+            existing.multiplier = 0
+            existing.multiplierLocked = true
+            existing.overrideSource = "adjustment"
+        } else {
+            modelContext.insert(
+                Transaction(
+                    transactionId: transactionId,
+                    title: title,
+                    amount: abs(amount),
+                    date: date,
+                    category: category,
+                    paymentMethod: paymentMethod,
+                    multiplier: 0,
+                    categoryLocked: true,
+                    multiplierLocked: true,
+                    overrideSource: "adjustment"
+                )
+            )
+        }
     }
 
     /// Create CreditCardPayment + excluded-spend Transaction from loose fields (legacy income cleanup).

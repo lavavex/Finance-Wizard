@@ -25,6 +25,7 @@ struct PayoffPlanEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     @Query private var accounts: [BankAccount]
+    @Query private var transactions: [Transaction]
 
     @State private var kind: PayoffPlanKind = .custom
     @State private var name: String = ""
@@ -39,6 +40,8 @@ struct PayoffPlanEditorView: View {
     @State private var endDate: Date = Date()
     @State private var termText: String = ""
     @State private var notes: String = ""
+    @State private var linkedTransactionId: String?
+    @State private var showTransactionPicker = false
     @State private var saveError: String?
 
     private var creditAccounts: [BankAccount] {
@@ -53,6 +56,35 @@ struct PayoffPlanEditorView: View {
 
     private var paymentMethodLabel: String {
         selectedAccount?.displayName ?? defaultPaymentMethod
+    }
+
+    private var linkedTransaction: Transaction? {
+        guard let id = linkedTransactionId else { return nil }
+        return transactions.first { $0.transactionId == id }
+    }
+
+    private var showsTransactionPicker: Bool {
+        kind == .myLoan || kind == .payOverTime
+    }
+
+    private var pickerTransactions: [Transaction] {
+        let onCard = transactions.filter { matchesSelectedCard($0) }
+        if kind == .myLoan {
+            let loans = onCard.filter { PayoffPlanRecognition.looksLikeLoanDisbursement(title: $0.title) }
+                .sorted { $0.date > $1.date }
+            let rest = onCard.filter { !PayoffPlanRecognition.looksLikeLoanDisbursement(title: $0.title) }
+                .sorted {
+                    if abs($0.amount) == abs($1.amount) { return $0.date > $1.date }
+                    return abs($0.amount) > abs($1.amount)
+                }
+            return Array((loans + rest).prefix(80))
+        }
+        return Array(
+            onCard
+                .filter { !TransactionAnalytics.isCreditCardPaymentCategory($0.category) }
+                .sorted { $0.date > $1.date }
+                .prefix(80)
+        )
     }
 
     var body: some View {
@@ -82,6 +114,32 @@ struct PayoffPlanEditorView: View {
                     }
                 } else if !defaultPaymentMethod.isEmpty {
                     LabeledContent("Card", value: defaultPaymentMethod)
+                }
+            }
+
+            if showsTransactionPicker {
+                Section {
+                    if let tx = linkedTransaction {
+                        Button {
+                            showTransactionPicker = true
+                        } label: {
+                            TransactionRowView(transaction: tx)
+                        }
+                        .buttonStyle(.plain)
+                        Button("Clear transaction", role: .destructive) {
+                            linkedTransactionId = nil
+                        }
+                    } else {
+                        Button(kind == .myLoan ? "Choose loan charge" : "Choose purchase") {
+                            showTransactionPicker = true
+                        }
+                    }
+                } header: {
+                    Text(kind == .myLoan ? "Loan charge" : "Purchase")
+                } footer: {
+                    Text(kind == .myLoan
+                         ? "The loan posts as a charge on the card (for example “My Loan TO 1234”). Pick that row."
+                         : "The purchase this Pay Over Time plan is paying off.")
                 }
             }
 
@@ -187,6 +245,33 @@ struct PayoffPlanEditorView: View {
                 aprText = "0"
             }
         }
+        .sheet(isPresented: $showTransactionPicker) {
+            NavigationStack {
+                List {
+                    if pickerTransactions.isEmpty {
+                        Text("No charges on this card yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(pickerTransactions, id: \.transactionId) { tx in
+                            Button {
+                                applyLinkedTransaction(tx)
+                                showTransactionPicker = false
+                            } label: {
+                                TransactionRowView(transaction: tx)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .navigationTitle(kind == .myLoan ? "Loan charge" : "Purchase")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showTransactionPicker = false }
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -197,7 +282,7 @@ struct PayoffPlanEditorView: View {
         case .promoAPR:
             Text("Set remaining to the promo balance (not the whole card). Monthly payment should clear it before the promo ends.")
         case .myLoan:
-            Text("Use the loan’s fixed payment and APR from Chase — not a Pay Over Time purchase plan.")
+            Text("Use the loan’s fixed payment and APR. Original amount should match the loan charge on the card.")
         case .custom:
             EmptyView()
         }
@@ -263,11 +348,15 @@ struct PayoffPlanEditorView: View {
             }
             termText = plan.termMonths.map(String.init) ?? ""
             notes = plan.notes ?? ""
+            linkedTransactionId = plan.linkedTransactionId
             return
         }
         kind = defaultKind
-        name = defaultName
+        name = defaultKind == .myLoan && !defaultName.isEmpty
+            ? PayoffPlanRecognition.displayName(fromTitle: defaultName)
+            : defaultName
         selectedAccountId = defaultAccountId ?? ""
+        linkedTransactionId = defaultLinkedTransactionId
         if let amount = defaultAmount {
             originalText = formatMoney(amount)
             remainingText = formatMoney(amount)
@@ -323,6 +412,7 @@ struct PayoffPlanEditorView: View {
             plan.startDate = startDate
             plan.endDate = hasEndDate ? endDate : nil
             plan.termMonths = term
+            plan.linkedTransactionId = linkedTransactionId
             plan.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             plan.isEnded = ended
             plan.updatedAt = Date()
@@ -340,11 +430,14 @@ struct PayoffPlanEditorView: View {
                 startDate: startDate,
                 endDate: hasEndDate ? endDate : nil,
                 termMonths: term,
-                linkedTransactionId: defaultLinkedTransactionId,
+                linkedTransactionId: linkedTransactionId,
                 notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 isEnded: ended
             )
             modelContext.insert(plan)
+        }
+        if kind == .myLoan, let tx = linkedTransaction {
+            adoptMyLoanCharge(tx)
         }
         do {
             try modelContext.save()
@@ -376,6 +469,64 @@ struct PayoffPlanEditorView: View {
         modelContext.delete(plan)
         try? modelContext.save()
         dismiss()
+    }
+
+    private func matchesSelectedCard(_ tx: Transaction) -> Bool {
+        if let account = selectedAccount {
+            return account.matchesPaymentMethod(tx.paymentMethod)
+        }
+        let method = paymentMethodLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if method.isEmpty { return true }
+        if tx.paymentMethod.caseInsensitiveCompare(method) == .orderedSame { return true }
+        if !defaultPaymentMethod.isEmpty,
+           tx.paymentMethod.caseInsensitiveCompare(defaultPaymentMethod) == .orderedSame {
+            return true
+        }
+        return false
+    }
+
+    private func applyLinkedTransaction(_ tx: Transaction) {
+        linkedTransactionId = tx.transactionId
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || name == defaultName {
+            name = PayoffPlanRecognition.displayName(fromTitle: tx.title)
+        }
+        let amount = abs(tx.amount)
+        if originalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            originalText = formatMoney(amount)
+        }
+        if remainingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            remainingText = formatMoney(amount)
+        }
+        startDate = tx.date
+        if let account = BankAccount.matching(paymentMethod: tx.paymentMethod, in: Array(accounts)) {
+            selectedAccountId = account.accountId
+        }
+        if kind == .myLoan {
+            originalText = formatMoney(amount)
+            if remainingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                remainingText = formatMoney(amount)
+            }
+        }
+    }
+
+    /// My Loan is not a card bill payment — drop Total paid + recategorize as Loan.
+    private func adoptMyLoanCharge(_ tx: Transaction) {
+        tx.category = KnownCategory.loan.rawValue
+        tx.categoryLocked = true
+        tx.multiplier = 0
+        tx.multiplierLocked = true
+        tx.overrideSource = "my-loan"
+        let targetId = tx.transactionId
+        var descriptor = FetchDescriptor<CreditCardPayment>(
+            predicate: #Predicate<CreditCardPayment> { row in
+                row.transactionId == targetId
+            }
+        )
+        descriptor.fetchLimit = 1
+        if let payment = try? modelContext.fetch(descriptor).first {
+            modelContext.delete(payment)
+        }
     }
 
     private func parseAmount(_ raw: String) -> Double? {

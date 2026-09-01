@@ -379,7 +379,8 @@ struct AllTransactionsView: View {
                                 IncomeRowView(
                                     income: row,
                                     institutionId: matched?.institutionId,
-                                    institutionName: matched?.institutionName ?? row.sourceInstitution
+                                    institutionName: matched?.institutionName ?? row.sourceInstitution,
+                                    accountLabel: matched?.displayName
                                 )
                             }
                         }
@@ -844,6 +845,7 @@ struct IncomeRowView: View {
     let income: Income
     var institutionId: String? = nil
     var institutionName: String? = nil
+    var accountLabel: String? = nil
 
     @Environment(\.screenshotPrivacy) private var screenshotPrivacy
 
@@ -870,7 +872,7 @@ struct IncomeRowView: View {
                 Text(income.source)
                     .font(.body)
                 Text(
-                    "\(income.category) · \(ScreenshotPrivacy.cardText(income.accountDisplay, privacy: screenshotPrivacy))"
+                    "\(income.category) · \(ScreenshotPrivacy.cardText(accountLabel ?? income.accountDisplay, privacy: screenshotPrivacy))"
                 )
                     .font(.caption)
                     .foregroundStyle(.secondary)

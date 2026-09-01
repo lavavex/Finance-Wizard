@@ -15,7 +15,7 @@ Defined in `Shared/Models/Transaction.swift`.
 | `title` | `String` | Merchant / vendor |
 | `amount` | `Double` | **Expenses stored negative** in the app |
 | `date` | `Date` | Parsed from `YYYY-MM-DD` |
-| `category` | `String` | Budget category (e.g. Dining, Gas (Car)) |
+| `category` | `String` | Budget category (e.g. Dining, Gas (Car)). **Loan** / **Refund** / **Installment** / **Credit Card Payment** are excluded from Total Spend. |
 | `paymentMethod` | `String` | Card / account name |
 | `multiplier` | `Double` | Points rate (e.g. 5 = 5x) |
 | `subscriptionCadenceOverride` | `String?` | Recurring: `nil` = auto; `"yearly"` / `"monthly"` / `"weekly"` = treat that vendor as recurring (amount may vary); `"cancelled"` / `"none"` (Not Recurring); cleared in Debug |
@@ -115,7 +115,7 @@ Card bill payments only (`Shared/Models/CreditCardPayment.swift`). Never counted
 | `RecurringStream` | `Shared/Models/RecurringStream.swift` | Stored recurring groups used with live detection on the Recurring tab |
 | `PayoffPlan` | `Shared/Models/PayoffPlan.swift` | User-declared My Loan / Pay Over Time / promo APR / custom payoff on a card |
 
-`PayoffPlan.kindRaw`: `myLoan` | `payOverTime` | `promoAPR` | `custom`. Remaining is user-updated (**Record payment** subtracts `monthlyPayment`; `monthlyFee` does not). Shown on Recurring like a bill.
+`PayoffPlan.kindRaw`: `myLoan` | `payOverTime` | `promoAPR` | `custom`. Remaining is user-updated (**Record payment** subtracts `monthlyPayment`; `monthlyFee` does not). Shown on Recurring like a bill. `linkedTransactionId` is the Pay Over Time purchase **or** the My Loan card charge.
 
 ## App Group store
 

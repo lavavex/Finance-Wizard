@@ -23,6 +23,8 @@ enum PlaidFlowKind: String, Sendable {
     case transfer
     /// Paying a credit card bill — track for payoff UI, not spend/income
     case creditPayment
+    /// Card refund / statement credit / loan proceeds — visible, not spend, not income
+    case adjustment
 }
 
 // MARK: - Mapper
@@ -52,10 +54,21 @@ enum PlaidCategoryMapper {
         let type = (accountType ?? "").lowercased()
         let subtype = (accountSubtype ?? "").lowercased()
 
+        // Card-line loan: charge on the card is Loan; deposit to checking is not earnings.
+        if PayoffPlanRecognition.looksLikeLoanDisbursement(title: title, pfc: detailed) {
+            if type == "credit", amount >= 0 { return .spending }
+            if amount < 0 { return .adjustment }
+        }
+
         // Must run before transfer/income: on credit accounts payments are amount < 0
         // and otherwise become "Other Income".
         if isCreditCardPayment(primary: primary, detailed: detailed, titleLower: lower, accountType: type, amount: amount) {
             return .creditPayment
+        }
+
+        // Card-side money-in that is not a bill pay: refunds and issuer credits.
+        if type == "credit", amount < 0 {
+            return .adjustment
         }
 
         // Do not treat credit-account money-in as a generic transfer (bill pays often
@@ -84,16 +97,24 @@ enum PlaidCategoryMapper {
     ) -> Bool {
         let onCredit = accountType == "credit"
 
+        if PayoffPlanRecognition.looksLikeLoanDisbursement(title: titleLower) {
+            return false
+        }
+
         if detailed.contains("CREDIT_CARD_PAYMENT") {
+            // On the card, money *out* is a purchase — PFC CREDIT_CARD_PAYMENT is not enough.
+            if onCredit && amount > 0 { return false }
             return true
         }
         // Loan payments only when clearly a revolving card (not mortgage / auto)
         if primary == "LOAN_PAYMENTS"
             && (detailed.contains("CREDIT_CARD") || detailed.contains("CREDIT_CARD_PAYMENT")) {
+            if onCredit && amount > 0 { return false }
             return true
         }
         if primary == "LOAN_PAYMENTS" && (looksLikeCardPaymentTitle(titleLower) || onCredit) {
-            // On the card itself, LOAN_PAYMENTS is almost always a bill payment.
+            // On the card itself, money-in LOAN_PAYMENTS is a bill payment; money-out is not.
+            if onCredit && amount > 0 { return false }
             return true
         }
         if (primary == "TRANSFER_OUT" || primary == "TRANSFER_IN")
@@ -135,6 +156,7 @@ enum PlaidCategoryMapper {
     /// Strong title heuristics that usually mean “this is a card bill payment.”
     private static func looksLikeCardPaymentTitle(_ lower: String) -> Bool {
         if looksLikeMerchantRefundTitle(lower) { return false }
+        if PayoffPlanRecognition.looksLikeLoanDisbursement(title: lower) { return false }
 
         if lower.contains("payment thank you") { return true }
         if lower.contains("thank you") && (lower.contains("payment") || lower.contains("pymt")
@@ -227,16 +249,20 @@ enum PlaidCategoryMapper {
 
     /// Merchant refunds / statement credits that must not be treated as bill payments.
     private static func looksLikeMerchantRefundTitle(_ lower: String) -> Bool {
-        if lower.contains("statement credit") { return true }
+        if lower.contains("statement credit") || lower.contains("store credit") { return true }
         if lower.contains("cash reward") || lower.contains("your cash reward") { return true }
-        if lower.contains("annual fee refund") { return true }
+        if lower.contains("annual fee refund") || lower.contains("fee refund") { return true }
         if lower.hasPrefix("offer:") { return true }
-        if lower.contains("stubhub credit") { return true }
-        if lower.contains(" store credit") { return true }
         if lower.contains("refund") || lower.contains("return") || lower.contains("reversal") {
             return true
         }
         if lower.contains("cashback") || lower.contains("cash back") { return true }
+        // Issuer credits (“TRAVEL CREDIT $300/YEAR”) — not the words “credit card”.
+        if lower.contains("credit"), !lower.contains("credit card"), !lower.contains("creditcard") {
+            if lower.contains("$") || lower.contains("/year") || lower.contains("annual") {
+                return true
+            }
+        }
         return false
     }
 
@@ -291,7 +317,13 @@ enum PlaidCategoryMapper {
     /// Human-readable expense category from PFC primary/detailed.
     /// Always returns a `KnownCategory` spend name (or Credit Card Payment).
     /// Detailed strings are checked first (more specific), then primary buckets.
-    static func expenseCategory(from pfc: PlaidPFC?) -> String {
+    static func expenseCategory(from pfc: PlaidPFC?, title: String = "") -> String {
+        if PayoffPlanRecognition.looksLikeLoanDisbursement(title: title) {
+            return KnownCategory.loan.rawValue
+        }
+        if PayoffPlanRecognition.looksLikeInstallmentBillingTitle(title) {
+            return KnownCategory.installment.rawValue
+        }
         let primary = (pfc?.primary ?? "").uppercased()
         let detailed = (pfc?.detailed ?? "").uppercased()
 
@@ -399,17 +431,17 @@ enum PlaidCategoryMapper {
             if detailed.contains("STUDENT") {
                 return KnownCategory.education.rawValue
             }
-            return KnownCategory.miscellaneous.rawValue
+            return TitleCategoryHints.refine(category: KnownCategory.miscellaneous.rawValue, title: title)
         case "BANK_FEES":
             return KnownCategory.fees.rawValue
         case "GOVERNMENT_AND_NON_PROFIT":
             if detailed.contains("DONATION") || detailed.contains("CHARIT") {
                 return KnownCategory.giftsDonations.rawValue
             }
-            return KnownCategory.miscellaneous.rawValue
+            return TitleCategoryHints.refine(category: KnownCategory.miscellaneous.rawValue, title: title)
         default:
             // Never invent free-form titles like "Income" / "Transfer Out" — stay in KnownCategory.
-            return KnownCategory.miscellaneous.rawValue
+            return TitleCategoryHints.refine(category: KnownCategory.miscellaneous.rawValue, title: title)
         }
     }
 
