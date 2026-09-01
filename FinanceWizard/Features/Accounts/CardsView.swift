@@ -16,6 +16,7 @@ struct CardsView: View {
     @Query private var transactions: [Transaction]
     @Query(sort: \BankAccount.name) private var accounts: [BankAccount]
     @Query(sort: \CreditCardPayment.date, order: .reverse) private var payments: [CreditCardPayment]
+    @Query private var payoffPlans: [PayoffPlan]
     @Environment(\.modelContext) private var modelContext
 
     // Filters / sort shared with detail screens via NavigationLink parameters.
@@ -43,7 +44,7 @@ struct CardsView: View {
 
     /// Dependency string for .task(id:): when any piece changes, rebuild the board.
     private var refreshToken: String {
-        "\(period.rawValue)|\(referenceDate.timeIntervalSince1970)|\(transactions.count)|\(accounts.count)|\(payments.count)|\(nicknameEpoch)"
+        "\(period.rawValue)|\(referenceDate.timeIntervalSince1970)|\(transactions.count)|\(accounts.count)|\(payments.count)|\(payoffPlans.count)|\(nicknameEpoch)"
     }
 
     var body: some View {
@@ -160,7 +161,13 @@ struct CardsView: View {
                 if !board.upcomingBills.isEmpty {
                     Section {
                         ForEach(board.upcomingBills, id: \.accountId) { account in
-                            UpcomingBillRow(account: account)
+                            UpcomingBillRow(
+                                account: account,
+                                installmentIncluded: PayoffPlanProgress.installmentIncludedInMin(
+                                    on: account,
+                                    plans: Array(payoffPlans)
+                                )
+                            )
                         }
                     } header: {
                         Text("Upcoming bills")
@@ -266,17 +273,21 @@ struct CardsView: View {
         let accounts = self.accounts
         let transactions = self.transactions
         let payments = self.payments
+        let payoffPlans = self.payoffPlans
         _ = nicknameEpoch
 
         Task { @MainActor in
             // Task.yield() lets SwiftUI paint once before the potentially heavy build.
             await Task.yield()
+            PayoffPlanProgress.applyStatementProgress(plans: payoffPlans, accounts: accounts)
+            try? modelContext.save()
             board = AccountsBoard.build(
                 accounts: accounts,
                 transactions: transactions,
                 payments: payments,
                 period: period,
-                referenceDate: referenceDate
+                referenceDate: referenceDate,
+                payoffPlans: payoffPlans
             )
             isBuildingBoard = false
         }
@@ -318,16 +329,9 @@ struct CardsView: View {
                 displayName: row.displayName,
                 rawPaymentMethod: row.rawPaymentMethod,
                 matchingPaymentMethods: row.matchingPaymentMethods,
-                period: period,
-                referenceDate: referenceDate,
                 sort: sort,
                 creditAccount: row.creditAccount,
                 bankAccount: row.bankAccount ?? row.creditAccount,
-                periodPayments: AccountsBoard.paymentsMatching(
-                    credit: row.creditAccount,
-                    paymentMethods: row.matchingPaymentMethods,
-                    in: board.periodPayments
-                ),
                 onNicknameChanged: { nicknameEpoch += 1 }
             )
         } label: {

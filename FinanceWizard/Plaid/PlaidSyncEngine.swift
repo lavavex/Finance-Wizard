@@ -173,6 +173,10 @@ enum PlaidSyncEngine {
             }
         }
 
+        let plans = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
+        let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        PayoffPlanProgress.applyStatementProgress(plans: plans, accounts: accounts)
+
         try modelContext.save()
         WidgetCenter.shared.reloadAllTimelines()
         return report

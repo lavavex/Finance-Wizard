@@ -115,17 +115,17 @@ struct TransactionDetailView: View {
         if PayoffPlanRecognition.looksLikeLoanDisbursement(title: transaction.title) {
             return .myLoan
         }
-        if PayoffPlanRecognition.looksLikeInstallmentBillingTitle(transaction.title) {
+        if PayoffPlanRecognition.looksLikeInstallmentBillingTitle(transaction.title)
+            || transaction.category.caseInsensitiveCompare(TransactionAnalytics.installmentCategory) == .orderedSame {
             return .payOverTime
         }
+        return nil
+    }
+
+    private var showsRecurringPicker: Bool {
+        if suggestedPayoffKind != nil || linkedPayoffPlan != nil { return false }
         let category = categoryText.isEmpty ? transaction.category : categoryText
-        if TransactionAnalytics.isCreditCardPaymentCategory(category) {
-            return nil
-        }
-        if TransactionAnalytics.isExcludedFromSpendCategory(category) {
-            return nil
-        }
-        return .payOverTime
+        return !TransactionAnalytics.isExcludedFromSpendCategory(category)
     }
 
     private var benefitsProfile: CardBenefitsProfile {
@@ -270,9 +270,14 @@ struct TransactionDetailView: View {
                     }
                     .disabled(isSuggestingCategory)
                 }
+            } header: {
+                Text("Spend category")
+            } footer: {
+                Text("Budget and Total Spend use this category.")
+            }
 
-                // Dual system: general spend category vs Benefits earn bucket
-                LabeledContent("Reward category") {
+            Section {
+                LabeledContent("Earn bucket") {
                     HStack(spacing: 6) {
                         Image(systemName: CategoryStyle.symbolName(forReward: mappedRewardCategory.rawValue))
                             .foregroundStyle(CategoryStyle.color(forReward: mappedRewardCategory.rawValue))
@@ -304,7 +309,6 @@ struct TransactionDetailView: View {
                     }
                 }
                 .onChange(of: selectedRail) { _, newRail in
-                    // Suggest account reward multiplier for this rail when not yet custom-locked
                     if !transaction.isMultiplierLocked,
                        let suggested = linkedAccount?.rewardMultiplier(for: newRail) {
                         multiplierText = formatMultiplier(suggested)
@@ -322,19 +326,23 @@ struct TransactionDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             } header: {
-                Text("Edit")
+                Text("Rewards")
+            } footer: {
+                Text("How this card pays points or cash back. Separate from the spend category above.")
             }
 
-            Section {
-                Picker("Recurring", selection: $subscriptionMode) {
-                    ForEach(SubscriptionDeclareMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
+            if showsRecurringPicker {
+                Section {
+                    Picker("Repeats", selection: $subscriptionMode) {
+                        ForEach(SubscriptionDeclareMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
                     }
+                } header: {
+                    Text("Repeating bill")
+                } footer: {
+                    Text("For subscriptions and bills (phone, electric). Not for card loans or installments.")
                 }
-            } header: {
-                Text("Recurring")
-            } footer: {
-                Text("Choose Monthly or Yearly for bills whose amount changes, like phone and electric.")
             }
 
             if linkedPayoffPlan != nil || suggestedPayoffKind != nil {
@@ -355,9 +363,9 @@ struct TransactionDetailView: View {
                     Text("Installments")
                 } footer: {
                     if suggestedPayoffKind == .myLoan || linkedPayoffPlan?.kind == .myLoan {
-                        Text("This charge is the My Loan disbursement on the card. Set payment, APR, and term on the plan.")
+                        Text("This charge is the loan disbursement. The monthly amount is part of the card minimum and due with the statement.")
                     } else {
-                        Text("Chase Pay Over Time (and similar) for this purchase. My Loan is a separate type — pick its card charge from the plan.")
+                        Text("Installment billing for this purchase. The monthly amount is part of the card minimum and due with the statement.")
                     }
                 }
             }

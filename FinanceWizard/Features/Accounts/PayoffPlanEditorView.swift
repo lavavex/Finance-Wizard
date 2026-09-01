@@ -63,8 +63,28 @@ struct PayoffPlanEditorView: View {
         return transactions.first { $0.transactionId == id }
     }
 
+    private var availableKinds: [PayoffPlanKind] {
+        if let existing { return [existing.kind] }
+        if defaultKind.followsCardStatement { return [defaultKind] }
+        return [.promoAPR, .custom]
+    }
+
+    private var showsKindPicker: Bool { availableKinds.count > 1 }
+
     private var showsTransactionPicker: Bool {
-        kind == .myLoan || kind == .payOverTime
+        kind.followsCardStatement
+    }
+
+    private var showsSchedule: Bool {
+        !kind.followsCardStatement
+    }
+
+    private var editorTitle: String {
+        if existing != nil { return kind.displayName }
+        if kind.followsCardStatement {
+            return kind == .myLoan ? "Loan on this card" : "Installment"
+        }
+        return "Pay off by date"
     }
 
     private var pickerTransactions: [Transaction] {
@@ -90,9 +110,11 @@ struct PayoffPlanEditorView: View {
     var body: some View {
         Form {
             Section {
-                Picker("Type", selection: $kind) {
-                    ForEach(PayoffPlanKind.allCases) { value in
-                        Text(value.displayName).tag(value)
+                if showsKindPicker {
+                    Picker("Type", selection: $kind) {
+                        ForEach(availableKinds) { value in
+                            Text(value.displayName).tag(value)
+                        }
                     }
                 }
                 Text(kind.shortHelp)
@@ -166,36 +188,52 @@ struct PayoffPlanEditorView: View {
                 amountsFooter
             }
 
-            Section {
-                DatePicker("First payment", selection: $startDate, displayedComponents: .date)
-                Toggle("End / promo date", isOn: $hasEndDate)
-                if hasEndDate {
+            if kind.followsCardStatement {
+                Section {
+                    if let due = selectedAccount?.nextPaymentDueDate {
+                        LabeledContent("Due with card") {
+                            Text(due, style: .date)
+                        }
+                    } else {
+                        Text("Due on the same day as this card’s statement payment. It is included in the minimum due.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("Remaining months")
+                        Spacer()
+                        TextField("optional", text: $termText)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 100)
+                    }
+                } header: {
+                    Text("Card statement")
+                } footer: {
+                    Text("The issuer adds this installment to the minimum at statement close. There is no separate due date.")
+                }
+            } else {
+                Section {
                     DatePicker(
-                        kind == .promoAPR ? "Promo ends" : "Last payment",
+                        kind == .promoAPR ? "Promo ends" : "Pay off by",
                         selection: $endDate,
                         displayedComponents: .date
                     )
-                }
-                HStack {
-                    Text("Term (months)")
-                    Spacer()
-                    TextField("optional", text: $termText)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(maxWidth: 100)
-                }
-                if hasEndDate, let suggested = suggestedMonthly {
-                    Button("Use \(suggested.formatted(.currency(code: "USD"))) / mo to finish by this date") {
-                        monthlyText = formatMoney(suggested)
+                    if let suggested = suggestedMonthly {
+                        Button("Use \(suggested.formatted(.currency(code: "USD"))) / mo to finish by this date") {
+                            monthlyText = formatMoney(suggested)
+                        }
                     }
+                    if let warning = paceWarning {
+                        Text(warning)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } header: {
+                    Text("Pay off by")
+                } footer: {
+                    Text("Extra principal you plan to send with the card payment each statement. Due date follows the card.")
                 }
-                if let warning = paceWarning {
-                    Text(warning)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            } header: {
-                Text("Schedule")
             }
 
             Section {
@@ -205,11 +243,17 @@ struct PayoffPlanEditorView: View {
 
             if existing != nil {
                 Section {
-                    Button("Record this month’s payment") {
-                        recordPayment()
+                    if !kind.followsCardStatement {
+                        Button("Record this month’s payment") {
+                            recordPayment()
+                        }
                     }
                     Button("Mark paid off") {
                         markPaidOff()
+                    }
+                } footer: {
+                    if kind.followsCardStatement {
+                        Text("Remaining drops when the next statement closes (after Sync).")
                     }
                 }
                 Section {
@@ -227,7 +271,7 @@ struct PayoffPlanEditorView: View {
                 }
             }
         }
-        .navigationTitle(existing == nil ? "New payoff plan" : "Payoff plan")
+        .navigationTitle(editorTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if existing == nil {
@@ -301,7 +345,7 @@ struct PayoffPlanEditorView: View {
     }
 
     private var suggestedMonthly: Double? {
-        guard hasEndDate, let remaining = parseAmount(remainingText), remaining > 0 else {
+        guard showsSchedule, let remaining = parseAmount(remainingText), remaining > 0 else {
             return nil
         }
         let cal = Calendar.current
@@ -316,7 +360,7 @@ struct PayoffPlanEditorView: View {
     }
 
     private var paceWarning: String? {
-        guard hasEndDate,
+        guard showsSchedule,
               let remaining = parseAmount(remainingText), remaining > 0,
               let monthly = parseAmount(monthlyText), monthly > 0 else {
             return nil
@@ -366,17 +410,22 @@ struct PayoffPlanEditorView: View {
         } else if let apr = defaultApr {
             aprText = formatNumber(apr)
         }
+        hasEndDate = !defaultKind.followsCardStatement
         if let end = defaultEndDate {
-            hasEndDate = true
             endDate = end
+        } else if hasEndDate {
+            endDate = Calendar.current.date(byAdding: .month, value: 6, to: Date()) ?? Date()
         }
     }
 
     private func save() {
         saveError = nil
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            saveError = "Name can’t be empty."
+        var trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedName.isEmpty {
+            trimmedName = kind.displayName
+        }
+        if showsSchedule, endDate < Calendar.current.startOfDay(for: Date()) {
+            saveError = "Pay-off date must be in the future."
             return
         }
         guard let original = parseAmount(originalText), original > 0 else {
@@ -409,13 +458,16 @@ struct PayoffPlanEditorView: View {
             plan.monthlyPayment = monthly
             plan.monthlyFee = kind == .payOverTime ? fee : nil
             plan.aprPercent = apr
-            plan.startDate = startDate
-            plan.endDate = hasEndDate ? endDate : nil
+            plan.startDate = selectedAccount?.nextPaymentDueDate ?? startDate
+            plan.endDate = kind.followsCardStatement ? nil : endDate
             plan.termMonths = term
             plan.linkedTransactionId = linkedTransactionId
             plan.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             plan.isEnded = ended
             plan.updatedAt = Date()
+            if kind.followsCardStatement, plan.lastAppliedStatementDate == nil {
+                plan.lastAppliedStatementDate = selectedAccount?.lastStatementIssueDate
+            }
         } else {
             let plan = PayoffPlan(
                 kind: kind,
@@ -427,12 +479,14 @@ struct PayoffPlanEditorView: View {
                 monthlyPayment: monthly,
                 monthlyFee: kind == .payOverTime ? fee : nil,
                 aprPercent: apr ?? (kind == .promoAPR ? 0 : nil),
-                startDate: startDate,
-                endDate: hasEndDate ? endDate : nil,
+                startDate: selectedAccount?.nextPaymentDueDate ?? startDate,
+                endDate: kind.followsCardStatement ? nil : endDate,
                 termMonths: term,
                 linkedTransactionId: linkedTransactionId,
                 notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-                isEnded: ended
+                isEnded: ended,
+                lastAppliedStatementDate: kind.followsCardStatement
+                    ? selectedAccount?.lastStatementIssueDate : nil
             )
             modelContext.insert(plan)
         }
@@ -561,6 +615,7 @@ struct PayoffPlanEditorView: View {
 /// Compact row for Recurring and card detail lists.
 struct PayoffPlanRowView: View {
     let plan: PayoffPlan
+    var cardDueDate: Date? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -590,8 +645,8 @@ struct PayoffPlanRowView: View {
 
     private var subtitle: String {
         var parts: [String] = [plan.kind.displayName]
-        if let next = plan.nextPaymentDate(), next > Date() {
-            parts.append("next \(next.formatted(date: .abbreviated, time: .omitted))")
+        if let next = plan.nextPaymentDate(cardDueDate: cardDueDate), next > Date() {
+            parts.append("due \(next.formatted(date: .abbreviated, time: .omitted))")
         } else if plan.isEnded {
             parts.append("paid off")
         } else if let end = plan.endDate {

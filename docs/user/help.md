@@ -57,13 +57,12 @@ Sync in the app first, then add the widget. If it stays empty, delete it and add
 
 ### How do I track Chase My Loan vs Pay Over Time vs an AmEx 0% promo?
 
-They are different plan **types** on the card (Accounts → card → **Payoff plans**):
+They are different things:
 
-- **My Loan** — Chase adds a charge on the card (e.g. “My Chase Loan TO 2667”). Open that row → **My Loan…**, or Accounts → card → **Add payoff plan** → **Choose loan charge**. Then set the fixed payment, APR, and term. It is not a card bill payment.
-- **Pay Over Time** — one purchase in installments. Open that charge → **Pay over time…** (or add the plan on the card and pick Pay Over Time). Optional monthly fee does not reduce remaining.
-- **Promo APR** — set **remaining** to the promo balance and an **end / promo date**. The form can suggest a monthly payment to finish by that date.
+- **My Loan / Pay Over Time / Apple installments** — attach the charge or installment row. Monthly amount is in the **card minimum**, due with the **statement**. Do not use **Pay off by date** for these.
+- **Pay off by date** — Accounts → card → **Pay off by date**. For a promo or extra balance you want gone by a date. The form can suggest a monthly extra to finish by then.
 
-**Record this month’s payment** on the plan after you pay. This does not send money to the bank; it only updates remaining in the app.
+Loan/installment **remaining** drops when a new statement posts (after Sync). Pay-off-by-date plans still have **Record this month’s payment** if you want to tick extra principal by hand.
 
 ### Total paid looks twice as high as I actually sent
 

@@ -294,6 +294,7 @@ enum PlaidConnectionBackup {
         var linkedTransactionId: String?
         var notes: String?
         var isEnded: Bool
+        var lastAppliedStatementDate: Date?
         var createdAt: Date
         var updatedAt: Date
     }
@@ -1076,6 +1077,7 @@ private extension PlaidConnectionBackup {
                     live.linkedTransactionId = row.linkedTransactionId
                     live.notes = row.notes
                     live.isEnded = row.isEnded
+                    live.lastAppliedStatementDate = row.lastAppliedStatementDate
                     live.createdAt = row.createdAt
                     live.updatedAt = row.updatedAt
                 }
@@ -1098,6 +1100,7 @@ private extension PlaidConnectionBackup {
                         linkedTransactionId: row.linkedTransactionId,
                         notes: row.notes,
                         isEnded: row.isEnded,
+                        lastAppliedStatementDate: row.lastAppliedStatementDate,
                         createdAt: row.createdAt,
                         updatedAt: row.updatedAt
                     )
@@ -1283,6 +1286,7 @@ private extension PlaidConnectionBackup {
             linkedTransactionId: p.linkedTransactionId,
             notes: p.notes,
             isEnded: p.isEnded,
+            lastAppliedStatementDate: p.lastAppliedStatementDate,
             createdAt: p.createdAt,
             updatedAt: p.updatedAt
         )
