@@ -51,8 +51,9 @@ enum OnDeviceAI {
         Credit card payments are transfers, not new spending. \
         For overall money or why the user feels broke, call getMoneySnapshot (monthOffset 0; also -1 to compare months). \
         Call getAccountBalances for cash or what is owed. \
-        Call getRecurringCharges for subscriptions and repeating bills. \
+        Call getRecurringCharges for subscriptions, repeating bills, and card payoff plans (My Loan, Pay Over Time, promo APR). \
         Call searchTransactions only for a named merchant or category, never for vague "any transactions to review". \
+        When a tool row has name or cardLabel, say that string exactly. Never say CREDIT CARD or a last-four unless that field is that string. \
         Be concise. Treat currency as USD unless a tool says otherwise.
         """
 

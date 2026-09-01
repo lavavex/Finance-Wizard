@@ -2,10 +2,11 @@
 //  SubscriptionAnalytics.swift
 //  Finance Wizard
 //
-//  Detects likely *subscriptions* — not “I buy coffee here a lot.”
-//  Requires near-identical amounts + subscription signals or strict monthly/yearly cadence.
+//  Detects likely *subscriptions* and repeating bills — not “I buy coffee here a lot.”
+//  Fixed-price subs need near-identical amounts + name/cadence signals.
+//  Variable bills (phone, electric) group by vendor when cadence is regular, or when
+//  the user marks a charge as weekly/monthly/yearly (amount need not match).
 //  Monthly/weekly with no charge in 3+ months → treated as cancelled (hidden).
-//  Users can declare a transaction as yearly/monthly/weekly (or not a sub).
 //
 
 import Foundation
@@ -45,6 +46,8 @@ struct SubscriptionCandidate: Identifiable, Sendable {
     var confidenceNote: String
     /// True when cadence came from a user declaration on a transaction.
     var isUserDeclared: Bool
+    /// True when clustered charges are not all the same price (phone / electric).
+    var amountVaries: Bool
 }
 
 /// Lightweight Sendable row for subscription detection off the main actor.
@@ -163,10 +166,12 @@ enum SubscriptionAnalytics {
 
         var results: [SubscriptionCandidate] = []
         var claimedKeys = Set<String>()
+        var claimedVendors = Set<String>()
 
         // 1) User-declared subscriptions (yearly etc.) — even single charges / habit categories
         for declared in collectDeclaredCandidates(from: spendAll, now: now) {
             claimedKeys.insert(candidateKey(declared))
+            claimedVendors.insert(declared.normalizedVendor)
             results.append(declared)
         }
 
@@ -179,47 +184,38 @@ enum SubscriptionAnalytics {
         }
 
         for (key, rows) in byVendor {
+            if claimedVendors.contains(key) { continue }
             let sorted = rows.sorted { $0.date < $1.date }
+            var addedForVendor = false
             for cluster in exactAmountClusters(sorted) {
-                let declaredCadence = cluster.compactMap(\.declaredSubscriptionCadence).first
-
-                let nameHits = cluster.filter { looksLikeSubscriptionName($0.title) }
-                let strongName = !nameHits.isEmpty
-                let minCount = (strongName || declaredCadence != nil) ? 2 : 3
-                guard cluster.count >= minCount || declaredCadence != nil && cluster.count >= 1 else {
-                    continue
-                }
-                if cluster.count < minCount, declaredCadence == nil { continue }
-
-                let amounts = cluster.map { abs($0.amount) }
-                let typical = median(amounts)
-                guard typical > 0 else { continue }
-                guard amountSpreadOK(amounts, typical: typical) else { continue }
-
-                let dates = cluster.map(\.date).sorted()
-                let cadence: SubscriptionCadence
-                if let declaredCadence {
-                    cadence = declaredCadence
-                } else if let inferred = inferCadence(dates: dates, allowWeekly: strongName) {
-                    cadence = inferred
-                } else {
-                    continue
-                }
-                if cadence == .weekly, !strongName, declaredCadence == nil { continue }
-
-                let candidate = makeCandidate(
+                if let candidate = candidateFromCluster(
                     key: key,
                     cluster: cluster,
-                    typical: typical,
-                    cadence: cadence,
-                    strongName: strongName,
-                    isUserDeclared: declaredCadence != nil,
+                    requireTightAmount: true,
                     now: now
-                )
+                ) {
+                    let ck = candidateKey(candidate)
+                    guard !claimedKeys.contains(ck) else { continue }
+                    claimedKeys.insert(ck)
+                    results.append(candidate)
+                    addedForVendor = true
+                }
+            }
+            // Phone / electric / other bills: same vendor, regular cadence, amount may change.
+            let billLike = sorted.contains { looksLikeBillCategory($0.category) }
+                || sorted.contains { looksLikeSubscriptionName($0.title) }
+            if !addedForVendor, billLike,
+               let candidate = candidateFromCluster(
+                    key: key,
+                    cluster: sorted,
+                    requireTightAmount: false,
+                    now: now
+               ) {
                 let ck = candidateKey(candidate)
-                guard !claimedKeys.contains(ck) else { continue }
-                claimedKeys.insert(ck)
-                results.append(candidate)
+                if !claimedKeys.contains(ck) {
+                    claimedKeys.insert(ck)
+                    results.append(candidate)
+                }
             }
         }
 
@@ -262,8 +258,8 @@ enum SubscriptionAnalytics {
             guard let cadence = tx.declaredSubscriptionCadence else { continue }
             let vendor = normalizeVendor(tx.title)
             guard vendor.count >= 2 else { continue }
-            let amtBucket = String(format: "%.2f", abs(tx.amount))
-            let key = "\(vendor)|\(cadence.rawValue)|\(amtBucket)"
+            // Vendor + cadence only — phone and electric amounts change month to month.
+            let key = "\(vendor)|\(cadence.rawValue)"
             byKey[key, default: []].append(tx)
         }
 
@@ -271,11 +267,11 @@ enum SubscriptionAnalytics {
         for (_, rows) in byKey {
             guard let cadence = rows.compactMap(\.declaredSubscriptionCadence).first else { continue }
             let vendor = normalizeVendor(rows[0].title)
-            let typicalSeed = abs(rows[0].amount)
             let related = spend.filter { tx in
                 guard !tx.isDeclaredNotSubscription else { return false }
                 guard normalizeVendor(tx.title) == vendor else { return false }
-                return abs(abs(tx.amount) - typicalSeed) <= max(0.25, typicalSeed * 0.01)
+                if let other = tx.declaredSubscriptionCadence, other != cadence { return false }
+                return true
             }
             let cluster = related.isEmpty ? rows : related
             let amounts = cluster.map { abs($0.amount) }
@@ -294,6 +290,52 @@ enum SubscriptionAnalytics {
             )
         }
         return results
+    }
+
+    /// Build a candidate from a vendor cluster. Tight amount matching is for
+    /// fixed-price subs; variable bills skip the spread check and use cadence.
+    nonisolated private static func candidateFromCluster(
+        key: String,
+        cluster: [SubscriptionTxSnapshot],
+        requireTightAmount: Bool,
+        now: Date
+    ) -> SubscriptionCandidate? {
+        let declaredCadence = cluster.compactMap(\.declaredSubscriptionCadence).first
+        let strongName = cluster.contains { looksLikeSubscriptionName($0.title) }
+        let billLike = cluster.contains { looksLikeBillCategory($0.category) }
+        let minCount = (strongName || billLike || declaredCadence != nil) ? 2 : 3
+        guard cluster.count >= minCount || (declaredCadence != nil && cluster.count >= 1) else {
+            return nil
+        }
+        if cluster.count < minCount, declaredCadence == nil { return nil }
+
+        let amounts = cluster.map { abs($0.amount) }
+        let typical = median(amounts)
+        guard typical > 0 else { return nil }
+        if requireTightAmount {
+            guard amountSpreadOK(amounts, typical: typical) else { return nil }
+        }
+
+        let dates = cluster.map(\.date).sorted()
+        let cadence: SubscriptionCadence
+        if let declaredCadence {
+            cadence = declaredCadence
+        } else if let inferred = inferCadence(dates: dates, allowWeekly: strongName) {
+            cadence = inferred
+        } else {
+            return nil
+        }
+        if cadence == .weekly, !strongName, declaredCadence == nil { return nil }
+
+        return makeCandidate(
+            key: key,
+            cluster: cluster,
+            typical: typical,
+            cadence: cadence,
+            strongName: strongName,
+            isUserDeclared: declaredCadence != nil,
+            now: now
+        )
     }
 
     /// Shared builder for auto-detected and user-declared candidates.
@@ -316,8 +358,15 @@ enum SubscriptionAnalytics {
         let dates = cluster.map(\.date).sorted()
         let methods = Array(Set(cluster.map(\.cardName))).sorted()
         let display = cluster.max(by: { $0.date < $1.date })?.title ?? key
+        let amounts = cluster.map { abs($0.amount) }
+        let spread = (amounts.max() ?? typical) - (amounts.min() ?? typical)
+        let amountVaries = spread > max(0.25, typical * 0.01)
         let note: String = {
             if isUserDeclared { return "Marked by you as \(cadence.displayName.lowercased())" }
+            if amountVaries {
+                if strongName { return "Name looks like a bill / membership; amount varies" }
+                return "Regular \(cadence.displayName.lowercased()) schedule (amount varies)"
+            }
             if strongName { return "Name looks like a membership / subscription" }
             return "Same amount on a regular \(cadence.displayName.lowercased()) schedule"
         }()
@@ -332,7 +381,8 @@ enum SubscriptionAnalytics {
             paymentMethods: methods,
             sampleTransactionIds: cluster.map(\.transactionId),
             confidenceNote: note,
-            isUserDeclared: isUserDeclared
+            isUserDeclared: isUserDeclared,
+            amountVaries: amountVaries
         )
     }
 
@@ -348,10 +398,17 @@ enum SubscriptionAnalytics {
         let blocked = [
             "dining", "groceries", "grocery", "gas (car)", "gas", "transit",
             "shopping", "personal care", "health", "travel", "flights", "hotels",
-            "housing", "utilities", "pets", "fees",
+            "housing", "pets", "fees",
             "transfer", "transfers", "credit card payment"
         ]
         return blocked.contains(c)
+    }
+
+    /// Spend categories that are usually a repeating bill, even when the amount changes.
+    nonisolated private static func looksLikeBillCategory(_ category: String) -> Bool {
+        let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return c == "utilities" || c == "home internet" || c == "car insurance"
+            || c == "subscriptions"
     }
 
     /// Title keywords for grocery/coffee/gas/etc. habits to exclude from auto-detect.
@@ -395,8 +452,8 @@ enum SubscriptionAnalytics {
             "google*gsuite", "google workspace", "google one", "google storage",
             "planet fitness", "equinox", "peloton", "classpass",
             "hellofresh", "blue apron", "factor75", "factor meals",
-            "comcast", "xfinity", "verizon wireless", "t-mobile", "tmobile",
-            "at&t", "att* ", "spectrum",
+            "comcast", "xfinity", "verizon", "vzw", "t-mobile", "tmobile",
+            "at&t", "att* ", "spectrum", "google fi", "cricket wireless",
             "ynab", "mint ", "credit karma",
         ]
         return needles.contains { t.contains($0) }

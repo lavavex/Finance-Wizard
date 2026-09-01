@@ -150,7 +150,7 @@ struct AccountBalancesTool: Tool {
             let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
             let rows = accounts.map { account in
                 AccountBalanceRow(
-                    name: account.name,
+                    name: account.displayName,
                     kind: account.type,
                     institution: account.institutionName,
                     currentUSD: account.currentBalance,
@@ -179,7 +179,7 @@ struct AccountBalanceList {
 /// Detected recurring charges (capped).
 struct RecurringChargesTool: Tool {
     let name = "getRecurringCharges"
-    let description = "Detected subscriptions and repeating bills with estimated monthly cost. Use for questions about Netflix, bills, or upcoming recurring charges."
+    let description = "Detected subscriptions, repeating bills, and card payoff plans (My Loan, Pay Over Time, promo APR) with estimated monthly cost. Use for questions about Netflix, bills, loans, or upcoming recurring charges."
 
     let modelContext: ModelContext
 
@@ -199,8 +199,7 @@ struct RecurringChargesTool: Tool {
             let snaps = SubscriptionAnalytics.snapshots(from: rows)
             let groups = SubscriptionAnalytics.detect(snapshots: snaps)
             let active = Array(groups.prefix(20))
-            let monthly = active.reduce(0.0) { $0 + $1.estimatedMonthly }
-            let items = active.map {
+            var items = active.map {
                 RecurringChargeRow(
                     vendor: $0.displayVendor,
                     typicalAmountUSD: $0.typicalAmount,
@@ -208,6 +207,19 @@ struct RecurringChargesTool: Tool {
                     estimatedMonthlyUSD: $0.estimatedMonthly
                 )
             }
+            let payoffs = ((try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? [])
+                .filter(\.isActive)
+            for plan in payoffs.prefix(20) {
+                items.append(
+                    RecurringChargeRow(
+                        vendor: "\(plan.kind.displayName): \(plan.name)",
+                        typicalAmountUSD: plan.installmentTotal,
+                        cadence: "Monthly",
+                        estimatedMonthlyUSD: plan.installmentTotal
+                    )
+                )
+            }
+            let monthly = items.reduce(0.0) { $0 + $1.estimatedMonthlyUSD }
             return RecurringChargeList(estimatedMonthlyUSD: monthly, charges: items)
         }
     }
@@ -244,29 +256,54 @@ struct SearchTransactionsTool: Tool {
 
     func call(arguments: Arguments) async throws -> TransactionSearchList {
         try await MainActor.run {
-            let needle = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
             let limit = min(20, max(1, arguments.limit))
             var descriptor = FetchDescriptor<Transaction>(
                 sortBy: [SortDescriptor(\.date, order: .reverse)]
             )
             descriptor.fetchLimit = 120
             let rows = (try? modelContext.fetch(descriptor)) ?? []
-            let matches = rows.filter {
-                $0.title.lowercased().contains(needle) || $0.category.lowercased().contains(needle)
-            }
-            .prefix(limit)
+            let matches = TransactionSearch.filter(rows, query: arguments.query, accounts: accounts).prefix(limit)
             let day = DateFormatter()
             day.dateStyle = .medium
             day.timeStyle = .none
             let items = matches.map { row in
-                TransactionSearchRow(
+                let account = BankAccount.matching(paymentMethod: row.paymentMethod, in: accounts)
+                let cardLabel = CardLabelStore.label(
+                    paymentMethod: row.paymentMethod,
+                    accountId: account?.accountId,
+                    fallback: row.paymentMethod
+                )
+                return TransactionSearchRow(
                     date: day.string(from: row.displayDate),
                     title: row.title,
                     category: row.category,
-                    amountUSD: abs(row.amount)
+                    amountUSD: abs(row.amount),
+                    cardLabel: cardLabel,
+                    transactionId: row.transactionId
                 )
             }
             return TransactionSearchList(query: arguments.query, rows: Array(items))
+        }
+    }
+}
+
+struct TopTransactionsTool: Tool {
+    let name = "getTopTransactions"
+    let description = "Search for biggest/largest single charges; not category totals; not a named merchant"
+    let modelContext: ModelContext
+    
+    @Generable
+    struct Arguments {
+        @Guide(description: "0 = this calendar month, -1 = last month, down to -12")
+        var monthOffset: Int
+        @Guide(description: "Max Number of transactions/rows to return, from 1 to 20")
+        var limit: Int
+    }
+    
+    func call(arguments: Arguments) async throws -> TopTransactionList {
+        try await MainActor.run {
+            return TopTransactionList(monthLabel: "month", rows: [])
         }
     }
 }
@@ -277,10 +314,18 @@ struct TransactionSearchRow {
     var title: String
     var category: String
     var amountUSD: Double
+    var cardLabel: String
+    var transactionId: String
 }
 
 @Generable
 struct TransactionSearchList {
     var query: String
+    var rows: [TransactionSearchRow]
+}
+
+@Generable
+struct TopTransactionList {
+    var monthLabel: String
     var rows: [TransactionSearchRow]
 }

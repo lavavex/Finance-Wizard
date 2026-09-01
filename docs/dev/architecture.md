@@ -32,7 +32,7 @@ FinanceWizard/                 Main app (SwiftUI + Plaid client)
   Features/
     Onboarding/                Welcome, gate, completed-flag store
     Transactions/              List tools, detail, period filter, review, Recurring
-    Accounts/                  Accounts hub, card detail, accounts board model
+    Accounts/                  Accounts hub, card detail, payoff plans, accounts board model
     Budget/                    Monthly budget UI
     Settings/                  Settings, backup, debug export, Debug menu
     Import/                    Apple Card CSV
