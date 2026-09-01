@@ -2,7 +2,8 @@
 //  SubscriptionsView.swift
 //  Finance Wizard
 //
-//  Recurring charges tab: detect subscriptions, mark Not Recurring vs Cancelled.
+//  Recurring charges tab: detect subscriptions and variable bills,
+//  mark Not Recurring vs Cancelled.
 //
 
 import SwiftUI
@@ -10,6 +11,7 @@ import SwiftData
 
 struct SubscriptionsView: View {
     @Query private var transactions: [Transaction]
+    @Query private var payoffPlans: [PayoffPlan]
 
     @State private var candidates: [SubscriptionCandidate] = []
     @State private var ended: [SubscriptionCandidate] = []
@@ -23,8 +25,25 @@ struct SubscriptionsView: View {
 
     @Environment(\.modelContext) private var modelContext
 
+    private var monthlySummaryLabel: String {
+        if isScanning { return "Scanning..." }
+        if activePayoffPlans.isEmpty {
+            return "\(candidates.count) recurring"
+        }
+        return "\(candidates.count) recurring · \(activePayoffPlans.count) payoff"
+    }
+
+    private var activePayoffPlans: [PayoffPlan] {
+        payoffPlans.filter(\.isActive).sorted { $0.installmentTotal > $1.installmentTotal }
+    }
+
+    private var endedPayoffPlans: [PayoffPlan] {
+        payoffPlans.filter { !$0.isActive }.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
     private var totalMonthly: Double {
         candidates.reduce(0) { $0 + $1.estimatedMonthly }
+            + activePayoffPlans.reduce(0) { $0 + $1.installmentTotal }
     }
     
     private var chargeDays: Set<DateComponents> {
@@ -34,7 +53,23 @@ struct SubscriptionsView: View {
                 days.insert(Calendar.current.dateComponents([.year, .month, .day], from: next))
             }
         }
+        for plan in activePayoffPlans {
+            if let next = plan.nextPaymentDate() {
+                days.insert(Calendar.current.dateComponents([.year, .month, .day], from: next))
+            }
+        }
         return days
+    }
+
+    private var payoffOnSelectedDay: [PayoffPlan] {
+        guard selectedDay != nil else { return [] }
+        return activePayoffPlans.filter { plan in
+            guard let next = plan.nextPaymentDate() else { return false }
+            let parts = Calendar.current.dateComponents([.year, .month, .day], from: next)
+            return parts.year == selectedDay?.year
+                && parts.month == selectedDay?.month
+                && parts.day == selectedDay?.day
+        }
     }
     private var chargesOnSelectedDay: [SubscriptionCandidate] {
         var matches: [SubscriptionCandidate] = []
@@ -68,7 +103,7 @@ struct SubscriptionsView: View {
                 }
                     if selectedDay != nil {
                         Section {
-                        if chargesOnSelectedDay.isEmpty {
+                        if chargesOnSelectedDay.isEmpty && payoffOnSelectedDay.isEmpty {
                             VStack{
                                 Image(systemName: "calendar")
                                     .font(.largeTitle)
@@ -82,6 +117,13 @@ struct SubscriptionsView: View {
                                 
                         }
                         else {
+                        ForEach(payoffOnSelectedDay, id: \.planId) { plan in
+                            NavigationLink {
+                                PayoffPlanEditorView(existing: plan)
+                            } label: {
+                                PayoffPlanRowView(plan: plan)
+                            }
+                        }
                         ForEach(chargesOnSelectedDay) { item in
                             NavigationLink(value: item.id) {
                                 subscriptionRow(item)
@@ -101,12 +143,28 @@ struct SubscriptionsView: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(isScanning ? "Scanning..." : "\(candidates.count) recurring")
+                            Text(monthlySummaryLabel)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 4)
+                }
+
+                if !activePayoffPlans.isEmpty || !endedPayoffPlans.isEmpty {
+                    Section {
+                        ForEach(activePayoffPlans, id: \.planId) { plan in
+                            NavigationLink {
+                                PayoffPlanEditorView(existing: plan)
+                            } label: {
+                                PayoffPlanRowView(plan: plan)
+                            }
+                        }
+                    } header: {
+                        Text("Payoff plans")
+                    } footer: {
+                        Text("My Loan, Pay Over Time, and promo APR. Add from a card or a purchase.")
+                    }
                 }
 
                 Section {
@@ -141,6 +199,20 @@ struct SubscriptionsView: View {
                         Text("Ended")
                     }
                 }
+
+                if !endedPayoffPlans.isEmpty {
+                    Section {
+                        ForEach(endedPayoffPlans, id: \.planId) { plan in
+                            NavigationLink {
+                                PayoffPlanEditorView(existing: plan)
+                            } label: {
+                                PayoffPlanRowView(plan: plan)
+                            }
+                        }
+                    } header: {
+                        Text("Paid off")
+                    }
+                }
             }
             .navigationTitle("Recurring Charges")
             .navigationDestination(for: String.self) { id in
@@ -169,6 +241,9 @@ struct SubscriptionsView: View {
         let matches = isSpinning ? [] : matchingTransactions(for: item)
         return List {
             LabeledContent("Cadence", value: item.cadence.displayName)
+            if item.amountVaries {
+                LabeledContent("Amount", value: "Varies")
+            }
             if !isSpinning {
                 LabeledContent("Times Seen", value: "\(matches.count)")
             }
@@ -230,7 +305,7 @@ struct SubscriptionsView: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 2) {
-                MoneyText(item.typicalAmount)
+                MoneyText(item.typicalAmount, prefix: item.amountVaries ? "~" : "")
                     .font(.body.weight(.semibold))
                 MoneyText(item.estimatedMonthly, prefix: "~", suffix: "/mo")
                     .font(.caption2)
@@ -332,6 +407,8 @@ struct SubscriptionsView: View {
                 if tx.isDeclaredNotSubscription { return false }
                 let vendor = SubscriptionAnalytics.normalizeVendor(tx.title)
                 if vendor != item.normalizedVendor { return false }
+                // User-marked or variable bills (phone, electric): amount may change.
+                if item.isUserDeclared || item.amountVaries { return true }
                 let tol = max(0.25, item.typicalAmount * 0.01)
                 return abs(abs(tx.amount) - item.typicalAmount) <= tol
             }

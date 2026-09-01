@@ -24,6 +24,7 @@ struct CardDetailView: View {
     var onNicknameChanged: (() -> Void)? = nil
 
     @Query private var transactions: [Transaction]
+    @Query private var payoffPlans: [PayoffPlan]
     @Environment(\.modelContext) private var modelContext
 
     @State private var nicknameDraft: String = ""
@@ -32,6 +33,7 @@ struct CardDetailView: View {
     @State private var debitMultText: String = ""
     @State private var achMultText: String = ""
     @State private var didSaveRewards = false
+    @State private var showAddPayoff = false
 
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
@@ -63,6 +65,18 @@ struct CardDetailView: View {
     }
 
     private var account: BankAccount? { creditAccount ?? bankAccount }
+
+    private var cardPayoffPlans: [PayoffPlan] {
+        payoffPlans.filter { plan in
+            if let id = creditAccount?.accountId, plan.accountId == id { return true }
+            if methods.contains(plan.paymentMethod) { return true }
+            return plan.paymentMethod.caseInsensitiveCompare(rawPaymentMethod) == .orderedSame
+        }
+        .sorted { lhs, rhs in
+            if lhs.isActive != rhs.isActive { return lhs.isActive && !rhs.isActive }
+            return lhs.installmentTotal > rhs.installmentTotal
+        }
+    }
 
     private var isDepositoryDetail: Bool {
         creditAccount == nil && (bankAccount?.isDepository == true || bankAccount != nil && creditAccount == nil)
@@ -309,6 +323,25 @@ struct CardDetailView: View {
                 }
             }
 
+            if creditAccount != nil {
+                Section {
+                    ForEach(cardPayoffPlans, id: \.planId) { plan in
+                        NavigationLink {
+                            PayoffPlanEditorView(existing: plan)
+                        } label: {
+                            PayoffPlanRowView(plan: plan)
+                        }
+                    }
+                    Button("Add payoff plan") {
+                        showAddPayoff = true
+                    }
+                } header: {
+                    Text("Payoff plans")
+                } footer: {
+                    Text("My Loan, Pay Over Time, and promo APR balances you are paying down. These also show on Recurring.")
+                }
+            }
+
             Section("Purchases") {
                 if cardRows.isEmpty {
                     Text("No purchases for this account in the selected period.")
@@ -332,6 +365,16 @@ struct CardDetailView: View {
         }
         .navigationTitle(titleName.isEmpty ? displayName : titleName)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showAddPayoff) {
+            NavigationStack {
+                PayoffPlanEditorView(
+                    defaultKind: .custom,
+                    defaultAccountId: creditAccount?.accountId,
+                    defaultPaymentMethod: displayName,
+                    defaultApr: creditAccount?.specialApr
+                )
+            }
+        }
         .onAppear {
             titleName = displayName
             nicknameDraft = displayName

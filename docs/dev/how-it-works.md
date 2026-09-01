@@ -80,6 +80,7 @@ All `@Model` types are under `Shared/Models/` and listed in `SharedStore.schema`
 | `CreditCardPayment` | `CreditCardPayment.swift` | Card bill pays (not Total Spend) |
 | `BudgetPlan` | `Budget.swift` | Caps, category limits, expected income |
 | `RecurringStream` | `RecurringStream.swift` | Streams from Plaid recurring API (optional) |
+| `PayoffPlan` | `PayoffPlan.swift` | My Loan / Pay Over Time / promo APR schedules (user-declared) |
 
 **Sign rule:** Plaid amount `> 0` (money out) → `Transaction` negated. Plaid `< 0` (money in) → `Income` positive. Transfers are skipped. Card bill pays become `CreditCardPayment` **and** a `Transaction` with category Credit Card Payment (list only, excluded from spend).
 
@@ -129,7 +130,7 @@ Webhook worker (`workers/plaid-webhooks/`) records Plaid events; the **app does 
 
 ### Accounts
 
-`CardsView` builds `AccountsBoard` (`AccountsBoard.swift`) from transactions, accounts, and payments. Detail: `CardDetailView.swift` (nickname via `CardLabelStore.swift`, debit/ACH rails via `PaymentRail.swift`, rewards via `CardBenefitsStore.swift` + `CardProductCatalog.swift`). Logos: `Shared/UI/BankIcon.swift` + `InstitutionLogoCache`.
+`CardsView` builds `AccountsBoard` (`AccountsBoard.swift`) from transactions, accounts, and payments. Detail: `CardDetailView.swift` (nickname via `CardLabelStore.swift`, debit/ACH rails via `PaymentRail.swift`, rewards via `CardBenefitsStore.swift` + `CardProductCatalog.swift`, payoff plans via `PayoffPlanEditorView.swift`). Logos: `Shared/UI/BankIcon.swift` + `InstitutionLogoCache`.
 
 ### Budget
 
@@ -137,7 +138,7 @@ Webhook worker (`workers/plaid-webhooks/`) records Plaid events; the **app does 
 
 ### Recurring
 
-`SubscriptionsView` scans local `Transaction`s with `SubscriptionAnalytics` (vendor + amount + cadence). `RecurringCalendarView` wraps `UICalendarView`: dots from each candidate’s next charge date, selection via `@Binding`. User **Cancelled** / **Not Recurring** writes `transaction.subscriptionCadenceOverride`. Overlay GIF: `Resources/WorkingOverlay.gif` + `Shared/UI/BundleGIFView.swift`. Plaid `/transactions/recurring/get` may also fill `RecurringStream` on Sync (add-on; soft-fail).
+`SubscriptionsView` scans local `Transaction`s with `SubscriptionAnalytics`. Auto-detect groups by vendor + near-identical amount + cadence; if that fails, a vendor with a regular weekly/monthly/yearly cadence can still form a **variable-amount** group (phone, electric). User **Monthly** / **Yearly** / **Weekly** on Transaction detail writes `subscriptionCadenceOverride` and stamps the same cadence on other charges from that vendor (amount ignored). Active `PayoffPlan`s (My Loan, Pay Over Time, promo APR) share the calendar and Est. Monthly. `RecurringCalendarView` wraps `UICalendarView`: dots from each candidate’s next charge date, selection via `@Binding`. User **Cancelled** / **Not Recurring** writes `transaction.subscriptionCadenceOverride`. Overlay GIF: `Resources/WorkingOverlay.gif` + `Shared/UI/BundleGIFView.swift`. Plaid `/transactions/recurring/get` may also fill `RecurringStream` on Sync (add-on; soft-fail).
 
 ### Settings
 
@@ -166,4 +167,4 @@ Config intents: `Widget/AppIntent.swift`. Widgets never call Plaid; they only re
 
 ## Not wired yet (keep)
 
-`FinanceWizard/Features/AI/` — availability on **Settings → On-device AI**. **Ask** is a circular overlay on `ContentView` (not a tab — six tabs trigger iOS **More**). Sheet presents `OnDeviceAIChatView`: `makeAskSession` + ledger tools (structured `@Generable` results), `streamResponse` into bubbles, `prewarm` on appear, follow-up chips, Writing Tools on the composer, thread persisted in a **separate** `AskChat` SwiftData store. New session after a long transcript. Transaction detail can **Suggest with Apple Intelligence**. App icon source: `FinanceWizard/Mika.icon/` (Icon Composer).
+`FinanceWizard/Features/AI/` — availability on **Settings → On-device AI**. **Ask** is a circular overlay on `ContentView` (not a tab — six tabs trigger iOS **More**). Sheet presents `OnDeviceAIChatView`: `makeAskSession` + ledger tools (structured `@Generable` results), `streamResponse` into bubbles, `prewarm` on appear, follow-up chips, Writing Tools on the composer, thread persisted in a **separate** `AskChat` SwiftData store. New session after a long transcript. Balance and search tools return `CardLabelStore` display names (`account.displayName` / `cardLabel`), not Plaid’s raw `Credit Card` label; search uses `TransactionSearch.filter` (same matcher as the Transactions search bar). Transaction detail can **Suggest with Apple Intelligence**. App icon source: `FinanceWizard/Mika.icon/` (Icon Composer).

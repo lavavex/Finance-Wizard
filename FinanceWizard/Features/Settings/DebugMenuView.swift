@@ -14,6 +14,7 @@ private enum DebugPendingAction: String, Identifiable {
     case clearCadenceOverrides
     case clearLogos
     case resetBudget
+    case clearPayoffPlans
     case clearBenefits
     case wipeEverything
 
@@ -27,6 +28,7 @@ private enum DebugPendingAction: String, Identifiable {
         case .clearCadenceOverrides: return "Clear Recurring marks?"
         case .clearLogos: return "Clear cached logos?"
         case .resetBudget: return "Reset budget plan?"
+        case .clearPayoffPlans: return "Delete payoff plans?"
         case .clearBenefits: return "Reset card rewards profiles?"
         case .wipeEverything: return "Wipe all local data?"
         }
@@ -46,6 +48,8 @@ private enum DebugPendingAction: String, Identifiable {
             return "Deletes cached institution logos. They will fetch again as tiles appear."
         case .resetBudget:
             return "Deletes the saved monthly cap, category limits, and expected income. A blank plan is created."
+        case .clearPayoffPlans:
+            return "Removes My Loan, Pay Over Time, and promo APR payoff plans. Cards and charges are unchanged."
         case .clearBenefits:
             return "Removes saved rewards profiles. Defaults rebuild the next time a card is opened."
         case .wipeEverything:
@@ -70,6 +74,7 @@ struct DebugMenuView: View {
     @Query private var payments: [CreditCardPayment]
     @Query private var budgetPlans: [BudgetPlan]
     @Query private var recurringStreams: [RecurringStream]
+    @Query private var payoffPlans: [PayoffPlan]
 
     @AppStorage(OnboardingStore.storageKey) private var onboardingCompleted = false
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
@@ -121,6 +126,7 @@ struct DebugMenuView: View {
                 LabeledContent("Card payments", value: "\(payments.count)")
                 LabeledContent("Budget plans", value: "\(budgetPlans.count)")
                 LabeledContent("Recurring streams", value: "\(recurringStreams.count)")
+                LabeledContent("Payoff plans", value: "\(payoffPlans.count)")
                 LabeledContent("Recurring marks", value: "\(cadenceOverrideCount)")
                 LabeledContent("Linked banks", value: "\(linkedBanks.count)")
                 LabeledContent("Vendor rules", value: "\(vendorRuleCount)")
@@ -145,6 +151,7 @@ struct DebugMenuView: View {
                 Button("Clear Recurring marks") { pending = .clearCadenceOverrides }
                 Button("Clear cached logos") { pending = .clearLogos }
                 Button("Reset budget plan") { pending = .resetBudget }
+                Button("Delete payoff plans") { pending = .clearPayoffPlans }
                 Button("Reset card rewards profiles") { pending = .clearBenefits }
             } header: {
                 Text("Reset pieces")
@@ -252,6 +259,13 @@ struct DebugMenuView: View {
             try? modelContext.save()
             _ = BudgetStore.loadOrCreate(in: modelContext)
             statusMessage = "Budget plan reset."
+        case .clearPayoffPlans:
+            let count = payoffPlans.count
+            for plan in payoffPlans {
+                modelContext.delete(plan)
+            }
+            try? modelContext.save()
+            statusMessage = "Deleted \(count) payoff plan(s)."
         case .clearBenefits:
             CardBenefitsStore.clearAllProfiles()
             statusMessage = "Rewards profiles reset."

@@ -561,7 +561,8 @@ enum SharedStore {
         BankAccount.self,
         CreditCardPayment.self,
         BudgetPlan.self,
-        RecurringStream.self
+        RecurringStream.self,
+        PayoffPlan.self
     ])
 
     /// Deletes every row of every schema type. Used by wipe-then-restore so
@@ -573,6 +574,7 @@ enum SharedStore {
         try context.delete(model: CreditCardPayment.self)
         try context.delete(model: BudgetPlan.self)
         try context.delete(model: RecurringStream.self)
+        try context.delete(model: PayoffPlan.self)
     }
 
     /// Build a ModelContainer both app and widget can open.

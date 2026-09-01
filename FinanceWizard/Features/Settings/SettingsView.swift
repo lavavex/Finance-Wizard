@@ -568,6 +568,9 @@ struct SettingsView: View {
         if summary.bankAccountsUpserted > 0 {
             parts.append("\(summary.bankAccountsUpserted) accounts")
         }
+        if summary.payoffPlansUpserted > 0 {
+            parts.append("\(summary.payoffPlansUpserted) payoff plans")
+        }
         let detail = parts.isEmpty ? "nothing new to apply" : parts.joined(separator: " · ")
         let policyLabel: String = {
             switch summary.policy {
@@ -881,6 +884,7 @@ private struct PlaidRestorePlanSheet: View {
                         LabeledContent("Card payments", value: "\(plan.paymentCount)")
                         LabeledContent("Recurring", value: "\(plan.recurringCount)")
                         LabeledContent("Budget plans", value: "\(plan.budgetPlanCount)")
+                        LabeledContent("Payoff plans", value: "\(plan.payoffPlanCount)")
                         LabeledContent("Nicknames", value: "\(plan.cardLabelCount)")
                         LabeledContent("Vendor rules", value: "\(plan.vendorRuleCount)")
                         LabeledContent("Card benefits", value: "\(plan.benefitsProfileCount)")

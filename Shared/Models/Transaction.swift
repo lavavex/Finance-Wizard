@@ -41,8 +41,8 @@ final class Transaction {
     var rewardCategoryOverride: String?
 
     /// User override for subscription detection: `nil` = auto,
-    /// `"yearly"` / `"monthly"` / `"weekly"` = treat as that cadence,
-    /// `"none"` = not a subscription.
+    /// `"yearly"` / `"monthly"` / `"weekly"` = treat that vendor as that cadence
+    /// (amount may vary), `"none"` = not a subscription.
     var subscriptionCadenceOverride: String?
 
     // MARK: - Plaid enrichment (nil on CSV / older rows)

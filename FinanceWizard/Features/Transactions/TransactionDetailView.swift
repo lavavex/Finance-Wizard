@@ -31,9 +31,11 @@ struct TransactionDetailView: View {
     @State private var didSave = false
     @State private var saveStatusMessage: String?
     @State private var isSuggestingCategory = false
+    @State private var showPayoffEditor = false
 
     @Query private var allTransactions: [Transaction]
     @Query private var bankAccounts: [BankAccount]
+    @Query private var payoffPlans: [PayoffPlan]
 
     /// User control for subscription radar (yearly is the common missing case).
     private enum SubscriptionDeclareMode: String, CaseIterable, Identifiable {
@@ -48,10 +50,10 @@ struct TransactionDetailView: View {
         var label: String {
             switch self {
             case .auto: return "Auto-detect"
-            case .yearly: return "Yearly subscription"
-            case .monthly: return "Monthly subscription"
-            case .weekly: return "Weekly subscription"
-            case .none: return "Not a subscription"
+            case .yearly: return "Yearly"
+            case .monthly: return "Monthly"
+            case .weekly: return "Weekly"
+            case .none: return "Not recurring"
             }
         }
 
@@ -102,6 +104,16 @@ struct TransactionDetailView: View {
 
     private var linkedAccount: BankAccount? {
         BankAccount.matching(paymentMethod: transaction.paymentMethod, in: bankAccounts)
+    }
+
+    private var linkedPayoffPlan: PayoffPlan? {
+        payoffPlans.first { $0.linkedTransactionId == transaction.transactionId }
+    }
+
+    private var canCreatePayOverTime: Bool {
+        !TransactionAnalytics.isExcludedFromSpendCategory(
+            categoryText.isEmpty ? transaction.category : categoryText
+        )
     }
 
     private var benefitsProfile: CardBenefitsProfile {
@@ -302,13 +314,35 @@ struct TransactionDetailView: View {
             }
 
             Section {
-                Picker("Subscription", selection: $subscriptionMode) {
+                Picker("Recurring", selection: $subscriptionMode) {
                     ForEach(SubscriptionDeclareMode.allCases) { mode in
                         Text(mode.label).tag(mode)
                     }
                 }
             } header: {
                 Text("Recurring")
+            } footer: {
+                Text("Choose Monthly or Yearly for bills whose amount changes, like phone and electric.")
+            }
+
+            if canCreatePayOverTime {
+                Section {
+                    if let plan = linkedPayoffPlan {
+                        NavigationLink {
+                            PayoffPlanEditorView(existing: plan)
+                        } label: {
+                            LabeledContent("Pay Over Time", value: plan.name)
+                        }
+                    } else {
+                        Button("Pay over time…") {
+                            showPayoffEditor = true
+                        }
+                    }
+                } header: {
+                    Text("Installments")
+                } footer: {
+                    Text("Chase Pay Over Time (and similar) for this purchase. My Loan is added from the card, not from a single charge.")
+                }
             }
 
             Section {
@@ -342,6 +376,18 @@ struct TransactionDetailView: View {
         }
         .navigationTitle("Transaction")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showPayoffEditor) {
+            NavigationStack {
+                PayoffPlanEditorView(
+                    defaultKind: .payOverTime,
+                    defaultName: transaction.title,
+                    defaultAccountId: linkedAccount?.accountId,
+                    defaultPaymentMethod: transaction.paymentMethod,
+                    defaultAmount: abs(transaction.amount),
+                    defaultLinkedTransactionId: transaction.transactionId
+                )
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 if isSaving {
@@ -485,6 +531,7 @@ struct TransactionDetailView: View {
             }
             transaction.subscriptionCadenceOverride = subscriptionMode.storageValue
             transaction.overrideSource = "user"
+            propagateRecurringCadence()
 
             // Keep CreditCardPayment table + spend exclusion in sync with category choice
             syncCreditPaymentRecord(for: transaction, category: trimmedCategory)
@@ -511,7 +558,11 @@ struct TransactionDetailView: View {
             WidgetCenter.shared.reloadAllTimelines()
 
             if subscriptionMode == .yearly {
-                saveStatusMessage = "Saved as yearly subscription."
+                saveStatusMessage = "Saved as yearly recurring."
+            } else if subscriptionMode == .monthly {
+                saveStatusMessage = "Saved as monthly recurring."
+            } else if subscriptionMode == .weekly {
+                saveStatusMessage = "Saved as weekly recurring."
             } else if TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
                 saveStatusMessage = "Saved as Credit Card Payment (excluded from Total Spend)."
             } else if localExtra > 0 {
@@ -587,6 +638,23 @@ struct TransactionDetailView: View {
             count += 1
         }
         return count
+    }
+
+    /// Monthly/yearly/weekly on one charge covers the same vendor even when amounts differ.
+    private func propagateRecurringCadence() {
+        guard subscriptionMode == .yearly || subscriptionMode == .monthly || subscriptionMode == .weekly,
+              let value = subscriptionMode.storageValue else {
+            return
+        }
+        let vendor = SubscriptionAnalytics.normalizeVendor(transaction.title)
+        guard vendor.count >= 2 else { return }
+        for row in allTransactions {
+            if row.transactionId == transaction.transactionId { continue }
+            guard SubscriptionAnalytics.normalizeVendor(row.title) == vendor else { continue }
+            if row.isDeclaredNotSubscription { continue }
+            if (row.subscriptionCadenceOverride ?? "").lowercased() == "cancelled" { continue }
+            row.subscriptionCadenceOverride = value
+        }
     }
 }
 

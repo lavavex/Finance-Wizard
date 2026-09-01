@@ -7,7 +7,7 @@
 //  Includes:
 //  • Plaid developer credentials (client_id, secret, environment, redirect)
 //  • Linked bank Items (access tokens + cursors + metadata)
-//  • SwiftData: transactions, income, bank accounts, card payments, budget, recurring
+//  • SwiftData: transactions, income, bank accounts, card payments, budget, recurring, payoff plans
 //  • Prefs: card nicknames, vendor learn-rules, card benefits profiles, screenshot privacy
 //  • Auto bags: UserDefaults under plaid./card./settings. + App Group logo files
 //
@@ -137,6 +137,7 @@ enum PlaidConnectionBackup {
         var creditCardPayments: [PaymentSnapshot]?
         var recurringStreams: [RecurringStreamSnapshot]?
         var budgetPlans: [BudgetPlanSnapshot]?
+        var payoffPlans: [PayoffPlanSnapshot]?
         var cardLabels: [String: String]?
         var vendorRules: [VendorRule]?
         var cardBenefitsProfiles: [CardBenefitsProfile]?
@@ -276,6 +277,27 @@ enum PlaidConnectionBackup {
         var updatedAt: Date
     }
 
+    struct PayoffPlanSnapshot: Codable, Equatable, Sendable {
+        var planId: String
+        var kindRaw: String
+        var name: String
+        var accountId: String?
+        var paymentMethod: String
+        var originalAmount: Double
+        var remainingAmount: Double
+        var monthlyPayment: Double
+        var monthlyFee: Double?
+        var aprPercent: Double?
+        var startDate: Date
+        var endDate: Date?
+        var termMonths: Int?
+        var linkedTransactionId: String?
+        var notes: String?
+        var isEnded: Bool
+        var createdAt: Date
+        var updatedAt: Date
+    }
+
     // MARK: Plans & summaries
 
     /// What restore would do — shown before applying, so existing links stay predictable.
@@ -291,6 +313,7 @@ enum PlaidConnectionBackup {
         var paymentCount: Int
         var recurringCount: Int
         var budgetPlanCount: Int
+        var payoffPlanCount: Int
         var cardLabelCount: Int
         var vendorRuleCount: Int
         var benefitsProfileCount: Int
@@ -314,6 +337,7 @@ enum PlaidConnectionBackup {
         var paymentsUpserted: Int
         var recurringUpserted: Int
         var budgetPlansUpserted: Int
+        var payoffPlansUpserted: Int
         var environment: String
         var institutionNamesAdded: [String]
     }
@@ -332,10 +356,11 @@ enum PlaidConnectionBackup {
         let payments = (try? modelContext.fetch(FetchDescriptor<CreditCardPayment>())) ?? []
         let streams = (try? modelContext.fetch(FetchDescriptor<RecurringStream>())) ?? []
         let plans = (try? modelContext.fetch(FetchDescriptor<BudgetPlan>())) ?? []
+        let payoffs = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
 
         let hasAnything = !clientID.isEmpty || !secret.isEmpty || !items.isEmpty
             || !txs.isEmpty || !incomes.isEmpty || !accounts.isEmpty || !payments.isEmpty
-            || !streams.isEmpty || !plans.isEmpty
+            || !streams.isEmpty || !plans.isEmpty || !payoffs.isEmpty
             || !VendorRulesStore.load().isEmpty
             || !CardBenefitsStore.allProfiles().isEmpty
             || !CardLabelStore.debugExportMap().isEmpty
@@ -375,6 +400,7 @@ enum PlaidConnectionBackup {
             creditCardPayments: payments.map(snapshot(payment:)),
             recurringStreams: streams.map(snapshot(stream:)),
             budgetPlans: plans.map(snapshot(plan:)),
+            payoffPlans: payoffs.map(snapshot(payoff:)),
             cardLabels: CardLabelStore.debugExportMap(),
             vendorRules: VendorRulesStore.load(),
             cardBenefitsProfiles: CardBenefitsStore.allProfiles(),
@@ -472,6 +498,7 @@ enum PlaidConnectionBackup {
             paymentCount: payload.creditCardPayments?.count ?? 0,
             recurringCount: payload.recurringStreams?.count ?? 0,
             budgetPlanCount: payload.budgetPlans?.count ?? 0,
+            payoffPlanCount: payload.payoffPlans?.count ?? 0,
             cardLabelCount: payload.cardLabels?.count ?? 0,
             vendorRuleCount: payload.vendorRules?.count ?? 0,
             benefitsProfileCount: payload.cardBenefitsProfiles?.count ?? 0,
@@ -505,6 +532,7 @@ enum PlaidConnectionBackup {
         var paymentCount = 0
         var streamCount = 0
         var planCount = 0
+        var payoffCount = 0
 
         if let rows = payload.transactions {
             txCount = upsertTransactions(rows, modelContext: modelContext)
@@ -523,6 +551,9 @@ enum PlaidConnectionBackup {
         }
         if let rows = payload.budgetPlans {
             planCount = upsertBudgetPlans(rows, modelContext: modelContext)
+        }
+        if let rows = payload.payoffPlans {
+            payoffCount = upsertPayoffPlans(rows, modelContext: modelContext)
         }
 
         if let labels = payload.cardLabels, !labels.isEmpty {
@@ -580,6 +611,7 @@ enum PlaidConnectionBackup {
             paymentsUpserted: paymentCount,
             recurringUpserted: streamCount,
             budgetPlansUpserted: planCount,
+            payoffPlansUpserted: payoffCount,
             environment: PlaidCredentialsStore.environment.displayName,
             institutionNamesAdded: itemResult.addedNames
         )
@@ -1022,6 +1054,60 @@ private extension PlaidConnectionBackup {
         return count
     }
 
+    static func upsertPayoffPlans(_ rows: [PayoffPlanSnapshot], modelContext: ModelContext) -> Int {
+        let existing = ((try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? [])
+        let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.planId, $0) })
+        var count = 0
+        for row in rows {
+            if let live = byId[row.planId] {
+                if row.updatedAt >= live.updatedAt {
+                    live.kindRaw = row.kindRaw
+                    live.name = row.name
+                    live.accountId = row.accountId
+                    live.paymentMethod = row.paymentMethod
+                    live.originalAmount = row.originalAmount
+                    live.remainingAmount = row.remainingAmount
+                    live.monthlyPayment = row.monthlyPayment
+                    live.monthlyFee = row.monthlyFee
+                    live.aprPercent = row.aprPercent
+                    live.startDate = row.startDate
+                    live.endDate = row.endDate
+                    live.termMonths = row.termMonths
+                    live.linkedTransactionId = row.linkedTransactionId
+                    live.notes = row.notes
+                    live.isEnded = row.isEnded
+                    live.createdAt = row.createdAt
+                    live.updatedAt = row.updatedAt
+                }
+            } else {
+                modelContext.insert(
+                    PayoffPlan(
+                        planId: row.planId,
+                        kind: PayoffPlanKind(rawValue: row.kindRaw) ?? .custom,
+                        name: row.name,
+                        accountId: row.accountId,
+                        paymentMethod: row.paymentMethod,
+                        originalAmount: row.originalAmount,
+                        remainingAmount: row.remainingAmount,
+                        monthlyPayment: row.monthlyPayment,
+                        monthlyFee: row.monthlyFee,
+                        aprPercent: row.aprPercent,
+                        startDate: row.startDate,
+                        endDate: row.endDate,
+                        termMonths: row.termMonths,
+                        linkedTransactionId: row.linkedTransactionId,
+                        notes: row.notes,
+                        isEnded: row.isEnded,
+                        createdAt: row.createdAt,
+                        updatedAt: row.updatedAt
+                    )
+                )
+            }
+            count += 1
+        }
+        return count
+    }
+
     static func mergeCardLabels(_ labels: [String: String]) {
         let existing = CardLabelStore.debugExportMap()
         for (key, value) in labels {
@@ -1175,6 +1261,29 @@ private extension PlaidConnectionBackup {
             monthlyLimit: p.monthlyLimit,
             categoryLimits: p.categoryLimits,
             expectedIncome: p.expectedIncomeStreams,
+            updatedAt: p.updatedAt
+        )
+    }
+
+    static func snapshot(payoff p: PayoffPlan) -> PayoffPlanSnapshot {
+        PayoffPlanSnapshot(
+            planId: p.planId,
+            kindRaw: p.kindRaw,
+            name: p.name,
+            accountId: p.accountId,
+            paymentMethod: p.paymentMethod,
+            originalAmount: p.originalAmount,
+            remainingAmount: p.remainingAmount,
+            monthlyPayment: p.monthlyPayment,
+            monthlyFee: p.monthlyFee,
+            aprPercent: p.aprPercent,
+            startDate: p.startDate,
+            endDate: p.endDate,
+            termMonths: p.termMonths,
+            linkedTransactionId: p.linkedTransactionId,
+            notes: p.notes,
+            isEnded: p.isEnded,
+            createdAt: p.createdAt,
             updatedAt: p.updatedAt
         )
     }

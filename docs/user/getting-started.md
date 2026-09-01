@@ -65,7 +65,7 @@ If Link asks you to sign in again later, **Settings** → swipe the bank → **R
 | **Transactions** | Spend and income for a week/month, search, categories, **Sync** / **Import** |
 | **Accounts** | Cards, checking/savings, utilization, bills due |
 | **Budget** | Monthly cap and category limits vs real spend |
-| **Recurring** | Detected subscriptions and repeating bills |
+| **Recurring** | Detected subscriptions, repeating bills, and card payoff plans (My Loan, Pay Over Time, promo APR) |
 | **Settings** | Plaid keys, linked banks, backup, privacy |
 
 More detail: [Using the app](using-the-app.md).

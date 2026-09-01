@@ -18,7 +18,7 @@ Defined in `Shared/Models/Transaction.swift`.
 | `category` | `String` | Budget category (e.g. Dining, Gas (Car)) |
 | `paymentMethod` | `String` | Card / account name |
 | `multiplier` | `Double` | Points rate (e.g. 5 = 5x) |
-| `subscriptionCadenceOverride` | `String?` | Recurring tab: `"cancelled"` / `"none"` (Not Recurring); cleared in Debug |
+| `subscriptionCadenceOverride` | `String?` | Recurring: `nil` = auto; `"yearly"` / `"monthly"` / `"weekly"` = treat that vendor as recurring (amount may vary); `"cancelled"` / `"none"` (Not Recurring); cleared in Debug |
 
 ### Amount sign convention (expenses)
 
@@ -107,12 +107,15 @@ Card bill payments only (`Shared/Models/CreditCardPayment.swift`). Never counted
 | `cardName` | Display label for the card |
 | `sourceAccount` | Optional funding account |
 
-## SwiftData: `BudgetPlan` / `RecurringStream`
+## SwiftData: `BudgetPlan` / `RecurringStream` / `PayoffPlan`
 
 | Model | File | Role |
 |-------|------|------|
 | `BudgetPlan` | `Shared/Models/Budget.swift` | Monthly cap, category limits, expected income (Budget tab; Debug can reset) |
 | `RecurringStream` | `Shared/Models/RecurringStream.swift` | Stored recurring groups used with live detection on the Recurring tab |
+| `PayoffPlan` | `Shared/Models/PayoffPlan.swift` | User-declared My Loan / Pay Over Time / promo APR / custom payoff on a card |
+
+`PayoffPlan.kindRaw`: `myLoan` | `payOverTime` | `promoAPR` | `custom`. Remaining is user-updated (**Record payment** subtracts `monthlyPayment`; `monthlyFee` does not). Shown on Recurring like a bill.
 
 ## App Group store
 
@@ -121,7 +124,7 @@ Card bill payments only (`Shared/Models/CreditCardPayment.swift`). Never counted
 ```text
 groupContainer: .identifier("group.net.roberth.FinanceWizard")
 store name: FinanceTransactions
-schema: Transaction, Income, BankAccount, CreditCardPayment, BudgetPlan, RecurringStream
+schema: Transaction, Income, BankAccount, CreditCardPayment, BudgetPlan, RecurringStream, PayoffPlan
 ```
 
 Both app and widget call `SharedStore.makeContainer()`.
