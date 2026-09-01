@@ -82,36 +82,95 @@ enum CreditAnalytics {
         return map
     }
 
-    /// Banks post the same payment twice (ACH out of checking + “Payment Thank You” on the card).
-    /// Keep one row per day/amount/mask, preferring the side with `creditAccountId`.
+    /// Checking ACH and the card’s “Thank You” can land 0–3 days apart (Apple Card, EPAY).
+    /// Pair same amount + same card identity; do not merge two different cards that happen
+    /// to be paid the same dollars (e.g. $1000 Apple vs $1000 Amex).
+    static let duplicateWindowDays = 3
+
     static func deduplicated(_ rows: [CreditCardPayment]) -> [CreditCardPayment] {
         let cal = Calendar.current
-        var best: [String: CreditCardPayment] = [:]
+        let sorted = rows.sorted { $0.date < $1.date }
+        var used = Set<String>()
+        var chosen: [CreditCardPayment] = []
 
-        for row in rows {
-            let day = cal.startOfDay(for: row.date)
-            let dayKey = ISO8601DateFormatter().string(from: day)
-            let amountKey = String(format: "%.2f", max(0, row.amount))
-            let mask = extractMask(from: row.cardName)
-                ?? extractMask(from: row.title)
-                ?? extractMask(from: row.sourceAccount ?? "")
-                ?? "nomask"
-            let key = "\(dayKey)|\(amountKey)|\(mask.lowercased())"
-
-            if let existing = best[key] {
-                let preferNew: Bool = {
-                    if existing.creditAccountId == nil, row.creditAccountId != nil { return true }
-                    if existing.creditAccountId != nil, row.creditAccountId == nil { return false }
-                    if existing.cardName.count < row.cardName.count { return true }
-                    return false
-                }()
-                if preferNew { best[key] = row }
-            } else {
-                best[key] = row
+        for row in sorted {
+            if used.contains(row.transactionId) { continue }
+            var group = [row]
+            let rowDay = cal.startOfDay(for: row.date)
+            for other in sorted {
+                if other.transactionId == row.transactionId { continue }
+                if used.contains(other.transactionId) { continue }
+                if abs(other.amount - row.amount) > 0.021 { continue }
+                let otherDay = cal.startOfDay(for: other.date)
+                let days = abs(cal.dateComponents([.day], from: rowDay, to: otherDay).day ?? 99)
+                if days > duplicateWindowDays { continue }
+                if isSamePayment(row, other) {
+                    group.append(other)
+                }
             }
+            for item in group { used.insert(item.transactionId) }
+            chosen.append(preferredPayment(in: group))
         }
 
-        return best.values.sorted { $0.date > $1.date }
+        return chosen.sorted { $0.date > $1.date }
+    }
+
+    /// True when two rows are the checking-side and card-side of one bill pay.
+    static func isSamePayment(_ a: CreditCardPayment, _ b: CreditCardPayment) -> Bool {
+        let ia = paymentIdentities(a)
+        let ib = paymentIdentities(b)
+        let ma = ia.first { $0.hasPrefix("mask:") }
+        let mb = ib.first { $0.hasPrefix("mask:") }
+        // Last-four of the *card* is the strongest match; different fours are different cards.
+        if let ma, let mb { return ma == mb }
+        let issuersA = ia.filter { $0.hasPrefix("issuer:") }
+        let issuersB = ib.filter { $0.hasPrefix("issuer:") }
+        if !issuersA.isEmpty, !issuersB.isEmpty {
+            return !issuersA.isDisjoint(with: issuersB)
+        }
+        // Unlabeled funding (EPAY) vs a card Thank You of the same amount.
+        return isCardSide(a) != isCardSide(b)
+    }
+
+    private static func preferredPayment(in group: [CreditCardPayment]) -> CreditCardPayment {
+        group.max { a, b in
+            let ac = isCardSide(a) ? 1 : 0
+            let bc = isCardSide(b) ? 1 : 0
+            if ac != bc { return ac < bc }
+            if (a.creditAccountId == nil) != (b.creditAccountId == nil) {
+                return a.creditAccountId == nil
+            }
+            return a.cardName.count < b.cardName.count
+        } ?? group[0]
+    }
+
+    private static func isCardSide(_ row: CreditCardPayment) -> Bool {
+        if row.creditAccountId != nil { return true }
+        if CardIssuerCatalog.looksLikeCreditAccountName(row.cardName) { return true }
+        let t = row.title.lowercased()
+        if t.contains("thank you") || t.contains("thankyou") { return true }
+        if t.contains("ach deposit") { return true }
+        return false
+    }
+
+    /// Card identity: last-four of the *card* (not the funding account) or issuer slug.
+    static func paymentIdentities(_ row: CreditCardPayment) -> Set<String> {
+        var ids = Set<String>()
+        let title = row.title.lowercased()
+        let card = row.cardName.lowercased()
+        let blob = title + " " + card
+
+        ids.formUnion(CardIssuerCatalog.issuerIds(in: blob))
+
+        if let mask = extractMask(from: row.title),
+           title.contains("ending in") || title.contains("card ending") {
+            ids.insert("mask:\(mask)")
+        }
+        if CardIssuerCatalog.looksLikeCreditAccountName(row.cardName),
+           let mask = extractMask(from: row.cardName) {
+            ids.insert("mask:\(mask)")
+        }
+        return ids
     }
 
     /// Last 4 digits from “···0820”, “ending in 0820”, etc.

@@ -120,13 +120,17 @@ enum AppleCardCSVImporter {
             .replacingOccurrences(of: ",", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         // Allow literal zero amounts; reject empty/non-numeric.
-        guard let amountAbs = Double(amountRaw), amountAbs != 0 || amountRaw == "0" || amountRaw == "0.0" else {
+        guard let amountAbs = Double(amountRaw), abs(amountAbs) >= 0.005 else {
             return false
         }
 
         let merchant = col(map.merchant)
         let description = col(map.description)
         let title = merchant.isEmpty ? (description.isEmpty ? "Apple Card" : description) : merchant
+        // Apple’s CSV emits reward clawbacks as this type for every Apple Card, not spend.
+        if title.lowercased().contains("daily cash adjustment") {
+            return false
+        }
         let appleCategory = col(map.category)
         let typeRaw = col(map.type).lowercased()
         let type = normalizeType(typeRaw, title: title, amount: amountAbs)
@@ -167,21 +171,29 @@ enum AppleCardCSVImporter {
             report.payments += 1
 
         case .credit:
-            // Refund / statement credit — store as income so it doesn’t inflate spend.
-            upsertIncome(
+            // Statement credit / return — visible on the card, not Total Spend or Income.
+            upsertExpense(
                 id: stableId,
-                source: title,
+                title: title,
                 amount: abs(amountAbs),
                 date: date,
-                category: "Refund",
+                category: KnownCategory.refund.rawValue,
+                categoryLocked: true,
+                multiplier: 0,
+                multiplierLocked: true,
+                overrideSource: "apple-card-csv",
+                paymentRail: PaymentRail.other.rawValue,
                 modelContext: modelContext
             )
-            // Remove any prior expense mis-import.
-            deleteExpense(id: stableId, modelContext: modelContext)
+            deleteIncome(id: stableId, modelContext: modelContext)
+            deleteCreditPayment(id: stableId, modelContext: modelContext)
             report.credits += 1
 
         case .purchase:
-            let category = mapAppleCategory(appleCategory)
+            let category = mapAppleCategory(appleCategory, title: title)
+            let isInstallment = PayoffPlanRecognition.looksLikeInstallmentBillingTitle(title)
+                || category == KnownCategory.installment.rawValue
+            let isInterest = title.lowercased().contains("interest charge")
             // 2% base Daily Cash; higher reward categories applied via CardBenefitsStore.
             let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
             let mult = CardBenefitsStore.resolvedMultiplier(
@@ -197,11 +209,10 @@ enum AppleCardCSVImporter {
                 title: title,
                 amount: -abs(amountAbs),
                 date: date,
-                category: category,
-                categoryLocked: false,
-                // Default to 2x Daily Cash if resolver returns 0.
-                multiplier: mult > 0 ? mult : 2,
-                multiplierLocked: false,
+                category: isInterest ? KnownCategory.fees.rawValue : category,
+                categoryLocked: isInstallment || isInterest,
+                multiplier: isInstallment || isInterest ? 0 : (mult > 0 ? mult : 2),
+                multiplierLocked: isInstallment || isInterest,
                 overrideSource: "apple-card-csv",
                 paymentRail: PaymentRail.debit.rawValue,
                 modelContext: modelContext
@@ -237,10 +248,25 @@ enum AppleCardCSVImporter {
     }
 
     /// Maps Apple’s free-form category labels into this app’s KnownCategory names.
-    private static func mapAppleCategory(_ apple: String) -> String {
+    private static func mapAppleCategory(_ apple: String, title: String = "") -> String {
+        if PayoffPlanRecognition.looksLikeInstallmentBillingTitle(title) {
+            return KnownCategory.installment.rawValue
+        }
         let c = apple.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if c.isEmpty { return KnownCategory.miscellaneous.rawValue }
-        if c.contains("parking") || c.contains("transit") || c.contains("rideshare") || c.contains("taxi") {
+        if c.isEmpty || c.contains("other") {
+            return TitleCategoryHints.refine(
+                category: KnownCategory.miscellaneous.rawValue,
+                title: title
+            )
+        }
+        if c.contains("installment") {
+            return KnownCategory.installment.rawValue
+        }
+        if c.contains("interest") {
+            return KnownCategory.fees.rawValue
+        }
+        if c.contains("parking") || c.contains("transit") || c.contains("rideshare") || c.contains("taxi")
+            || c.contains("transportation") {
             return KnownCategory.transit.rawValue
         }
         if c.contains("gas") || c.contains("fuel") {
@@ -439,6 +465,19 @@ enum AppleCardCSVImporter {
                     kind: "income"
                 )
             )
+        }
+    }
+
+    @MainActor
+    private static func deleteIncome(id: String, modelContext: ModelContext) {
+        var descriptor = FetchDescriptor<Income>(
+            predicate: #Predicate<Income> { row in
+                row.transactionId == id
+            }
+        )
+        descriptor.fetchLimit = 1
+        if let row = try? modelContext.fetch(descriptor).first {
+            modelContext.delete(row)
         }
     }
 

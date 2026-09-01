@@ -3,7 +3,7 @@
 //  Finance Wizard
 //
 //  User-declared installment / promo payoff on a credit card.
-//  My Loan, Pay Over Time, and promo APR are different products — stored as kind.
+//  Card-line loans, purchase installments, and promo APR are different products.
 //
 
 import Foundation
@@ -34,7 +34,7 @@ enum PayoffPlanKind: String, CaseIterable, Identifiable, Codable, Sendable {
     var shortHelp: String {
         switch self {
         case .myLoan:
-            return "A lump sum from a card’s credit line (Chase My Loan). Fixed monthly payment, interest rate, and term — not the same as Pay Over Time."
+            return "A lump sum from a card’s credit line (Chase My Loan). Pick the card charge (for example “My Chase Loan TO 2667”), then the fixed payment, APR, and term. Not the same as Pay Over Time."
         case .payOverTime:
             return "A purchase split into monthly installments (Chase Pay Over Time, Amex Plan It). Monthly payment plus an optional plan fee. Not the same as My Loan."
         case .promoAPR:
@@ -51,6 +51,42 @@ enum PayoffPlanKind: String, CaseIterable, Identifiable, Codable, Sendable {
         case .promoAPR: return "percent"
         case .custom: return "creditcard"
         }
+    }
+}
+
+/// Title / PFC heuristics for installment billing and card-line loan proceeds.
+enum PayoffPlanRecognition {
+    /// Card-line loan posting or checking deposit (any issuer).
+    /// Plaid `LOAN_DISBURSEMENTS`, or titles like “My Loan TO 2667” / “loan proceeds”.
+    static func looksLikeLoanDisbursement(title: String, pfc: String? = nil) -> Bool {
+        let p = (pfc ?? "").uppercased()
+        if p.contains("LOAN_DISBURSEMENTS") { return true }
+        let t = title.lowercased()
+        if t.contains("student loan") || t.contains("auto loan") { return false }
+        if t.contains("loan payment") || t.contains("loan pmt") || t.contains("loan pymt") {
+            return false
+        }
+        if t.contains("loan disbursement") || t.contains("loan proceeds") { return true }
+        if t.contains("my loan") { return true }
+        if t.range(of: #"loan to \d"#, options: .regularExpression) != nil { return true }
+        return false
+    }
+
+    /// Short plan name from a disbursement title (“My Loan TO 2667” → “My Loan”).
+    static func displayName(fromTitle title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = trimmed.range(of: " TO ", options: .caseInsensitive) {
+            return String(trimmed[..<range.lowerBound])
+        }
+        return trimmed
+    }
+
+    /// Recurring installment billing of an existing purchase (Apple Card CSV, Pay Over Time, Plan It).
+    static func looksLikeInstallmentBillingTitle(_ title: String) -> Bool {
+        let t = title.lowercased()
+        if t.contains("pay over time") { return true }
+        if t.contains("installment") { return true }
+        return false
     }
 }
 
@@ -81,7 +117,7 @@ final class PayoffPlan {
     var endDate: Date?
     /// Original term in months, when known.
     var termMonths: Int?
-    /// Original purchase `transactionId` for Pay Over Time.
+    /// Original purchase (Pay Over Time) or the card disbursement (My Loan).
     var linkedTransactionId: String?
     var notes: String?
     var isEnded: Bool

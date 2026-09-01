@@ -42,6 +42,13 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
     case fees = "Fees"
     case miscellaneous = "Miscellaneous"
 
+    /// Card-line disbursement (Chase My Loan). Visible, but not Total Spend or Total paid.
+    case loan = "Loan"
+    /// Merchant refund / statement credit on a card (not earnings, not spend).
+    case refund = "Refund"
+    /// Apple Card monthly installment billing rows (original purchase already counted).
+    case installment = "Installment"
+
     /// Bill pays — excluded from Total Spend / Budget spend.
     case creditCardPayment = "Credit Card Payment"
 
@@ -74,6 +81,9 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
         case .giftsDonations: return "Gifts, charity, donations"
         case .fees: return "Bank fees, ATM, late fees"
         case .miscellaneous: return "Everything else"
+        case .loan: return "My Loan / cash from a card’s credit line (not spend)"
+        case .refund: return "Card credits and merchant refunds (not earnings)"
+        case .installment: return "Apple Card monthly installment billings (not new spend)"
         case .creditCardPayment: return "Card bill payments (not spend)"
         }
     }
@@ -85,7 +95,9 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
 
     /// Spend categories only (excludes bill pays) — Budget limits + spend charts.
     static var spendNames: [String] {
-        allCases.filter { $0 != .creditCardPayment }.map(\.rawValue)
+        allCases.filter {
+            $0 != .creditCardPayment && $0 != .loan && $0 != .refund && $0 != .installment
+        }.map(\.rawValue)
     }
 
     /// Logical order for Budget “add limit” picker (essentials first).
@@ -128,6 +140,11 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
         alias(["gifts & donations", "gifts and donations", "gifts", "donations", "charity", "donation"], .giftsDonations)
         alias(["fees", "bank fees", "atm", "service fee"], .fees)
         alias(["miscellaneous", "misc", "other", "uncategorized", "general services"], .miscellaneous)
+        alias(["loan", "my loan", "my chase loan"], .loan)
+        alias(["refund", "statement credit"], .refund)
+        alias(["installment", "installments"], .installment)
+        alias(["interest", "interest charge"], .fees)
+        alias(["debit", "daily cash adjustment"], .miscellaneous)
         alias([
             "credit card payment", "credit card payments",
             "card payment", "card payments"

@@ -201,6 +201,12 @@ struct FinanceSnapshot {
 enum TransactionAnalytics {
     /// Canonical label for credit-card bill payments (not real spend).
     nonisolated static let creditCardPaymentCategory = "Credit Card Payment"
+    /// Card-line disbursement (Chase My Loan) — not spend and not a bill payment.
+    nonisolated static let loanCategory = "Loan"
+    /// Card statement credit / merchant refund — not spend and not income.
+    nonisolated static let refundCategory = "Refund"
+    /// Apple Card monthly installment billing — original purchase already counted.
+    nonisolated static let installmentCategory = "Installment"
 
     /// Categories excluded from Total Spend, charts, and card spend rollups.
     static func isExcludedFromSpend(_ transaction: Transaction) -> Bool {
@@ -209,6 +215,17 @@ enum TransactionAnalytics {
 
     /// String form so callers without a full Transaction can still check.
     nonisolated static func isExcludedFromSpendCategory(_ category: String) -> Bool {
+        let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return c == creditCardPaymentCategory.lowercased()
+            || c == "credit card payments"
+            || c == "card payment"
+            || c == "card payments"
+            || c == loanCategory.lowercased()
+            || c == refundCategory.lowercased()
+            || c == installmentCategory.lowercased()
+    }
+
+    nonisolated static func isCreditCardPaymentCategory(_ category: String) -> Bool {
         let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return c == creditCardPaymentCategory.lowercased()
             || c == "credit card payments"

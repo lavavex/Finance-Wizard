@@ -74,10 +74,22 @@ struct TransactionRowView: View {
                             ? Color.secondary
                             : (transaction.amount >= 0 ? .green : .primary)
                     )
-                if TransactionAnalytics.isExcludedFromSpend(transaction) {
+                if TransactionAnalytics.isCreditCardPaymentCategory(transaction.category) {
                     Text("Bill pay")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(CategoryStyle.creditPayment)
+                } else if transaction.category.caseInsensitiveCompare(TransactionAnalytics.loanCategory) == .orderedSame {
+                    Text("Loan")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(CategoryStyle.services)
+                } else if transaction.category.caseInsensitiveCompare(TransactionAnalytics.refundCategory) == .orderedSame {
+                    Text("Refund")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                } else if transaction.category.caseInsensitiveCompare(TransactionAnalytics.installmentCategory) == .orderedSame {
+                    Text("Installment")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(CategoryStyle.services)
                 } else if transaction.multiplier > 0 {
                     Text("\(transaction.multiplier.formatted())x")
                         .font(.caption)

@@ -295,7 +295,7 @@ struct CardDetailView: View {
                     }
                     // Optional APRs — only show rows Plaid actually provided.
                     if let apr = credit.purchaseApr {
-                        LabeledContent("Purchase APR") {
+                        LabeledContent(apr == 0 ? "Purchase APR (promo)" : "Purchase APR") {
                             Text(formatAPR(apr))
                         }
                     }
@@ -368,10 +368,15 @@ struct CardDetailView: View {
         .sheet(isPresented: $showAddPayoff) {
             NavigationStack {
                 PayoffPlanEditorView(
-                    defaultKind: .custom,
+                    defaultKind: (creditAccount?.purchaseApr == 0 || creditAccount?.specialApr == 0)
+                        ? .promoAPR : .custom,
                     defaultAccountId: creditAccount?.accountId,
                     defaultPaymentMethod: displayName,
+                    defaultAmount: (creditAccount?.purchaseApr == 0 || creditAccount?.specialApr == 0)
+                        ? (creditAccount?.lastStatementBalance ?? creditAccount?.currentBalance)
+                        : nil,
                     defaultApr: creditAccount?.specialApr
+                        ?? ((creditAccount?.purchaseApr == 0) ? 0 : nil)
                 )
             }
         }

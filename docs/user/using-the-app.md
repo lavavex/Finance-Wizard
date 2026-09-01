@@ -37,7 +37,9 @@ Tap a row for **Transaction** detail. You can change **category** and **points m
 
 **Recurring** on that screen: **Auto-detect**, **Yearly**, **Monthly**, **Weekly**, or **Not recurring**. Use **Monthly** or **Yearly** for bills whose amount changes, like phone and electric — the Recurring tab groups that merchant even when the dollar amount is different each time.
 
-**Credit Card Payment** (shown as “Bill pay”) is a payment to a card, not a purchase. It stays in the list but is **not** in Total Spend, charts, or widgets. It also shows under Accounts → Total paid.
+**Credit Card Payment** (shown as “Bill pay”) is a payment to a card, not a purchase. It stays in the list but is **not** in Total Spend, charts, or widgets. It also shows under Accounts → Total paid. Checking ACH and the card’s “Thank You” are the **same** payment — Total paid counts it once even if the bank posts them a day or two apart.
+
+**Refund** / **Loan** / **Installment** also stay in the list but are **not** Total Spend or Total Income. Card statement credits (travel credit, merchant returns) and My Loan deposits to checking are not paychecks. Apple Card **Monthly Installments** are the billing of a purchase already in the list — use **Pay over time…** if you want them on Recurring.
 
 ## Accounts
 
@@ -59,9 +61,9 @@ On a **credit card**, **Payoff plans** tracks balances you are paying down on a 
 
 | Type | What it is |
 |------|------------|
-| **My Loan** | Lump sum from the card’s credit line (Chase My Loan). Fixed monthly payment, APR, and term. |
+| **My Loan** | Lump sum from the card’s credit line (Chase My Loan). Chase posts it as a **charge** on the card (e.g. “My Chase Loan TO 2667”). Open that charge → **My Loan…**, or add a plan on the card and **Choose loan charge**. Then set the fixed payment, APR, and term. |
 | **Pay Over Time** | A **purchase** split into installments (Chase Pay Over Time, Amex Plan It). Monthly payment plus an optional plan fee. Add from the **transaction**, or from the card. |
-| **Promo APR** | A slice of the card balance at 0% (or special APR) until a date — e.g. AmEx intro APR. Set remaining to the **promo** balance, not the whole card, and a monthly payment to clear it before the promo ends. |
+| **Promo APR** | A slice of the card balance at 0% (or special APR) until a date — e.g. AmEx intro APR. If the card’s purchase APR is **0%**, **Add payoff plan** starts as Promo APR with the statement balance. Set remaining to the **promo** balance if it is not the whole card. |
 | **Balance payoff** | Any other scheduled payoff on that card. |
 
 **Record this month’s payment** reduces remaining by the monthly payment. Plans also appear on the **Recurring** tab (calendar + estimated monthly). They do **not** change Total Spend; they are a schedule on top of the card balance.
@@ -82,7 +84,7 @@ Transaction detail: **Suggest with Apple Intelligence** picks a category from th
 
 Detected subscriptions and repeating bills. Fixed-price subs need the same merchant and amount on a schedule. Phone, electric, and similar bills can **vary** — mark one charge **Monthly** or **Yearly** on Transaction detail, or the app may pick them up when the cadence is regular. A **month grid** at the top marks **next charge** days; tap a day to list those charges under the calendar. **Active** vs **Ended** (including ones you mark **Cancelled** or **Not Recurring**). Shows next charge and estimated monthly total (`~` when the amount changes). Tap a row for the charges.
 
-**Payoff plans** (My Loan, Pay Over Time, promo APR) are listed here too and count toward Est. Monthly. Add them from a card or from **Pay over time…** on a purchase.
+**Payoff plans** (My Loan, Pay Over Time, promo APR) are listed here too and count toward Est. Monthly. Add **Pay Over Time** from a purchase, **My Loan** from the My Chase Loan charge (or the card).
 
 ## Budget
 
