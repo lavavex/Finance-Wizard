@@ -35,7 +35,8 @@ struct AccountsBoard {
         transactions: [Transaction],
         payments: [CreditCardPayment],
         period: SnapshotPeriod,
-        referenceDate: Date
+        referenceDate: Date,
+        payoffPlans: [PayoffPlan] = []
     ) -> AccountsBoard {
         var board = AccountsBoard()
         let creditAccounts = accounts.filter(\.isCredit)
@@ -90,26 +91,42 @@ struct AccountsBoard {
         }) {
             let methods = account.matchingPaymentMethods(in: pool)
             for m in methods { claimed.insert(m) }
-            let totals = index.totals(for: methods)
             let primary = methods.sorted().first ?? account.plaidDisplayName
-            let paid = CreditAnalytics.totalPaid(
-                in: paymentsMatching(
+            let cardTxs = transactions.filter { methods.contains(TransactionAnalytics.cardName(for: $0)) }
+            let closeDay = StatementCycle.closeDay(from: account.lastStatementIssueDate)
+            let statementGroups = StatementCycle.group(cardTxs, closeDay: closeDay)
+            let currentStatement = statementGroups.first(where: { $0.bucket.isOpen })
+            let statementRows = currentStatement?.rows ?? []
+            let statementPayments: [CreditCardPayment] = {
+                let matched = paymentsMatching(
                     credit: account,
                     paymentMethods: methods,
-                    in: board.periodPayments
+                    in: payments
                 )
-            )
+                guard let bucket = currentStatement?.bucket else { return matched }
+                return matched.filter { $0.date >= bucket.start && $0.date <= bucket.end }
+            }()
+            let paid = CreditAnalytics.totalPaid(in: statementPayments)
             board.creditRows.append(
                 UnifiedCardRow(
                     id: account.accountId,
                     displayName: account.displayName,
                     rawPaymentMethod: primary,
                     matchingPaymentMethods: methods,
-                    spent: totals.spend,
-                    transactionCount: totals.count,
+                    spent: TransactionAnalytics.totalSpend(in: statementRows),
+                    transactionCount: statementRows.count,
                     creditAccount: account,
                     bankAccount: account,
-                    paidInPeriod: paid
+                    paidInPeriod: paid,
+                    installmentIncludedInMin: PayoffPlanProgress.installmentIncludedInMin(
+                        on: account,
+                        plans: payoffPlans
+                    ),
+                    extraPrincipalThisStatement: PayoffPlanProgress.extraPrincipalThisStatement(
+                        on: account,
+                        plans: payoffPlans
+                    ),
+                    spendIsThisStatement: true
                 )
             )
         }
@@ -195,6 +212,7 @@ struct AccountsBoard {
 /// Compact row for a credit account with a due date (or overdue).
 struct UpcomingBillRow: View {
     let account: BankAccount
+    var installmentIncluded: Double = 0
 
     // Color escalates as due date nears or utilization is high.
     private var urgencyColor: Color {
@@ -238,6 +256,11 @@ struct UpcomingBillRow: View {
                     MoneyText(max(0, account.currentBalance))
                         .font(.body.weight(.semibold))
                         .foregroundStyle(urgencyColor)
+                }
+                if installmentIncluded > 0.005 {
+                    Text("Incl. \(installmentIncluded.formatted(.currency(code: "USD"))) installment")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 if let due = account.nextPaymentDueDate {
                     if account.isOverdue == true {
@@ -318,6 +341,9 @@ struct UnifiedCardRow: Identifiable {
     let creditAccount: BankAccount?
     var bankAccount: BankAccount? = nil
     let paidInPeriod: Double
+    var installmentIncludedInMin: Double = 0
+    var extraPrincipalThisStatement: Double = 0
+    var spendIsThisStatement: Bool = false
 
     // Prefer credit, else depository, for logo lookups.
     var institutionId: String? {
@@ -403,9 +429,16 @@ struct UnifiedCardLabel: View {
             if let credit = row.creditAccount, credit.hasLiabilitiesDetails {
                 HStack(spacing: 8) {
                     if let minPay = credit.minimumPaymentAmount {
-                        MoneyText(minPay, prefix: "Min ")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            MoneyText(minPay, prefix: "Min ")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if row.installmentIncludedInMin > 0.005 {
+                                Text("includes \(row.installmentIncludedInMin.formatted(.currency(code: "USD"))) loan/installment")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
                     }
                     if let due = credit.nextPaymentDueDate {
                         Text("·")
@@ -430,14 +463,17 @@ struct UnifiedCardLabel: View {
             }
 
             HStack {
-                MoneyText(row.spent, prefix: "Spend ")
+                MoneyText(
+                    row.spent,
+                    prefix: row.spendIsThisStatement ? "This statement " : "Spend "
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if row.transactionCount > 0 {
                     Text("·")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
-                    Text("\(row.transactionCount) purchases")
+                    Text("\(row.transactionCount)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

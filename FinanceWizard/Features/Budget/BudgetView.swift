@@ -12,6 +12,8 @@ import SwiftData
 struct BudgetView: View {
     @Query private var transactions: [Transaction]
     @Query private var incomeRows: [Income]
+    @Query private var accounts: [BankAccount]
+    @Query private var payoffPlans: [PayoffPlan]
     @Environment(\.modelContext) private var modelContext
 
     @State private var plan: BudgetPlan?
@@ -32,6 +34,29 @@ struct BudgetView: View {
 
     private var periodLabel: String {
         period.filterLabel(referenceDate: referenceDate)
+    }
+
+    private var cardsDueThisPeriod: [BankAccount] {
+        let credit = accounts.filter(\.isCredit)
+        guard let interval = TransactionAnalytics.dateInterval(
+            for: period,
+            referenceDate: referenceDate
+        ) else {
+            return credit.filter { $0.nextPaymentDueDate != nil || $0.isOverdue == true }
+                .sorted { ($0.nextPaymentDueDate ?? .distantFuture) < ($1.nextPaymentDueDate ?? .distantFuture) }
+        }
+        return credit.filter { account in
+            if account.isOverdue == true { return true }
+            guard let due = account.nextPaymentDueDate else { return false }
+            return due >= interval.start && due < interval.end
+        }
+        .sorted { ($0.nextPaymentDueDate ?? .distantFuture) < ($1.nextPaymentDueDate ?? .distantFuture) }
+    }
+
+    private var extraPrincipalDue: Double {
+        cardsDueThisPeriod.reduce(0) {
+            $0 + PayoffPlanProgress.extraPrincipalThisStatement(on: $1, plans: Array(payoffPlans))
+        }
     }
 
     /// Aggregated spend/income vs limits for the current plan and period.
@@ -73,6 +98,11 @@ struct BudgetView: View {
                 let loaded = BudgetStore.loadOrCreate(in: modelContext)
                 plan = loaded
                 monthlyDraft = formatAmount(loaded.monthlyLimit)
+                PayoffPlanProgress.applyStatementProgress(
+                    plans: Array(payoffPlans),
+                    accounts: Array(accounts)
+                )
+                try? modelContext.save()
             }
             .sheet(isPresented: $showAddCategory) {
                 addCategorySheet
@@ -225,6 +255,61 @@ struct BudgetView: View {
                 .padding(.vertical, 4)
             } header: {
                 Text("This period")
+            }
+
+            if !cardsDueThisPeriod.isEmpty {
+                Section {
+                    ForEach(cardsDueThisPeriod, id: \.accountId) { account in
+                        let included = PayoffPlanProgress.installmentIncludedInMin(
+                            on: account,
+                            plans: Array(payoffPlans)
+                        )
+                        let extra = PayoffPlanProgress.extraPrincipalThisStatement(
+                            on: account,
+                            plans: Array(payoffPlans)
+                        )
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                CardText(account.displayName)
+                                Spacer()
+                                if let min = account.minimumPaymentAmount {
+                                    MoneyText(min)
+                                        .font(.body.weight(.semibold))
+                                }
+                            }
+                            HStack {
+                                if let due = account.nextPaymentDueDate {
+                                    Text("Due \(due.formatted(date: .abbreviated, time: .omitted))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if included > 0.005 {
+                                    Text("Min includes \(included.formatted(.currency(code: "USD"))) installment")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            if extra > 0.005 {
+                                Text("+\(extra.formatted(.currency(code: "USD"))) extra principal (pay-off plan)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if extraPrincipalDue > 0.005 {
+                        HStack {
+                            Text("Extra principal this period")
+                            Spacer()
+                            MoneyText(extraPrincipalDue)
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                } header: {
+                    Text("Cards due")
+                } footer: {
+                    Text("Card minimums already include loans and installments. Extra principal is on top of the minimum.")
+                }
             }
 
             // MARK: Expected income

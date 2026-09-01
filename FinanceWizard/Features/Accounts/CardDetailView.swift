@@ -9,22 +9,20 @@ import SwiftUI
 import SwiftData
 
 /// Detail screen for one credit card, depository account, or orphan payment method.
-/// Receives period/sort from Accounts so the purchase list matches the hub filters.
+/// Credit cards list **all** activity grouped by statement cycle, not the Accounts date filter.
 struct CardDetailView: View {
     let displayName: String
     let rawPaymentMethod: String
     // Default empty Set; parent usually passes matching methods from UnifiedCardRow.
     var matchingPaymentMethods: Set<String> = []
-    let period: SnapshotPeriod
-    let referenceDate: Date
-    let sort: TransactionSort
+    var sort: TransactionSort = .dateNewest
     var creditAccount: BankAccount? = nil
     var bankAccount: BankAccount? = nil
-    var periodPayments: [CreditCardPayment] = []
     var onNicknameChanged: (() -> Void)? = nil
 
     @Query private var transactions: [Transaction]
     @Query private var payoffPlans: [PayoffPlan]
+    @Query private var allPayments: [CreditCardPayment]
     @Environment(\.modelContext) private var modelContext
 
     @State private var nicknameDraft: String = ""
@@ -35,10 +33,6 @@ struct CardDetailView: View {
     @State private var didSaveRewards = false
     @State private var showAddPayoff = false
 
-    private var periodLabel: String {
-        period.filterLabel(referenceDate: referenceDate)
-    }
-
     // Always have at least the raw method in the set used to filter purchases.
     private var methods: Set<String> {
         var set = matchingPaymentMethods
@@ -47,21 +41,61 @@ struct CardDetailView: View {
     }
 
     private var cardRows: [Transaction] {
-        let inPeriod = TransactionAnalytics.inPeriod(
-            transactions,
-            period: period,
-            referenceDate: referenceDate
+        transactions.filter { methods.contains(TransactionAnalytics.cardName(for: $0)) }
+    }
+
+    private var statementCloseDay: Int? {
+        StatementCycle.closeDay(from: creditAccount?.lastStatementIssueDate)
+    }
+
+    private var statementGroups: [(bucket: StatementBucket, rows: [Transaction])] {
+        StatementCycle.group(
+            cardRows,
+            closeDay: creditAccount != nil ? statementCloseDay : nil,
+            sort: sort
         )
-        let forCard = inPeriod.filter { methods.contains(TransactionAnalytics.cardName(for: $0)) }
-        return TransactionAnalytics.sorted(forCard, by: sort)
+    }
+
+    private var currentStatementRows: [Transaction] {
+        statementGroups.first(where: { $0.bucket.isOpen })?.rows
+            ?? statementGroups.first?.rows
+            ?? []
     }
 
     private var cardSpend: Double {
-        TransactionAnalytics.totalSpend(in: cardRows)
+        TransactionAnalytics.totalSpend(in: currentStatementRows)
+    }
+
+    private var cardPayments: [CreditCardPayment] {
+        AccountsBoard.paymentsMatching(
+            credit: creditAccount,
+            paymentMethods: methods,
+            in: Array(allPayments)
+        )
+    }
+
+    private var currentStatementPayments: [CreditCardPayment] {
+        guard let current = statementGroups.first(where: { $0.bucket.isOpen })?.bucket
+                ?? statementGroups.first?.bucket else {
+            return cardPayments
+        }
+        return cardPayments.filter {
+            $0.date >= current.start && $0.date <= current.end
+        }
     }
 
     private var paidTotal: Double {
-        CreditAnalytics.totalPaid(in: periodPayments)
+        CreditAnalytics.totalPaid(in: currentStatementPayments)
+    }
+
+    private var summaryPeriodLabel: String {
+        if creditAccount != nil, statementCloseDay != nil {
+            return "This statement"
+        }
+        if let open = statementGroups.first(where: { $0.bucket.isOpen }) {
+            return open.bucket.title
+        }
+        return "All activity"
     }
 
     private var account: BankAccount? { creditAccount ?? bankAccount }
@@ -76,6 +110,14 @@ struct CardDetailView: View {
             if lhs.isActive != rhs.isActive { return lhs.isActive && !rhs.isActive }
             return lhs.installmentTotal > rhs.installmentTotal
         }
+    }
+
+    private var issuerPlans: [PayoffPlan] {
+        cardPayoffPlans.filter { $0.kind.followsCardStatement }
+    }
+
+    private var payoffByDatePlans: [PayoffPlan] {
+        cardPayoffPlans.filter { !$0.kind.followsCardStatement }
     }
 
     private var isDepositoryDetail: Bool {
@@ -192,15 +234,15 @@ struct CardDetailView: View {
                     MoneyText(cardSpend)
                         .foregroundStyle(.secondary)
                 }
-                Text("\(periodLabel) · \(cardRows.count) purchases")
+                Text("\(summaryPeriodLabel) · \(currentStatementRows.count) transactions")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                if creditAccount != nil || paidTotal > 0 || !periodPayments.isEmpty {
+                if creditAccount != nil || paidTotal > 0 || !currentStatementPayments.isEmpty {
                     TotalPaidDisclosure(
                         total: paidTotal,
-                        payments: periodPayments,
-                        periodLabel: periodLabel,
+                        payments: currentStatementPayments,
+                        periodLabel: summaryPeriodLabel,
                         institutionId: account?.institutionId
                     )
                 }
@@ -324,40 +366,71 @@ struct CardDetailView: View {
             }
 
             if creditAccount != nil {
+                if !issuerPlans.isEmpty {
+                    Section {
+                        ForEach(issuerPlans, id: \.planId) { plan in
+                            NavigationLink {
+                                PayoffPlanEditorView(existing: plan)
+                            } label: {
+                                PayoffPlanRowView(
+                                    plan: plan,
+                                    cardDueDate: creditAccount?.nextPaymentDueDate
+                                )
+                            }
+                        }
+                    } header: {
+                        Text("Loans & installments")
+                    } footer: {
+                        Text("Issuer plans. Each month’s amount is in the card minimum and due with the statement.")
+                    }
+                }
                 Section {
-                    ForEach(cardPayoffPlans, id: \.planId) { plan in
+                    ForEach(payoffByDatePlans, id: \.planId) { plan in
                         NavigationLink {
                             PayoffPlanEditorView(existing: plan)
                         } label: {
-                            PayoffPlanRowView(plan: plan)
+                            PayoffPlanRowView(
+                                plan: plan,
+                                cardDueDate: creditAccount?.nextPaymentDueDate
+                            )
                         }
                     }
-                    Button("Add payoff plan") {
+                    Button("Pay off by date") {
                         showAddPayoff = true
                     }
                 } header: {
-                    Text("Payoff plans")
+                    Text("Pay off by date")
                 } footer: {
-                    Text("My Loan, Pay Over Time, and promo APR balances you are paying down. These also show on Recurring.")
+                    Text("A plan to clear a promo or extra balance by a date you choose. Not for My Loan or Pay Over Time.")
                 }
             }
 
-            Section("Purchases") {
-                if cardRows.isEmpty {
-                    Text("No purchases for this account in the selected period.")
+            if statementGroups.isEmpty {
+                Section("Activity") {
+                    Text("No transactions on this account yet.")
                         .foregroundStyle(.secondary)
-                } else {
-                    ForEach(cardRows) { transaction in
-                        NavigationLink {
-                            TransactionDetailView(transaction: transaction)
-                        } label: {
-                            TransactionRowView(
-                                transaction: transaction,
-                                institutionId: account?.institutionId,
-                                institutionName: account?.institutionName,
-                                // Show debit/ACH rail on depository (or orphan) detail screens.
-                                showPaymentRail: bankAccount?.isDepository == true || creditAccount == nil
-                            )
+                }
+            } else {
+                ForEach(statementGroups, id: \.bucket.id) { group in
+                    Section {
+                        ForEach(group.rows) { transaction in
+                            NavigationLink {
+                                TransactionDetailView(transaction: transaction)
+                            } label: {
+                                TransactionRowView(
+                                    transaction: transaction,
+                                    institutionId: account?.institutionId,
+                                    institutionName: account?.institutionName,
+                                    showPaymentRail: bankAccount?.isDepository == true || creditAccount == nil
+                                )
+                            }
+                        }
+                    } header: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.bucket.title)
+                            Text(group.bucket.rangeLabel)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }

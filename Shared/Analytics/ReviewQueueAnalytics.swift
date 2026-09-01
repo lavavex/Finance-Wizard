@@ -104,11 +104,12 @@ enum ReviewQueueAnalytics {
 
     /// Empty or generic labels that usually need a real category.
     private static func looksWeakCategory(_ category: String) -> Bool {
+        if TransactionAnalytics.isExcludedFromSpendCategory(category) { return false }
         let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if c.isEmpty { return true }
         return [
             "miscellaneous", "misc", "other", "uncategorized", "general",
-            "transfer", "transfers", "unknown"
+            "transfer", "transfers", "unknown", "debit"
         ].contains(c)
     }
 

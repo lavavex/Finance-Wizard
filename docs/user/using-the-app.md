@@ -53,20 +53,20 @@ Credit cards plus checking and savings.
 | **Min payments / next due** | When the bank reports them |
 | **Upcoming bills** | Due in the next 30 days (or overdue) |
 
-Open an account to rename it. On checking, you can set **Debit** vs **ACH** reward rates. Pull down to Sync.
+Open a card to see **all** activity by **statement period** (not the Accounts week/month filter). On checking, you can set **Debit** vs **ACH** reward rates. Pull down to Sync.
 
-### Payoff plans (My Loan, Pay Over Time, promo APR)
+### Loans, installments, and pay-off-by-date
 
-On a **credit card**, **Payoff plans** tracks balances you are paying down on a schedule. These are **not** the same product:
+On a **credit card**:
 
-| Type | What it is |
-|------|------------|
-| **My Loan** | Lump sum from the card’s credit line (Chase My Loan). Chase posts it as a **charge** on the card (e.g. “My Chase Loan TO 2667”). Open that charge → **My Loan…**, or add a plan on the card and **Choose loan charge**. Then set the fixed payment, APR, and term. |
-| **Pay Over Time** | A **purchase** split into installments (Chase Pay Over Time, Amex Plan It). Monthly payment plus an optional plan fee. Add from the **transaction**, or from the card. |
-| **Promo APR** | A slice of the card balance at 0% (or special APR) until a date — e.g. AmEx intro APR. If the card’s purchase APR is **0%**, **Add payoff plan** starts as Promo APR with the statement balance. Set remaining to the **promo** balance if it is not the whole card. |
-| **Balance payoff** | Any other scheduled payoff on that card. |
+| | What it is |
+|--|------------|
+| **Loans & installments** | My Loan / Pay Over Time / Apple installments. Open the **loan charge** or **installment** row and attach it. The monthly amount is **already in the card minimum** and due on the **same day as the card**. There is no separate schedule. |
+| **Pay off by date** | A plan to clear a promo (0% APR) or extra balance by a date you choose. Accounts → card → **Pay off by date**. Extra principal you intend to send with the statement payment. |
 
-**Record this month’s payment** reduces remaining by the monthly payment. Plans also appear on the **Recurring** tab (calendar + estimated monthly). They do **not** change Total Spend; they are a schedule on top of the card balance.
+**Record this month’s payment** reduces remaining in the app. These show on **Recurring** on the card’s due date.
+
+Open a card from Accounts to see **all** activity grouped by **statement** (close day from the bank). The Accounts week/month filter does not apply on that screen.
 
 ### Rewards on a card
 
@@ -84,11 +84,11 @@ Transaction detail: **Suggest with Apple Intelligence** picks a category from th
 
 Detected subscriptions and repeating bills. Fixed-price subs need the same merchant and amount on a schedule. Phone, electric, and similar bills can **vary** — mark one charge **Monthly** or **Yearly** on Transaction detail, or the app may pick them up when the cadence is regular. A **month grid** at the top marks **next charge** days; tap a day to list those charges under the calendar. **Active** vs **Ended** (including ones you mark **Cancelled** or **Not Recurring**). Shows next charge and estimated monthly total (`~` when the amount changes). Tap a row for the charges.
 
-**Payoff plans** (My Loan, Pay Over Time, promo APR) are listed here too and count toward Est. Monthly. Add **Pay Over Time** from a purchase, **My Loan** from the My Chase Loan charge (or the card).
+**Extra bills** is subscriptions and other charges besides the card payment. **On your cards** is loans and installments that are already in the card minimum — they do not add to Extra bills. Pay-off-extra plans are extra principal you mean to send with the statement.
 
 ## Budget
 
-A **monthly cap**, **expected income**, and **per-category limits** compared to real spend. Remaining / over updates as new charges sync.
+A **monthly cap**, **expected income**, and **per-category limits** compared to real spend. Remaining / over updates as new charges sync. **Cards due** lists statement minimums in this period (loans/installments are already inside the min) plus any extra principal from a pay-off-by-date plan.
 
 ## Settings
 

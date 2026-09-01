@@ -12,6 +12,7 @@ import SwiftData
 struct SubscriptionsView: View {
     @Query private var transactions: [Transaction]
     @Query private var payoffPlans: [PayoffPlan]
+    @Query private var accounts: [BankAccount]
 
     @State private var candidates: [SubscriptionCandidate] = []
     @State private var ended: [SubscriptionCandidate] = []
@@ -27,23 +28,36 @@ struct SubscriptionsView: View {
 
     private var monthlySummaryLabel: String {
         if isScanning { return "Scanning..." }
-        if activePayoffPlans.isEmpty {
-            return "\(candidates.count) recurring"
-        }
-        return "\(candidates.count) recurring · \(activePayoffPlans.count) payoff"
+        return "\(candidates.count) bills"
     }
 
-    private var activePayoffPlans: [PayoffPlan] {
-        payoffPlans.filter(\.isActive).sorted { $0.installmentTotal > $1.installmentTotal }
+    private var issuerPlans: [PayoffPlan] {
+        payoffPlans.filter { $0.isActive && $0.kind.followsCardStatement }
+            .sorted { $0.installmentTotal > $1.installmentTotal }
+    }
+
+    private var extraPayoffPlans: [PayoffPlan] {
+        payoffPlans.filter { $0.isActive && !$0.kind.followsCardStatement }
+            .sorted { $0.installmentTotal > $1.installmentTotal }
     }
 
     private var endedPayoffPlans: [PayoffPlan] {
         payoffPlans.filter { !$0.isActive }.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    private var totalMonthly: Double {
+    /// Cash besides the card bill: subscriptions + extra principal plans.
+    private var extraMonthly: Double {
         candidates.reduce(0) { $0 + $1.estimatedMonthly }
-            + activePayoffPlans.reduce(0) { $0 + $1.installmentTotal }
+            + extraPayoffPlans.reduce(0) { $0 + $1.monthlyPayment }
+    }
+
+    /// Already inside card minima — not extra cash leaving checking twice.
+    private var onCardMonthly: Double {
+        issuerPlans.reduce(0) { $0 + $1.installmentTotal }
+    }
+
+    private var activePayoffPlans: [PayoffPlan] {
+        payoffPlans.filter(\.isActive).sorted { $0.installmentTotal > $1.installmentTotal }
     }
     
     private var chargeDays: Set<DateComponents> {
@@ -54,7 +68,7 @@ struct SubscriptionsView: View {
             }
         }
         for plan in activePayoffPlans {
-            if let next = plan.nextPaymentDate() {
+            if let next = plan.nextPaymentDate(cardDueDate: cardDueDate(for: plan)) {
                 days.insert(Calendar.current.dateComponents([.year, .month, .day], from: next))
             }
         }
@@ -64,7 +78,7 @@ struct SubscriptionsView: View {
     private var payoffOnSelectedDay: [PayoffPlan] {
         guard selectedDay != nil else { return [] }
         return activePayoffPlans.filter { plan in
-            guard let next = plan.nextPaymentDate() else { return false }
+            guard let next = plan.nextPaymentDate(cardDueDate: cardDueDate(for: plan)) else { return false }
             let parts = Calendar.current.dateComponents([.year, .month, .day], from: next)
             return parts.year == selectedDay?.year
                 && parts.month == selectedDay?.month
@@ -121,7 +135,7 @@ struct SubscriptionsView: View {
                             NavigationLink {
                                 PayoffPlanEditorView(existing: plan)
                             } label: {
-                                PayoffPlanRowView(plan: plan)
+                                PayoffPlanRowView(plan: plan, cardDueDate: cardDueDate(for: plan))
                             }
                         }
                         ForEach(chargesOnSelectedDay) { item in
@@ -135,10 +149,10 @@ struct SubscriptionsView: View {
                 Section {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Est. Monthly")
+                            Text("Extra bills")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            MoneyText(totalMonthly)
+                            MoneyText(extraMonthly)
                                 .font(.title2.weight(.bold))
                         }
                         Spacer()
@@ -146,24 +160,45 @@ struct SubscriptionsView: View {
                             Text(monthlySummaryLabel)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            if onCardMonthly > 0.005 {
+                                Text("+\(onCardMonthly.formatted(.currency(code: "USD"))) on cards")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                     }
                     .padding(.vertical, 4)
+                } footer: {
+                    Text("Extra bills are subscriptions and other charges besides the card payment. Loans and installments are already in the card minimum.")
                 }
 
-                if !activePayoffPlans.isEmpty || !endedPayoffPlans.isEmpty {
+                if !issuerPlans.isEmpty {
                     Section {
-                        ForEach(activePayoffPlans, id: \.planId) { plan in
+                        ForEach(issuerPlans, id: \.planId) { plan in
                             NavigationLink {
                                 PayoffPlanEditorView(existing: plan)
                             } label: {
-                                PayoffPlanRowView(plan: plan)
+                                PayoffPlanRowView(plan: plan, cardDueDate: cardDueDate(for: plan))
                             }
                         }
                     } header: {
-                        Text("Payoff plans")
+                        Text("On your cards")
                     } footer: {
-                        Text("My Loan, Pay Over Time, and promo APR. Add from a card or a purchase.")
+                        Text("Due with the statement. Included in the card minimum — not extra cash.")
+                    }
+                }
+
+                if !extraPayoffPlans.isEmpty {
+                    Section {
+                        ForEach(extraPayoffPlans, id: \.planId) { plan in
+                            NavigationLink {
+                                PayoffPlanEditorView(existing: plan)
+                            } label: {
+                                PayoffPlanRowView(plan: plan, cardDueDate: cardDueDate(for: plan))
+                            }
+                        }
+                    } header: {
+                        Text("Pay off extra")
                     }
                 }
 
@@ -174,7 +209,10 @@ struct SubscriptionsView: View {
                             .padding(.vertical, 12)
                             .listRowBackground(Color.clear)
                     } else if candidates.isEmpty {
-                        ContentUnavailableView("No Recurring Charges Found", systemImage: "repeat.circle", description: Text("Recurring Charges will show up here.")
+                        ContentUnavailableView(
+                            "No repeating bills yet",
+                            systemImage: "repeat.circle",
+                            description: Text("Subscriptions and marked monthly bills show up here.")
                         )
                         .listRowBackground(Color.clear)
                     } else {
@@ -185,32 +223,25 @@ struct SubscriptionsView: View {
                         }
                     }
                 } header: {
-                    Text("Active")
+                    Text("Bills")
                 }
 
-                if !ended.isEmpty {
+                if !ended.isEmpty || !endedPayoffPlans.isEmpty {
                     Section {
                         ForEach(ended) { item in
                             NavigationLink(value: item.id) {
                                 subscriptionRow(item)
                             }
                         }
-                    } header: {
-                        Text("Ended")
-                    }
-                }
-
-                if !endedPayoffPlans.isEmpty {
-                    Section {
                         ForEach(endedPayoffPlans, id: \.planId) { plan in
                             NavigationLink {
                                 PayoffPlanEditorView(existing: plan)
                             } label: {
-                                PayoffPlanRowView(plan: plan)
+                                PayoffPlanRowView(plan: plan, cardDueDate: cardDueDate(for: plan))
                             }
                         }
                     } header: {
-                        Text("Paid off")
+                        Text("Ended")
                     }
                 }
             }
@@ -367,6 +398,15 @@ struct SubscriptionsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
+    private func cardDueDate(for plan: PayoffPlan) -> Date? {
+        if let id = plan.accountId {
+            if let match = accounts.first(where: { $0.accountId == id }) {
+                return match.nextPaymentDueDate
+            }
+        }
+        return accounts.first { $0.matchesPaymentMethod(plan.paymentMethod) }?.nextPaymentDueDate
+    }
+
     @MainActor
     private func detectGroups() async -> (active: [SubscriptionCandidate], ended: [SubscriptionCandidate]) {
         await logWork("Snapshotting \(transactions.count) transactions")
@@ -395,6 +435,11 @@ struct SubscriptionsView: View {
     @MainActor
     private func rescan(showScanning: Bool = true) async {
         if showScanning { isScanning = true }
+        PayoffPlanProgress.applyStatementProgress(
+            plans: Array(payoffPlans),
+            accounts: Array(accounts)
+        )
+        try? modelContext.save()
         let groups = await detectGroups()
         candidates = groups.active
         ended = groups.ended

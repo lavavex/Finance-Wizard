@@ -31,16 +31,21 @@ enum PayoffPlanKind: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
+    /// Issuer-scheduled: payment is part of the card minimum and due on the statement due date.
+    var followsCardStatement: Bool {
+        self == .myLoan || self == .payOverTime
+    }
+
     var shortHelp: String {
         switch self {
         case .myLoan:
-            return "A lump sum from a card’s credit line (Chase My Loan). Pick the card charge (for example “My Chase Loan TO 2667”), then the fixed payment, APR, and term. Not the same as Pay Over Time."
+            return "A lump sum against the card’s credit line. The monthly amount is added to the card minimum and due on the same day as the card."
         case .payOverTime:
-            return "A purchase split into monthly installments (Chase Pay Over Time, Amex Plan It). Monthly payment plus an optional plan fee. Not the same as My Loan."
+            return "A purchase billed in installments. The monthly amount (plus any plan fee) is added to the card minimum and due with the card."
         case .promoAPR:
-            return "A slice of the card balance at 0% or special APR until a date. Set a monthly payment to clear it before the promo ends."
+            return "Pay a promo or 0% balance down by a date you choose. Size the monthly extra so it clears before that date."
         case .custom:
-            return "Any other card balance you want to pay down on a monthly schedule."
+            return "Pay a slice of this card down by a date you choose."
         }
     }
 
@@ -121,6 +126,8 @@ final class PayoffPlan {
     var linkedTransactionId: String?
     var notes: String?
     var isEnded: Bool
+    /// Last statement close we already subtracted a monthly payment for (issuer plans).
+    var lastAppliedStatementDate: Date?
     var createdAt: Date
     var updatedAt: Date
 
@@ -156,6 +163,7 @@ final class PayoffPlan {
         linkedTransactionId: String? = nil,
         notes: String? = nil,
         isEnded: Bool = false,
+        lastAppliedStatementDate: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -175,27 +183,61 @@ final class PayoffPlan {
         self.linkedTransactionId = linkedTransactionId
         self.notes = notes
         self.isEnded = isEnded
+        self.lastAppliedStatementDate = lastAppliedStatementDate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
-    /// Next installment on or after today. Nil when the plan is done or past `endDate`.
-    func nextPaymentDate(from now: Date = Date()) -> Date? {
+    func isOn(account: BankAccount) -> Bool {
+        if let id = accountId, id == account.accountId { return true }
+        return account.matchesPaymentMethod(paymentMethod)
+    }
+
+    /// Subtract monthly payments for statement closes after `lastAppliedStatementDate`.
+    /// First time we see a statement we only stamp the date — remaining is the current balance.
+    func applyStatementProgress(lastStatement: Date?, now: Date = Date()) {
+        guard kind.followsCardStatement, isActive, let lastStatement else { return }
+        let cal = Calendar.current
+        let stmt = cal.startOfDay(for: lastStatement)
+        if let applied = lastAppliedStatementDate {
+            let appliedDay = cal.startOfDay(for: applied)
+            guard stmt > appliedDay else { return }
+            let months = max(1, cal.dateComponents([.month], from: appliedDay, to: stmt).month ?? 1)
+            for _ in 0..<months {
+                recordPayment()
+                if !isActive { break }
+            }
+        }
+        lastAppliedStatementDate = stmt
+        updatedAt = now
+    }
+
+    /// Next amount due. Loans / installments use the card’s statement due date when known.
+    func nextPaymentDate(cardDueDate: Date? = nil, from now: Date = Date()) -> Date? {
         guard isActive else { return nil }
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
-        var cursor = cal.startOfDay(for: startDate)
-        if cursor > today {
-            if let end = endDate, cursor > cal.startOfDay(for: end) { return nil }
-            return cursor
+        if kind.followsCardStatement {
+            guard let due = cardDueDate.map({ cal.startOfDay(for: $0) }) else {
+                return nextMonthly(from: startDate, after: today, calendar: cal)
+            }
+            if due >= today { return due }
+            return cal.date(byAdding: .month, value: 1, to: due)
         }
+        let next = nextMonthly(from: startDate, after: today, calendar: cal)
+        if let end = endDate, let next, next > cal.startOfDay(for: end) { return nil }
+        return next
+    }
+
+    private func nextMonthly(from start: Date, after today: Date, calendar: Calendar) -> Date? {
+        var cursor = calendar.startOfDay(for: start)
+        if cursor >= today { return cursor }
         var hops = 0
-        while cursor <= today, hops < 360 {
-            guard let next = cal.date(byAdding: .month, value: 1, to: cursor) else { break }
+        while cursor < today, hops < 360 {
+            guard let next = calendar.date(byAdding: .month, value: 1, to: cursor) else { return nil }
             cursor = next
             hops += 1
         }
-        if let end = endDate, cursor > cal.startOfDay(for: end) { return nil }
         return cursor
     }
 
@@ -254,5 +296,27 @@ final class PayoffPlan {
         remainingAmount = 0
         isEnded = true
         updatedAt = Date()
+    }
+}
+
+enum PayoffPlanProgress {
+    @MainActor
+    static func applyStatementProgress(plans: [PayoffPlan], accounts: [BankAccount]) {
+        for plan in plans where plan.isActive && plan.kind.followsCardStatement {
+            let account = accounts.first { plan.isOn(account: $0) }
+            plan.applyStatementProgress(lastStatement: account?.lastStatementIssueDate)
+        }
+    }
+
+    static func installmentIncludedInMin(on account: BankAccount, plans: [PayoffPlan]) -> Double {
+        plans
+            .filter { $0.isActive && $0.kind.followsCardStatement && $0.isOn(account: account) }
+            .reduce(0) { $0 + $1.installmentTotal }
+    }
+
+    static func extraPrincipalThisStatement(on account: BankAccount, plans: [PayoffPlan]) -> Double {
+        plans
+            .filter { $0.isActive && !$0.kind.followsCardStatement && $0.isOn(account: account) }
+            .reduce(0) { $0 + $1.monthlyPayment }
     }
 }

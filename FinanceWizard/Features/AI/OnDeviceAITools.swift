@@ -210,12 +210,13 @@ struct RecurringChargesTool: Tool {
             let payoffs = ((try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? [])
                 .filter(\.isActive)
             for plan in payoffs.prefix(20) {
+                let onCard = plan.kind.followsCardStatement
                 items.append(
                     RecurringChargeRow(
                         vendor: "\(plan.kind.displayName): \(plan.name)",
                         typicalAmountUSD: plan.installmentTotal,
-                        cadence: "Monthly",
-                        estimatedMonthlyUSD: plan.installmentTotal
+                        cadence: onCard ? "On card statement (in minimum)" : "Extra principal",
+                        estimatedMonthlyUSD: onCard ? 0 : plan.monthlyPayment
                     )
                 )
             }
