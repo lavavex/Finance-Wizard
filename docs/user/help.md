@@ -59,8 +59,8 @@ Sync in the app first, then add the widget. If it stays empty, delete it and add
 
 They are different things:
 
-- **My Loan / Pay Over Time / Apple installments** — attach the charge or installment row. Monthly amount is in the **card minimum**, due with the **statement**. Do not use **Pay off by date** for these.
-- **Pay off by date** — Accounts → card → **Pay off by date**. For a promo or extra balance you want gone by a date. The form can suggest a monthly extra to finish by then.
+- **My Loan / Pay Over Time / Apple installments** — attach the charge or installment row. Monthly amount is in the **card minimum**, due with the **statement**. Do not use **Pay off by date** for these. The app now recognises the issuers’ real wording: **My Chase Loan**, **My Chase Plan**, and AmEx **Plan It**.
+- **Pay off by date** — Accounts → card → **Pay off by date**. For a promo or extra balance you want gone by a date. The form can suggest a monthly extra to finish by then. On a promo with a **non-zero** APR the suggestion and the pace warning now include interest, so a plan that looks like it finishes on time actually does. Editing a saved plan no longer nudges its schedule forward — a new plan still starts on the card’s due date, but re-saving keeps the date the plan already has.
 
 Loan/installment **remaining** drops when a new statement posts (after Sync). Pay-off-by-date plans still have **Record this month’s payment** if you want to tick extra principal by hand.
 
@@ -71,6 +71,24 @@ The bank lists the payment on checking **and** on the card. Accounts → Total p
 ### A travel credit or store refund showed up as income
 
 Those are card credits, not paychecks. Sync files them as **Refund** (not Total Income). A loan disbursement into checking is **Loan**, not earnings. Payroll and other deposits to checking stay income.
+
+### A phone, insurance, or utility bill vanished from Total Spend
+
+Fixed. Any charge whose description contained **autopay** (VERIZON \*AUTOPAY, T‑MOBILE AUTOPAY, GEICO AUTOPAY) used to be filed as a credit‑card bill payment and dropped out of Total Spend and Budget. Those words now only count as a card payment on money **coming in** to a credit card, or when the description also names a card issuer. Pull down to **Sync** to re‑file older rows.
+
+### My card rates went back to the defaults after an update
+
+Fixed. App updates used to re-apply the built-in product rates over anything you had edited. Once you change a rate or merchant boost, updates leave it alone and only add categories your card has never had. For anything that rotates — the Freedom Flex quarterly 5% — use a **temporary boost** with the quarter’s end date so it expires on its own.
+
+One-time note: edits made **before** this release cannot be told apart from defaults, so they are re-seeded once. Re-apply them and they will stick from then on.
+
+### Cash back estimates looked far too high
+
+Fixed. Cards whose base rate is exactly 1% (Blue Cash Everyday and Preferred, Prime Visa, Amazon Visa) reported 100% back on non-category purchases. The estimate is correct now.
+
+### Statement grouping looked wrong on a card that closes on the 29th–31st
+
+Fixed. Those cards produced windows stamped in the following month with a date range that did not match the rows under it. Statement periods now clamp to the length of each month, so February closes on the 28th (29th in a leap year) and the windows line up.
 
 ### Phone or electric bill doesn’t show on Recurring
 

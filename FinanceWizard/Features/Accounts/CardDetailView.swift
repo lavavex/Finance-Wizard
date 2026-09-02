@@ -32,6 +32,11 @@ struct CardDetailView: View {
     @State private var achMultText: String = ""
     @State private var didSaveRewards = false
     @State private var showAddPayoff = false
+    /// FIX: the "Saved" confirmations used detached Task.sleep calls that kept running
+    /// after the view was popped and then wrote to @State on a dead view. Held here so
+    /// they can be cancelled on disappear and replaced instead of stacking up.
+    @State private var savedNameResetTask: Task<Void, Never>?
+    @State private var savedRewardsResetTask: Task<Void, Never>?
 
     // Always have at least the raw method in the set used to filter purchases.
     private var methods: Set<String> {
@@ -52,14 +57,19 @@ struct CardDetailView: View {
         StatementCycle.group(
             cardRows,
             closeDay: creditAccount != nil ? statementCloseDay : nil,
+            lastStatement: creditAccount?.lastStatementIssueDate,
             sort: sort
         )
     }
 
+    /// Cycle shown in Summary — shared with AccountsBoard so both screens agree.
+    private var currentStatementGroup: (bucket: StatementBucket, rows: [Transaction])? {
+        StatementCycle.currentGroup(in: statementGroups)
+    }
+
+    // OLD: statementGroups.first(where: { $0.bucket.isOpen })?.rows ?? statementGroups.first?.rows ?? []
     private var currentStatementRows: [Transaction] {
-        statementGroups.first(where: { $0.bucket.isOpen })?.rows
-            ?? statementGroups.first?.rows
-            ?? []
+        currentStatementGroup?.rows ?? []
     }
 
     private var cardSpend: Double {
@@ -75,8 +85,7 @@ struct CardDetailView: View {
     }
 
     private var currentStatementPayments: [CreditCardPayment] {
-        guard let current = statementGroups.first(where: { $0.bucket.isOpen })?.bucket
-                ?? statementGroups.first?.bucket else {
+        guard let current = currentStatementGroup?.bucket else {
             return cardPayments
         }
         return cardPayments.filter {
@@ -88,14 +97,15 @@ struct CardDetailView: View {
         CreditAnalytics.totalPaid(in: currentStatementPayments)
     }
 
+    /// FIX: this returned "This statement" for any credit account with a close day, even
+    /// when the rows below were the previous, already-closed cycle. Label what is actually
+    /// on screen: the bucket's own title.
+    /// OLD:
+    /// if creditAccount != nil, statementCloseDay != nil { return "This statement" }
+    /// if let open = statementGroups.first(where: { $0.bucket.isOpen }) { return open.bucket.title }
     private var summaryPeriodLabel: String {
-        if creditAccount != nil, statementCloseDay != nil {
-            return "This statement"
-        }
-        if let open = statementGroups.first(where: { $0.bucket.isOpen }) {
-            return open.bucket.title
-        }
-        return "All activity"
+        guard let bucket = currentStatementGroup?.bucket else { return "All activity" }
+        return bucket.title
     }
 
     private var account: BankAccount? { creditAccount ?? bankAccount }
@@ -120,9 +130,12 @@ struct CardDetailView: View {
         cardPayoffPlans.filter { !$0.kind.followsCardStatement }
     }
 
-    private var isDepositoryDetail: Bool {
-        creditAccount == nil && (bankAccount?.isDepository == true || bankAccount != nil && creditAccount == nil)
-    }
+    // FIX: removed `isDepositoryDetail` — it was never read, and its condition was
+    // self-contradictory (`creditAccount == nil` tested twice, once redundantly).
+    // OLD:
+    // private var isDepositoryDetail: Bool {
+    //     creditAccount == nil && (bankAccount?.isDepository == true || bankAccount != nil && creditAccount == nil)
+    // }
 
     var body: some View {
         List {
@@ -252,15 +265,20 @@ struct CardDetailView: View {
 
             if let bank = bankAccount, bank.isDepository || creditAccount == nil && bankAccount != nil {
                 if bank.isDepository {
+                    // FIX: these fields are stored as percent (X Money seeds 3 = 3%, and
+                    // PlaidSyncEngine writes the value straight onto Transaction.multiplier
+                    // alongside cash-back percents), but the UI prompted for "0.03" and
+                    // labelled the unit "×". Anyone following the placeholder saved 0.03%.
+                    // OLD: TextField("e.g. 0.03", …) with a trailing Text("×")
                     Section {
                         HStack {
                             Text("Debit card rewards")
                             Spacer()
-                            TextField("e.g. 0.03", text: $debitMultText)
+                            TextField("e.g. 3", text: $debitMultText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(maxWidth: 100)
-                            Text("×")
+                            Text("%")
                                 .foregroundStyle(.secondary)
                         }
                         HStack {
@@ -270,7 +288,7 @@ struct CardDetailView: View {
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(maxWidth: 100)
-                            Text("×")
+                            Text("%")
                                 .foregroundStyle(.secondary)
                         }
                         Button("Save rewards") {
@@ -283,6 +301,8 @@ struct CardDetailView: View {
                         }
                     } header: {
                         Text("Debit vs ACH rewards")
+                    } footer: {
+                        Text("Cash back earned on this account's own card and ACH spend. 3 means 3%.")
                     }
                 }
             }
@@ -298,6 +318,14 @@ struct CardDetailView: View {
                         LabeledContent("Minimum payment") {
                             MoneyText(minPay)
                         }
+                    }
+                    LabeledContent("Interest saving balance") {
+                        MoneyText(
+                            PayoffPlanProgress.interestSavingBalance(
+                                on: credit,
+                                plans: cardPayoffPlans
+                            )
+                        )
                     }
                     if let due = credit.nextPaymentDueDate {
                         LabeledContent("Payment due") {
@@ -359,8 +387,11 @@ struct CardDetailView: View {
                 } header: {
                     Text("Credit details")
                 } footer: {
+                    if !issuerPlans.isEmpty {
+                        Text("Interest saving balance is other balances in full plus this statement’s loan/installment payments — not leftover loan principal. Paying it each cycle avoids purchase interest and keeps the loan on its billing-cycle schedule. Statement balance would pay the loan off early.")
+                    }
                     if credit.liabilitiesSyncedAt == nil {
-                        Text("No APR/due date yet. Enable Liabilities in the Plaid Dashboard, Relink this bank (select the credit card), then Sync. Chase/Amex can take a few minutes after Relink.")
+                        Text("No APR/due date yet. Enable Liabilities in the Plaid Dashboard, Relink this bank (select the credit card), then Sync.")
                     }
                 }
             }
@@ -461,6 +492,10 @@ struct CardDetailView: View {
                 achMultText = formatOptionalMult(bank.achRewardMultiplier)
             }
         }
+        .onDisappear {
+            savedNameResetTask?.cancel()
+            savedRewardsResetTask?.cancel()
+        }
     }
 
     // MARK: - Actions
@@ -482,8 +517,11 @@ struct CardDetailView: View {
         nicknameDraft = titleName
         didSaveNickname = true
         onNicknameChanged?()
-        Task {
+        // OLD: Task { try? await Task.sleep(…); didSaveNickname = false }
+        savedNameResetTask?.cancel()
+        savedNameResetTask = Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
             didSaveNickname = false
         }
     }
@@ -496,8 +534,11 @@ struct CardDetailView: View {
         try? modelContext.save()
         didSaveRewards = true
         onNicknameChanged?()
-        Task {
+        // OLD: Task { try? await Task.sleep(…); didSaveRewards = false }
+        savedRewardsResetTask?.cancel()
+        savedRewardsResetTask = Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
             didSaveRewards = false
         }
     }

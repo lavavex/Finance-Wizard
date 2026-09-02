@@ -122,7 +122,13 @@ enum PlaidCategoryMapper {
             return true
         }
 
-        if looksLikeCardPaymentTitle(titleLower) {
+        // FIX: weak needles ("autopay", "ach payment", "payment received") used to be
+        // evaluated here for every row on every account. Merchant bills that carry them —
+        // VERIZON *AUTOPAY, T-MOBILE AUTOPAY, GEICO AUTOPAY, AT&T AUTOPAY — were filed as
+        // credit-card payments and disappeared from Total Spend and Budget. They are only
+        // trustworthy as money-in on a credit account; elsewhere an issuer needle is required.
+        // OLD: if looksLikeCardPaymentTitle(titleLower) {
+        if looksLikeCardPaymentTitle(titleLower, allowWeakSignals: onCredit && amount < 0) {
             return true
         }
 
@@ -154,7 +160,16 @@ enum PlaidCategoryMapper {
     }
 
     /// Strong title heuristics that usually mean “this is a card bill payment.”
-    private static func looksLikeCardPaymentTitle(_ lower: String) -> Bool {
+    ///
+    /// `allowWeakSignals` opens up needles that plenty of ordinary merchant bills also
+    /// carry (autopay, ACH payment, payment received). Pass it only when the row is
+    /// already known to be money-in on a credit account, where a merchant bill cannot
+    /// appear. Everywhere else those words need an issuer needle to count — see
+    /// `looksLikeIssuerBillPayTitle`.
+    private static func looksLikeCardPaymentTitle(
+        _ lower: String,
+        allowWeakSignals: Bool = false
+    ) -> Bool {
         if looksLikeMerchantRefundTitle(lower) { return false }
         if PayoffPlanRecognition.looksLikeLoanDisbursement(title: lower) { return false }
 
@@ -169,22 +184,39 @@ enum PlaidCategoryMapper {
             || lower.contains("thankyou") {
             return true
         }
-        if lower.contains("autopay") {
-            return true
+        // FIX: these four blocks were unconditional. "Autopay" in particular is on most
+        // recurring utility / phone / insurance descriptors, so those bills were being
+        // classified as credit-card payments and dropped from spend entirely.
+        // OLD:
+        // if lower.contains("autopay") {
+        //     return true
+        // }
+        // if lower.contains("automatic payment") { return true }
+        // if lower.contains("ach pmt") || lower.contains("ach payment") || lower.contains("ach pymt") {
+        //     return true
+        // }
+        // if lower.contains("payment received") || lower.contains("pymt received")
+        //     || lower.contains("payment - thank") || lower.contains("payment-thank") {
+        //     return true
+        // }
+        if allowWeakSignals {
+            if lower.contains("autopay") || lower.contains("auto pay") { return true }
+            if lower.contains("automatic payment") { return true }
+            if lower.contains("ach pmt") || lower.contains("ach payment")
+                || lower.contains("ach pymt") {
+                return true
+            }
+            if lower.contains("payment received") || lower.contains("pymt received") {
+                return true
+            }
         }
-        if lower.contains("automatic payment") { return true }
+        // "PAYMENT - THANK YOU" is an issuer statement line, not a merchant descriptor.
+        if lower.contains("payment - thank") || lower.contains("payment-thank") { return true }
         if lower.contains("credit card payment") || lower.contains("creditcard payment") { return true }
         if lower.contains("card payment") { return true }
         if lower.contains("payment to credit") { return true }
         if lower.contains("online payment from chk") { return true }
         if lower.contains("online payment") && (lower.contains("thank") || lower.contains("card")) {
-            return true
-        }
-        if lower.contains("ach pmt") || lower.contains("ach payment") || lower.contains("ach pymt") {
-            return true
-        }
-        if lower.contains("payment received") || lower.contains("pymt received")
-            || lower.contains("payment - thank") || lower.contains("payment-thank") {
             return true
         }
         // "Payment to Chase card ending in 1234" / "Payment to Amex"

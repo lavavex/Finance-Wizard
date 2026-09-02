@@ -73,6 +73,20 @@ May need an **https Universal Link** in Settings + Plaid Dashboard allowlist.
 
 Should not happen if upsert by `transactionId` works. Re-linking can mint new Plaid ids → new rows.
 
+## Classification and card rates
+
+### A merchant bill is being filed as a credit-card payment
+
+`PlaidCategoryMapper.looksLikeCardPaymentTitle(_:allowWeakSignals:)` splits its needles. Strong ones (“payment thank you”, “credit card payment”, “payment to <issuer>”, `looksLikeIssuerBillPayTitle`) always count. Weak ones — `autopay`, `automatic payment`, `ach pmt`, `payment received` — are ordinary merchant-descriptor words and only count when `allowWeakSignals` is true, which `isCreditCardPayment` passes **only** for money-in on a credit account. Do not move a needle back into the unconditional set without checking it against real utility / phone / insurance descriptors.
+
+### A rate is wrong for one card
+
+Fix `CardProductCatalog`, then bump `CardBenefitsStore.currentMigrationVersion` so saved profiles re-run `migrateIfNeeded`. The re-seed is **additive** for profiles with `ratesCustomizedByUser == true`: it adds catalog categories they have never had but never overwrites an existing key. Non-customised profiles are replaced wholesale, which is how a catalog correction reaches existing users.
+
+### Statement periods look off
+
+`StatementCycle.clampedDate` must clamp the close day to the month’s length **before** building the date. `Calendar.date(from:)` is lenient and never returns nil for an out-of-range day — it rolls over (2026-02-31 → 2026-03-03), which silently produced February windows stamped in March. `statementStart(end:closeDay:)` derives the window start from the previous close for the same reason. `group(_:closeDay:lastStatement:)` takes the issuer’s last statement date so `isOpen` means “not yet billed” rather than “ends on or after today”; `currentGroup(in:)` is the single source of truth for which cycle the Accounts row and the card screen summarise.
+
 ## Onboarding / Welcome
 
 ### Welcome never appears

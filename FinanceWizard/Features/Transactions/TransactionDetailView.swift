@@ -38,6 +38,22 @@ struct TransactionDetailView: View {
     @Query private var bankAccounts: [BankAccount]
     @Query private var payoffPlans: [PayoffPlan]
 
+    /// Rewards profile for the card this purchase is on — drives the estimate section's
+    /// units (points vs cash back) and point valuation.
+    private var rewardProfile: CardBenefitsProfile {
+        CardBenefitsStore.profile(
+            accountId: transaction.plaidAccountId,
+            paymentMethod: transaction.paymentMethod,
+            accounts: Array(bankAccounts)
+        )
+    }
+
+    /// "1¢" / "1.25¢" for the estimate label.
+    private var pointValueLabel: String {
+        let cents = rewardProfile.pointValueCents
+        return "\(cents.formatted(.number.precision(.fractionLength(0...2))))¢"
+    }
+
     /// User control for subscription radar (yearly is the common missing case).
     private enum SubscriptionDeclareMode: String, CaseIterable, Identifiable {
         case auto
@@ -382,13 +398,37 @@ struct TransactionDetailView: View {
                 Text("Remember")
             }
 
-            Section("Points (estimate)") {
-                let points = abs(transaction.amount) * (Double(multiplierText.replacingOccurrences(of: ",", with: ".")) ?? transaction.multiplier)
-                LabeledContent("Points") {
-                    Text(points, format: .number.precision(.fractionLength(0...2)))
-                }
-                LabeledContent("~ Value @ 1¢/pt") {
-                    MoneyText(points * 0.01)
+            // FIX: this always said "Points" and always valued them at 1¢, whatever the
+            // card was. On a cash-back card a 3% rate rendered as "Points 300" for a $100
+            // purchase, and on a Chase UR card it undervalued by 20% — the catalog stores
+            // Ultimate Rewards at 1.25¢/pt and the screen ignored it. Read the card's own
+            // reward kind and point value instead.
+            // OLD:
+            // Section("Points (estimate)") {
+            //     let points = abs(transaction.amount) * (Double(multiplierText…) ?? transaction.multiplier)
+            //     LabeledContent("Points") { Text(points, format: …) }
+            //     LabeledContent("~ Value @ 1¢/pt") { MoneyText(points * 0.01) }
+            // }
+            Section(rewardProfile.rewardKind == .points ? "Points (estimate)" : "Cash back (estimate)") {
+                let rate = Double(multiplierText.replacingOccurrences(of: ",", with: "."))
+                    ?? transaction.multiplier
+                let spend = abs(transaction.amount)
+                switch rewardProfile.rewardKind {
+                case .points:
+                    let points = spend * rate
+                    LabeledContent("Points") {
+                        Text(points, format: .number.precision(.fractionLength(0...2)))
+                    }
+                    LabeledContent("~ Value @ \(pointValueLabel)/pt") {
+                        MoneyText(points * (rewardProfile.pointValueCents / 100))
+                    }
+                case .cashback:
+                    LabeledContent("Rate") {
+                        Text("\(rate.formatted(.number.precision(.fractionLength(0...2))))%")
+                    }
+                    LabeledContent("~ Cash back") {
+                        MoneyText(spend * rate / 100)
+                    }
                 }
             }
 

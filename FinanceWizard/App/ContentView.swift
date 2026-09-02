@@ -132,18 +132,35 @@ struct ContentView: View {
             loadedTabs.insert(.settings)
             selectedTab = .settings
         }
-        .overlay(alignment: .bottomTrailing) {
+        // FIX: this was an .overlay with a hard-coded 60pt bottom padding meant to clear
+        // the tab bar. The number does not track tab-bar height across devices or Dynamic
+        // Type, and because an overlay reserves no space it floated on top of list content
+        // — covering the last row and its swipe actions on every tab. safeAreaInset sits
+        // above the tab bar automatically and insets the scroll views underneath it.
+        // OLD:
+        // .overlay(alignment: .bottomTrailing) {
+        //     Button { showAsk = true } label: { … }
+        //         .padding(.trailing, 20)
+        //         .padding(.bottom, 60)
+        // }
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
             Button {
                 showAsk = true
             } label: {
                 Image(systemName: "apple.intelligence")
                     .font(.title)
-                    .foregroundStyle(LinearGradient(colors: [.orange, .pink, .purple, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.orange, .pink, .purple, .cyan],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             }
             .accessibilityLabel("Ask")
             .buttonStyle(.glass)
             .padding(.trailing, 20)
-            .padding(.bottom, 60)
+            .padding(.bottom, 8)
         }
         .sheet(isPresented: $showAsk) {
             OnDeviceAIChatView()

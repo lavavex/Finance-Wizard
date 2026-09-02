@@ -255,7 +255,11 @@ final class BankAccount {
         let plaid = plaidDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
         if m.caseInsensitiveCompare(plaid) == .orderedSame { return true }
         if m.caseInsensitiveCompare(name) == .orderedSame { return true }
-        if let mask, !mask.isEmpty, m.contains(mask) { return true }
+        // FIX: a bare substring search on a 4-digit mask matched any longer number that
+        // happened to contain it (mask "1234" matched "…12340"). Require the mask to stand
+        // alone as a last-four group.
+        // OLD: if let mask, !mask.isEmpty, m.contains(mask) { return true }
+        if let mask, !mask.isEmpty, Self.containsStandaloneMask(m, mask: mask) { return true }
         // Synthetic Apple Card account matches CSV / Wallet payment method
         if AppleCardAccount.isAppleCard(account: self), AppleCardAccount.isAppleCard(paymentMethod: method) {
             return true
@@ -263,10 +267,48 @@ final class BankAccount {
         return false
     }
 
+    /// True when `mask` appears in `text` as its own digit group rather than inside a
+    /// longer number: "···0820" and "ending 0820" match, "12340" does not match "1234".
+    static func containsStandaloneMask(_ text: String, mask: String) -> Bool {
+        guard !mask.isEmpty else { return false }
+        var searchStart = text.startIndex
+        while let found = text.range(of: mask, range: searchStart..<text.endIndex) {
+            let precededByDigit = found.lowerBound > text.startIndex
+                && text[text.index(before: found.lowerBound)].isNumber
+            let followedByDigit = found.upperBound < text.endIndex
+                && text[found.upperBound].isNumber
+            if !precededByDigit && !followedByDigit { return true }
+            guard found.upperBound < text.endIndex else { return false }
+            searchStart = found.upperBound
+        }
+        return false
+    }
+
     /// Best BankAccount match for a payment method label among linked accounts.
+    /// FIX: returning `hits.first(where: \.isCredit)` silently picked an arbitrary card
+    /// whenever two accounts matched — Amex supplementary cards commonly share a last-five,
+    /// so spend could be attributed to the wrong card's rewards profile. Prefer an exact
+    /// label match, and return nil rather than guess when it is still ambiguous.
+    /// OLD:
+    /// let hits = accounts.filter { $0.matchesPaymentMethod(paymentMethod) }
+    /// if let credit = hits.first(where: \.isCredit) { return credit }
+    /// return hits.first
     static func matching(paymentMethod: String, in accounts: [BankAccount]) -> BankAccount? {
         let hits = accounts.filter { $0.matchesPaymentMethod(paymentMethod) }
-        if let credit = hits.first(where: \.isCredit) { return credit }
-        return hits.first
+        if hits.count <= 1 { return hits.first }
+
+        let trimmed = paymentMethod.trimmingCharacters(in: .whitespacesAndNewlines)
+        let exact = hits.filter {
+            let plaid = $0.plaidDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.caseInsensitiveCompare(plaid) == .orderedSame
+                || trimmed.caseInsensitiveCompare($0.name) == .orderedSame
+        }
+        if exact.count == 1 { return exact.first }
+
+        let pool = exact.isEmpty ? hits : exact
+        let credit = pool.filter(\.isCredit)
+        if credit.count == 1 { return credit.first }
+        // Still ambiguous — no match is better than the wrong card.
+        return nil
     }
 }

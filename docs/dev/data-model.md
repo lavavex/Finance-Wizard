@@ -117,6 +117,28 @@ Card bill payments only (`Shared/Models/CreditCardPayment.swift`). Never counted
 
 `PayoffPlan.kindRaw`: `myLoan` | `payOverTime` | `promoAPR` | `custom`. Remaining is user-updated (**Record payment** subtracts `monthlyPayment`; `monthlyFee` does not). Shown on Recurring like a bill. `linkedTransactionId` is the Pay Over Time purchase **or** the My Loan card charge.
 
+`monthlyPayment` is the **full amount billed each statement**, interest / plan fee included — not the principal portion. `recordPayment()` takes interest out of it before reducing `remainingAmount`.
+
+Payoff projections are amortised, not `remaining ÷ payment`: `PayoffPlanMath.monthsToPayOff(remaining:payment:aprPercent:)` returns `nil` when the payment does not cover one month of interest (the balance never clears), and `levelPayment(remaining:months:aprPercent:)` sizes a payment that finishes on time at a given APR. Both fall back to the plain division at 0%.
+
+`startDate` is only overwritten with the card’s `nextPaymentDueDate` for issuer kinds (`followsCardStatement`). Promo / custom plans keep the date the user chose, because `nextPaymentDate` walks their schedule from it.
+
+## Card rewards: `CardBenefitsProfile`
+
+Stored as JSON in UserDefaults (`Shared/Cards/CardBenefitsStore.swift`), keyed `account:<plaid id>` or `method:<label>`.
+
+| Property | Notes |
+|----------|--------|
+| `defaultMultiplier` | Points `x`, or cash back as **percent** (`3` = 3%, never `0.03`) |
+| `categoryMultipliers` | `RewardCategory` name → rate, overrides only |
+| `merchantBoosts` | Partner merchants: one label, many title needles |
+| `temporaryBoosts` | Time-boxed rate with an end date — use for rotating quarterly categories |
+| `categoryCaps` | Reward category → capped spend per window in USD; past it the base rate applies |
+| `ratesCustomizedByUser` | Set by any hand edit. Blocks the catalog re-seed in `migrateIfNeeded` so app updates cannot revert user rates (they may only **add** unseen categories) |
+| `pointValueCents` | Cents per point for USD estimates (Chase UR `1.25`, Amex MR `1.0`) |
+
+Cash-back rates are stored as percent throughout; `earnFactor` divides by 100 unconditionally. (It previously guarded on `rate > 1`, which read an exact `1` as the fraction `1.0` and reported 100% back on every 1%-base card.) Cap-aware totals come from `cappedRewardUnits(spendDollars:category:priorCategorySpend:)`; the per-transaction multiplier stamped at Sync time has no year-to-date context and stays uncapped.
+
 ## App Group store
 
 `Shared/Store/SharedStore.swift`:

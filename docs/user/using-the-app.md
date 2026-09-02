@@ -50,10 +50,12 @@ Credit cards plus checking and savings.
 | **Total Spend** | Purchases this period (tap for categories) |
 | **Total paid** | Card bill payments (not spend) |
 | **Credit balance / limit / utilization** | From your bank on Sync |
-| **Min payments / next due** | When the bank reports them |
-| **Upcoming bills** | Due in the next 30 days (or overdue) |
+| **Min payments / next due** | When the bank reports them. **Interest saving balance** (on the card) is other balances in full plus this statement’s loan/installment payment — pay that to stay on the loan schedule without paying the loan off early. |
+| **Upcoming bills** | Due in the next 30 days (or overdue). A due date more than a week old that the bank has not flagged overdue is treated as stale and dropped, so a bank that stops refreshing does not pin an old bill here forever. |
 
-Open a card to see **all** activity by **statement period** (not the Accounts week/month filter). On checking, you can set **Debit** vs **ACH** reward rates. Pull down to Sync.
+Open a card to see **all** activity by **statement period** (not the Accounts week/month filter). The card row on Accounts and the card screen always show the same cycle: **This statement** while one is open, **Last statement** when nothing has posted since the close.
+
+On checking, you can set **Debit** vs **ACH** reward rates. These are **percent** — enter `3` for 3% cash back, not `0.03`. Pull down to Sync.
 
 ### Loans, installments, and pay-off-by-date
 
@@ -61,7 +63,7 @@ On a **credit card**:
 
 | | What it is |
 |--|------------|
-| **Loans & installments** | My Loan / Pay Over Time / Apple installments. Open the **loan charge** or **installment** row and attach it. The monthly amount is **already in the card minimum** and due on the **same day as the card**. There is no separate schedule. |
+| **Loans & installments** | Open the **loan charge** or **installment** row. Enter remaining, remaining months, and the **statement payment**. **My Loan** also uses the **fixed APR** from the loan email (interest this statement = remaining × APR ÷ 12). **Pay Over Time** fee is payment minus remaining ÷ months. That payment is **already in the card minimum**. Chase: do not pay “Statement balance” or you pay the whole loan off at once; “Interest saving balance” includes the monthly loan payment. |
 | **Pay off by date** | A plan to clear a promo (0% APR) or extra balance by a date you choose. Accounts → card → **Pay off by date**. Extra principal you intend to send with the statement payment. |
 
 **Record this month’s payment** reduces remaining in the app. These show on **Recurring** on the card’s due date.
@@ -70,13 +72,17 @@ Open a card from Accounts to see **all** activity grouped by **statement** (clos
 
 ### Rewards on a card
 
-On a credit card you can pick a **product** (so rates match the real card), edit earn rates and boosts, and see estimated rewards vs annual fee. Transaction detail can lock **travel earn** (Auto / Portal / Direct).
+On a credit card you can pick a **product** (so rates match the real card), edit earn rates and boosts, and see estimated rewards vs annual fee. Transaction detail can lock **travel earn** (Auto / Portal / Direct), and shows the estimate in the card’s own units — **points** at that card’s point value (Chase Ultimate Rewards at 1.25¢) or **cash back** as dollars.
 
-There are two kinds of categories: **spend** categories (Dining, Gas, …) and **reward** categories (Drugstores, Travel portal, …). The app maps a purchase into a reward bucket for estimates.
+There are two kinds of categories: **spend** categories (Dining, Gas, …) and **reward** categories (Drugstores, Travel portal, Flights, …). The app maps a purchase into a reward bucket for estimates. **Flights** is separate from **Travel (Other)** because several cards pay a flight-only rate (Amex Platinum 5x, Amex Gold 3x, Sapphire Reserve 4x) that does not apply to car rentals or cruises.
+
+**Rates you edit are yours.** Once you change a rate or a merchant boost on a card, app updates stop re-applying the built-in defaults over it — they only add categories the card has never had. Use a **temporary boost** with an end date for anything that rotates, such as the Chase Freedom Flex quarterly 5% category, so it expires by itself instead of paying 5x all year.
+
+Cards with a spend cap (Amex Blue Cash $6,000/yr, Amex Gold $25,000/yr supermarkets, Freedom Flex $1,500/quarter) carry that cap with the product, so estimates drop to the base rate past it.
 
 ## Ask
 
-Circular **Ask** button, bottom-right, above the tab bar (not a sixth tab — that would open iOS **More**). On-device chat (Apple Intelligence). It looks up **totals, balances, recurring, and recent charges** when needed. Card names match the nicknames you set in Accounts (not the bank’s “Credit Card” label). Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
+Circular **Ask** button, bottom-right, above the tab bar (not a sixth tab — that would open iOS **More**). It reserves its own space, so it no longer covers the last row of a list or its swipe actions. On-device chat (Apple Intelligence). It looks up **totals, balances, recurring, and recent charges** when needed. Card names match the nicknames you set in Accounts (not the bank’s “Credit Card” label). Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
 
 Transaction detail: **Suggest with Apple Intelligence** picks a category from the app’s list.
 
