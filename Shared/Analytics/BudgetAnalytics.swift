@@ -76,17 +76,6 @@ struct BudgetSnapshot {
         guard expectedIncome > 0.005 || !expectedMonthlyIncome.isZero else { return nil }
         return income - expectedIncome
     }
-
-    /// Spend headroom if using expected monthly income as the soft ceiling.
-    var expectedIncomeRemaining: Double? {
-        guard expectedMonthlyIncome > 0.005 else { return nil }
-        return expectedMonthlyIncome - totalSpent
-    }
-
-    /// Sum of category limits (for display).
-    var sumOfCategoryLimits: Double {
-        categories.compactMap(\.limit).reduce(0, +)
-    }
 }
 
 /// Pure analytics helpers for budgets (no UI). Call `snapshot` to build a `BudgetSnapshot`.

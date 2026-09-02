@@ -5,6 +5,11 @@
 //  Map Plaid personal_finance_category → app labels + cash-flow classification.
 //  Transfers & credit-card payments must never inflate Total Spend / Income.
 //
+//  In Shared/ so both the app and the widget compile it. It used to live in the app target,
+//  which forced ReviewQueueAnalytics (Shared) to keep its own duplicate list of card-payment
+//  needles — and the two drifted: the queue kept "autopay" long after the classifier stopped
+//  trusting it, so locked utility bills sat in Needs review forever. One list, one place.
+//
 //  Plaid signs amounts as: positive = money out (spend), negative = money in.
 //  personal_finance_category (PFC) has primary + detailed strings like FOOD_AND_DRINK.
 //

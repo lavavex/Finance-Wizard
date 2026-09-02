@@ -158,6 +158,16 @@ Rows written before that fix sit at UTC midnight. `reanchorStoredDays` re-stamps
 midnight of their intended day, gated on `dayAnchorVersion`. It only touches values sitting
 exactly on a UTC midnight, so real timestamps are safe and re-running is a no-op.
 
+### Where classification lives
+
+`PlaidCategoryMapper` and `PlaidPFC` are in **`Shared/`**, not the app target, so the widget
+compiles them too. That is deliberate: while the mapper was app-only, `ReviewQueueAnalytics`
+(which is Shared) had to keep a parallel copy of the card-payment needles — and the two
+drifted. The queue kept `"autopay"` long after the classifier stopped trusting it
+unconditionally, so locked utility and phone bills sat in Needs review forever and the one
+action offered moved them out of Total Spend. Do not reintroduce a second list; call
+`PlaidCategoryMapper.looksLikeCardPaymentTitlePublic`.
+
 ### Two things must agree about "the same" payment
 
 `CreditAnalytics.isSamePayment` collapses the checking-side and card-side rows of one bill

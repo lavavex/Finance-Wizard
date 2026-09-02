@@ -20,7 +20,6 @@ struct PeriodSpendIndex {
     /// Sum of abs(amount) on spend rows (always positive dollars spent).
     let totalSpend: Double
     /// Signed sum on spend rows (keeps refunds negative if present).
-    let spendBalance: Double
 
     /// Spend dollars + count per payment method (period spend only).
     let spendByMethod: [String: MethodTotals]
@@ -54,7 +53,6 @@ struct PeriodSpendIndex {
         var spendTxsByMethod: [String: [Transaction]] = [:]
         var allKnown = Set<String>()
         var totalSpend = 0.0
-        var spendBalance = 0.0
 
         for tx in transactions {
             allKnown.insert(TransactionAnalytics.cardName(for: tx))
@@ -68,7 +66,6 @@ struct PeriodSpendIndex {
             spendTxs.append(tx)
             let dollars = abs(tx.amount)
             totalSpend += dollars
-            spendBalance += tx.amount
 
             var totals = spendByMethod[method] ?? MethodTotals(spend: 0, count: 0)
             totals.spend += dollars
@@ -83,7 +80,6 @@ struct PeriodSpendIndex {
             periodTransactions: periodTxs,
             spendTransactions: spendTxs,
             totalSpend: totalSpend,
-            spendBalance: spendBalance,
             spendByMethod: spendByMethod,
             spendTxsByMethod: spendTxsByMethod,
             allKnownMethods: allKnown

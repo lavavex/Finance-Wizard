@@ -29,15 +29,6 @@ enum ReviewQueueReason: String, CaseIterable, Identifiable, Sendable {
         case .weakCategory: return "questionmark.circle"
         }
     }
-
-    var shortHint: String {
-        switch self {
-        case .billPayCandidate:
-            return "Looks like a card payment but isn’t bill pay"
-        case .weakCategory:
-            return "Misc / empty / uncategorized"
-        }
-    }
 }
 
 /// One queue row: a transaction plus one or more reasons it needs attention.
@@ -114,16 +105,9 @@ enum ReviewQueueAnalytics {
         if TransactionAnalytics.isExcludedFromSpendCategory(tx.category) { return false }
         // The user already ruled on this row — do not keep asking.
         if tx.isCategoryLocked || tx.overrideSource == "user" { return false }
-        let t = tx.title.lowercased()
-        // Strong needles only. "autopay" / "auto pay" / bare "online payment" / "epay" are
-        // deliberately absent: they appear on ordinary utility, phone and insurance bills.
-        // This file is in Shared/ (the widget compiles it), so it cannot call
-        // PlaidCategoryMapper — keep this list a strict subset of that one's strong set.
-        let needles = [
-            "payment thank you", "payment thankyou", "credit card payment",
-            "payment to chase", "payment to amex", "payment to american",
-            "payment to citi", "payment to capital", "payment to discover"
-        ]
-        return needles.contains { t.contains($0) }
+        // One list, one place: PlaidCategoryMapper moved into Shared/ precisely so this no
+        // longer maintains a parallel copy. Weak needles ("autopay" and friends) stay off by
+        // default, which is what keeps ordinary utility and phone bills out of the queue.
+        return PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(tx.title)
     }
 }
