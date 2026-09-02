@@ -35,10 +35,13 @@ FinanceWizard/                 Main app (SwiftUI + Plaid client)
     Accounts/                  Accounts hub, card detail, payoff plans, accounts board model
     Budget/                    Monthly budget UI
     Settings/                  Settings, backup, debug export, Debug menu
-    Import/                    Apple Card CSV
+    Import/                    Apple Card CSV, JSON import decode shapes
     AI/                        On-device Foundation Models (skeleton; not in Settings)
   Services/                    App-only helpers (classify API stub, logo fetch)
   Plaid/                       Credentials, Link, /transactions/sync, backup wipe
+                               PlaidSyncEngine (sync) · PlaidSyncMaintenance (prune,
+                               dedupe, one-off repair) · PlaidConnectionBackup (restore)
+                               · PlaidBackupModels (.fwbackup snapshot shapes)
 
 Shared/                        Compiled into APP + WIDGET (must stay in sync)
   Models/                      SwiftData @Model + domain enums
@@ -66,6 +69,19 @@ docs/                          GitHub Pages documentation
 | **Capability / entitlement** | None beyond what the system already requires for Apple Intelligence |
 
 `Features/AI/` — availability on Settings. **Ask** overlay button on `ContentView` (sheet, not a sixth tab): tool calling, streaming, prewarm, persisted thread (separate store). `suggestCategory` on transaction detail.
+
+### Cost of the hot paths
+
+Measured against a real 3,232-transaction / 242-payment store:
+
+| Path | Note |
+|---|---|
+| `CardLabelStore` nicknames | Cached in memory. Reading UserDefaults per lookup cost 2.4 ms per 3,232-row list pass vs 0.047 ms cached; lookups happen 1–3× per row. Writes refresh the cache; restore/wipe call `resetMemoryCache()`. |
+| `CreditAnalytics.deduplicated` | O(n²) — 6.5 ms at 242 payments, ~69 ms at 1,000. Callers holding the output of `payments(in:period:)` must use `sumPaid` rather than `totalPaid`, which would dedupe a second time. |
+| `ReviewQueueAnalytics.count` | Counts without building or sorting `ReviewQueueItem`s. Keep it in step with `items(...)`: both use `recentSpend` + `needsReview`. |
+| `cleanLegacyMisclassifiedRows` | Full-scans Transaction and Income. Gated on `legacyCleanupVersion` so it runs once per classifier change, not once per sync. Bump that constant when classification rules change. |
+| `AccountsBoard.build` | Groups transactions by payment method in one pass instead of filtering all rows per card. |
+| `findCreditAccount` | Takes the preloaded account array. It used to fetch the whole `BankAccount` table, twice per payment row. |
 
 ### Why `Shared/`?
 

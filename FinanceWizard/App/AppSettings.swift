@@ -34,8 +34,4 @@ enum AppSettings {
         return [current, previous]
     }
 
-    /// Friendly label for Settings UI, e.g. "2026-07, 2026-06".
-    static func syncMonthsDescription(now: Date = Date()) -> String {
-        currentAndPreviousMonths(now: now).joined(separator: ", ")
-    }
 }

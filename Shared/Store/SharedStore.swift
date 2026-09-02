@@ -242,10 +242,6 @@ enum TransactionAnalytics {
         transaction.paymentMethod.isEmpty ? "Unknown" : transaction.paymentMethod
     }
 
-    static func startDate(for period: SnapshotPeriod, now: Date = Date()) -> Date? {
-        dateInterval(for: period, referenceDate: now)?.start
-    }
-
     /// Inclusive start / exclusive end for week or month; nil for all-time.
     static func dateInterval(
         for period: SnapshotPeriod,

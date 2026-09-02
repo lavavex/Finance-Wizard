@@ -83,6 +83,8 @@ enum PlaidConnectionBackup {
         try modelContext.save()
         PlaidItemStore.removeAll()
         AppPreferenceBackup.wipe()
+        // Nicknames are cached in memory; the wipe replaced UserDefaults underneath it.
+        CardLabelStore.resetMemoryCache()
         InstitutionLogoCache.wipeAllLogoFiles()
         AskStore.wipe()
     }
@@ -124,177 +126,6 @@ enum PlaidConnectionBackup {
 
     // MARK: Payload
 
-    struct Payload: Codable, Equatable, Sendable {
-        var version: Int
-        var createdAt: Date
-        var credentials: CredentialsSnapshot
-        var items: [ItemSnapshot]
-        /// Full-app fields (optional so v1 connection-only backups still decode).
-        var transactions: [TransactionSnapshot]?
-        var income: [IncomeSnapshot]?
-        var bankAccounts: [BankAccountSnapshot]?
-        var creditCardPayments: [PaymentSnapshot]?
-        var recurringStreams: [RecurringStreamSnapshot]?
-        var budgetPlans: [BudgetPlanSnapshot]?
-        var payoffPlans: [PayoffPlanSnapshot]?
-        var cardLabels: [String: String]?
-        var vendorRules: [VendorRule]?
-        var screenshotPrivacy: Bool?
-        /// All UserDefaults keys with app prefixes (`plaid.`, `card.`, `settings.`).
-        /// New prefs under those prefixes are included automatically.
-        var preferenceDefaults: [String: Data]?
-        /// Institution logo files (filename → bytes) from the App Group cache.
-        var logoFiles: [String: Data]?
-    }
-
-    struct CredentialsSnapshot: Codable, Equatable, Sendable {
-        var clientID: String
-        var secret: String
-        var environment: String
-        var redirectURIOverride: String
-    }
-
-    struct ItemSnapshot: Codable, Equatable, Sendable, Identifiable {
-        var id: String
-        var accessToken: String
-        var institutionName: String
-        var accountNames: [String]
-        var transactionsCursor: String
-        var linkedAt: Date
-        var errorCode: String?
-        var errorMessage: String?
-        var lastStatusCheckAt: Date?
-    }
-
-    struct TransactionSnapshot: Codable, Equatable, Sendable {
-        var transactionId: String
-        var title: String
-        var amount: Double
-        var date: Date
-        var category: String
-        var paymentMethod: String
-        var categoryLocked: Bool?
-        var overrideSource: String?
-        var plaidPaymentChannel: String?
-        var paymentRail: String?
-        var paymentRailLocked: Bool?
-        var subscriptionCadenceOverride: String?
-        var authorizedDate: Date?
-        var pendingTransactionId: String?
-        var plaidAccountId: String?
-        var merchantEntityId: String?
-        var merchantName: String?
-        var logoURL: String?
-        var website: String?
-        var pfcConfidence: String?
-        var isPending: Bool?
-    }
-
-    struct IncomeSnapshot: Codable, Equatable, Sendable {
-        var transactionId: String
-        var source: String
-        var amount: Double
-        var date: Date
-        var category: String
-        var accountName: String?
-        var accountMask: String?
-        var sourceInstitution: String?
-        var rawName: String?
-        var pfc: String?
-        var pending: Bool
-        var kind: String
-        var updatedAt: String?
-    }
-
-    struct BankAccountSnapshot: Codable, Equatable, Sendable {
-        var accountId: String
-        var itemId: String
-        var name: String
-        var officialName: String?
-        var mask: String?
-        var type: String
-        var subtype: String?
-        var institutionName: String
-        var currentBalance: Double
-        var availableBalance: Double?
-        var creditLimit: Double?
-        var institutionId: String?
-        var lastSyncedAt: Date
-        var isOverdue: Bool?
-        var lastPaymentAmount: Double?
-        var lastPaymentDate: Date?
-        var lastStatementIssueDate: Date?
-        var lastStatementBalance: Double?
-        var minimumPaymentAmount: Double?
-        var nextPaymentDueDate: Date?
-        var purchaseApr: Double?
-        var cashApr: Double?
-        var balanceTransferApr: Double?
-        var specialApr: Double?
-        var liabilitiesSyncedAt: Date?
-    }
-
-    struct PaymentSnapshot: Codable, Equatable, Sendable {
-        var transactionId: String
-        var amount: Double
-        var date: Date
-        var cardName: String
-        var sourceAccount: String?
-        var title: String
-        var creditAccountId: String?
-        var institutionName: String?
-    }
-
-    struct RecurringStreamSnapshot: Codable, Equatable, Sendable {
-        var streamId: String
-        var itemId: String
-        var direction: String
-        var streamDescription: String
-        var merchantName: String?
-        var averageAmount: Double
-        var lastAmount: Double
-        var frequency: String
-        var firstDate: Date?
-        var lastDate: Date?
-        var isActive: Bool
-        var transactionIds: [String]
-        var accountId: String?
-        var updatedAt: Date
-    }
-
-    struct BudgetPlanSnapshot: Codable, Equatable, Sendable {
-        var planId: String
-        var monthlyLimit: Double?
-        var categoryLimits: [String: Double]
-        var expectedIncome: [ExpectedIncomeStream]
-        var updatedAt: Date
-    }
-
-    struct PayoffPlanSnapshot: Codable, Equatable, Sendable {
-        var planId: String
-        var kindRaw: String
-        var name: String
-        var accountId: String?
-        var paymentMethod: String
-        var originalAmount: Double
-        var remainingAmount: Double
-        var monthlyPayment: Double
-        var monthlyFee: Double?
-        var aprPercent: Double?
-        var startDate: Date
-        var endDate: Date?
-        var termMonths: Int?
-        var linkedTransactionId: String?
-        var notes: String?
-        var isEnded: Bool
-        var lastAppliedStatementDate: Date?
-        var createdAt: Date
-        var updatedAt: Date
-    }
-
-    // MARK: Plans & summaries
-
-    /// What restore would do — shown before applying, so existing links stay predictable.
     struct RestorePlan: Equatable, Sendable {
         var policy: RestorePolicy
         var credentialsAction: String
@@ -560,6 +391,8 @@ enum PlaidConnectionBackup {
         if policy.wipesLocalData {
             if let prefs = payload.preferenceDefaults, !prefs.isEmpty {
                 AppPreferenceBackup.restore(prefs)
+                // Restore rewrites the whole defaults domain — drop the nickname cache.
+                CardLabelStore.resetMemoryCache()
             }
             if let logos = payload.logoFiles, !logos.isEmpty {
                 InstitutionLogoCache.importLogoFiles(logos)

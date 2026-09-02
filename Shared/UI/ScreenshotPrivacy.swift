@@ -87,11 +87,6 @@ enum ScreenshotPrivacy {
         return s
     }
 
-    /// "···0820" / "···••••" for explicit mask lines.
-    static func maskLine(_ mask: String?, privacy: Bool) -> String? {
-        guard let mask, !mask.isEmpty else { return nil }
-        return privacy ? "···••••" : "···\(mask)"
-    }
 }
 
 // MARK: - Views

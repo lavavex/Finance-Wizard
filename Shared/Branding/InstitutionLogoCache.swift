@@ -78,11 +78,6 @@ enum InstitutionLogoCache {
         seedAppleCardLogo()
     }
 
-    /// Force re-seed (e.g. after asset update). Overwrites disk cache for Apple Card.
-    static func reseedAppleCardLogo() {
-        seedAppleCardLogo(force: true)
-    }
-
     nonisolated private static func seedAppleCardLogo(force: Bool = false) {
         let id = "local:apple-card"
         if !force, logoImage(institutionID: id) != nil { return }

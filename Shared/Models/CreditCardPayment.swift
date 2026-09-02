@@ -70,16 +70,13 @@ enum CreditAnalytics {
 
     /// Sum after collapsing checking-side + credit-side duplicates of the same bill pay.
     static func totalPaid(in rows: [CreditCardPayment]) -> Double {
-        deduplicated(rows).reduce(0) { $0 + max(0, $1.amount) }
+        sumPaid(deduplicated(rows))
     }
 
-    static func paidByCard(in rows: [CreditCardPayment]) -> [String: Double] {
-        var map: [String: Double] = [:]
-        for row in deduplicated(rows) {
-            let key = row.cardName.isEmpty ? "Unknown card" : row.cardName
-            map[key, default: 0] += max(0, row.amount)
-        }
-        return map
+    /// Sum rows that are already deduplicated. Callers holding the output of
+    /// `payments(in:period:)` should use this — running dedup twice is O(n²) for nothing.
+    static func sumPaid(_ rows: [CreditCardPayment]) -> Double {
+        rows.reduce(0) { $0 + max(0, $1.amount) }
     }
 
     /// Checking ACH and the card’s “Thank You” can land 0–3 days apart (Apple Card, EPAY).
