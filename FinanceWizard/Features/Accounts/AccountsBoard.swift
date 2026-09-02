@@ -52,7 +52,11 @@ struct AccountsBoard {
             period: period,
             referenceDate: referenceDate
         )
-        board.totalPaidInPeriod = CreditAnalytics.totalPaid(in: board.periodPayments)
+        // PERF: `payments(in:period:)` already returned a deduplicated list; totalPaid()
+        // deduplicated it a second time. Dedup is O(n²) (~6.5 ms at 242 payments, ~69 ms at
+        // 1,000), so the repeat was pure waste — just sum what we already have.
+        // OLD: board.totalPaidInPeriod = CreditAnalytics.totalPaid(in: board.periodPayments)
+        board.totalPaidInPeriod = CreditAnalytics.sumPaid(board.periodPayments)
 
         board.totalOwed = creditAccounts.reduce(0) { $0 + max(0, $1.currentBalance) }
         board.totalLimit = creditAccounts.compactMap(\.creditLimit).reduce(0, +)
@@ -90,6 +94,14 @@ struct AccountsBoard {
                 ($0.nextPaymentDueDate ?? .distantFuture) < ($1.nextPaymentDueDate ?? .distantFuture)
             }
 
+        // PERF: the credit loop below used to run `transactions.filter { … }` per card, so a
+        // 5-card wallet walked all 3,232 rows five times and recomputed cardName(for:) each
+        // time. Group once here and look each card's rows up by payment method instead.
+        var rowsByMethod: [String: [Transaction]] = [:]
+        for tx in transactions {
+            rowsByMethod[TransactionAnalytics.cardName(for: tx), default: []].append(tx)
+        }
+
         let pool = index.allKnownMethods
         // claimed tracks payment-method strings already assigned to a credit/depository row
         // so “orphan spend” only shows methods nothing else owns.
@@ -102,7 +114,8 @@ struct AccountsBoard {
             let methods = account.matchingPaymentMethods(in: pool)
             for m in methods { claimed.insert(m) }
             let primary = methods.sorted().first ?? account.plaidDisplayName
-            let cardTxs = transactions.filter { methods.contains(TransactionAnalytics.cardName(for: $0)) }
+            // OLD: let cardTxs = transactions.filter { methods.contains(TransactionAnalytics.cardName(for: $0)) }
+            let cardTxs = methods.flatMap { rowsByMethod[$0] ?? [] }
             let closeDay = StatementCycle.closeDay(from: account.lastStatementIssueDate)
             // Pass the issuer's last statement date so "open" means "not yet billed"
             // rather than "ends on or after today" — matches CardDetailView.

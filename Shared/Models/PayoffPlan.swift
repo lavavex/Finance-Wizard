@@ -330,21 +330,6 @@ final class PayoffPlan {
         return max(1, months)
     }
 
-    /// Level monthly payment that clears `remainingAmount` by `endDate` at this plan's APR.
-    /// FIX: was `remaining / months`, which is only right at 0% — on a promo with a real
-    /// APR it suggested a payment that leaves a balance when the promo expires.
-    /// OLD: return remainingAmount / Double(months)
-    func suggestedMonthlyPayment(from now: Date = Date()) -> Double? {
-        guard let months = monthsUntilEnd(from: now), months > 0, remainingAmount > 0 else {
-            return nil
-        }
-        return PayoffPlanMath.levelPayment(
-            remaining: remainingAmount,
-            months: months,
-            aprPercent: aprPercent
-        )
-    }
-
     /// True when a promo/end date exists and the current payment would miss it.
     func missesEndDate(from now: Date = Date()) -> Bool {
         guard let end = endDate else { return false }

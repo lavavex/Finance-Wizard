@@ -548,11 +548,6 @@ enum PlaidAPIClient {
         )
     }
 
-    /// Institution id for a linked Item (`/item/get`).
-    static func itemInstitutionID(accessToken: String) async throws -> String? {
-        try await itemGet(accessToken: accessToken).institutionID
-    }
-
     /// Logo + brand color via `/institutions/get_by_id` (optional metadata).
     /// This is the supported way to show bank branding — not product card photography.
     static func institutionBranding(institutionID: String) async throws -> PlaidInstitutionBranding {

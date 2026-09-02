@@ -54,11 +54,7 @@ enum ReviewQueueAnalytics {
         in transactions: [Transaction],
         accounts: [BankAccount] = []
     ) -> [ReviewQueueItem] {
-        let spend = TransactionAnalytics.spendOnly(transactions)
-        let cal = Calendar.current
-        let cutoff = cal.date(byAdding: .day, value: -120, to: Date()) ?? .distantPast
-        let recent = spend.filter { $0.date >= cutoff }
-
+        let recent = recentSpend(in: transactions)
         var rows: [ReviewQueueItem] = []
 
         for tx in recent {
@@ -79,8 +75,23 @@ enum ReviewQueueAnalytics {
         return rows.sorted { $0.transaction.date > $1.transaction.date }
     }
 
+    /// PERF: was `items(...).count`, which allocated a ReviewQueueItem per hit and then sorted
+    /// the whole array before throwing it away. This runs on every Transactions-tab rebuild.
+    /// Count the same rows without building or ordering them.
     static func count(in transactions: [Transaction], accounts: [BankAccount] = []) -> Int {
-        items(in: transactions, accounts: accounts).count
+        recentSpend(in: transactions).reduce(into: 0) { total, tx in
+            if needsReview(tx, accounts: accounts) { total += 1 }
+        }
+    }
+
+    /// Spend rows recent enough to be worth reviewing (shared by items and count).
+    private static func recentSpend(in transactions: [Transaction]) -> [Transaction] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -120, to: Date()) ?? .distantPast
+        return TransactionAnalytics.spendOnly(transactions).filter { $0.date >= cutoff }
+    }
+
+    private static func needsReview(_ tx: Transaction, accounts: [BankAccount]) -> Bool {
+        looksWeakCategory(tx.category) || looksBillPayCandidate(tx)
     }
 
     // MARK: - Heuristics

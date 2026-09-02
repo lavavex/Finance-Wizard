@@ -238,11 +238,6 @@ enum SubscriptionAnalytics {
         return candidate.lastDate >= cutoff
     }
 
-    /// Sum of estimated monthly costs across candidates.
-    nonisolated static func totalMonthlyBurn(_ items: [SubscriptionCandidate]) -> Double {
-        items.reduce(0) { $0 + $1.estimatedMonthly }
-    }
-
     // MARK: - User declarations
 
     /// Build candidates from transactions the user marked as weekly/monthly/yearly.

@@ -457,20 +457,6 @@ enum AppleCardCSVImporter {
         }
     }
 
-    /// Deletes a Transaction with the given id if present (e.g. when reclassifying as credit).
-    @MainActor
-    private static func deleteExpense(id: String, modelContext: ModelContext) {
-        var descriptor = FetchDescriptor<Transaction>(
-            predicate: #Predicate<Transaction> { row in
-                row.transactionId == id
-            }
-        )
-        descriptor.fetchLimit = 1
-        if let row = try? modelContext.fetch(descriptor).first {
-            modelContext.delete(row)
-        }
-    }
-
     /// Deletes a CreditCardPayment with the given id if present.
     @MainActor
     private static func deleteCreditPayment(id: String, modelContext: ModelContext) {
