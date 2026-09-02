@@ -72,7 +72,13 @@ enum PayoffPlanRecognition {
             return false
         }
         if t.contains("loan disbursement") || t.contains("loan proceeds") { return true }
-        if t.contains("my loan") { return true }
+        // FIX: "my loan" does not match Chase's real descriptor, "MY CHASE LOAN …" — the
+        // product only got recognised when the row happened to also match the
+        // "loan to <digits>" regex below. Match the branded names directly.
+        // OLD: if t.contains("my loan") { return true }
+        if t.contains("my loan") || t.contains("my chase loan") || t.contains("chase loan") {
+            return true
+        }
         if t.range(of: #"loan to \d"#, options: .regularExpression) != nil { return true }
         return false
     }
@@ -89,7 +95,16 @@ enum PayoffPlanRecognition {
     /// Recurring installment billing of an existing purchase (Apple Card CSV, Pay Over Time, Plan It).
     static func looksLikeInstallmentBillingTitle(_ title: String) -> Bool {
         let t = title.lowercased()
+        // FIX: the enum documents this as covering "Chase Pay Over Time, Amex Plan It" but
+        // neither issuer's actual descriptor was matched. Amex bills these as "Plan It" /
+        // "PLAN IT FEE"; Chase's instalment product is "My Chase Plan". (Note "Pay Over
+        // Time" is Amex's revolving feature, not Chase's — kept for existing rows.)
+        // OLD:
+        // if t.contains("pay over time") { return true }
+        // if t.contains("installment") { return true }
         if t.contains("pay over time") { return true }
+        if t.contains("plan it") || t.contains("planit") { return true }
+        if t.contains("my chase plan") || t.contains("chase plan") { return true }
         if t.contains("installment") { return true }
         return false
     }
@@ -110,7 +125,11 @@ final class PayoffPlan {
     var originalAmount: Double
     /// What is still owed on this plan (user-updated; Record payment subtracts the monthly payment).
     var remainingAmount: Double
-    /// Principal portion due each month.
+    /// FIX: this was documented as "Principal portion due each month", which contradicted
+    /// both the editor ("Monthly payment is what hits the statement") and the math —
+    /// recordPayment() subtracts interest from it before reducing the balance.
+    /// The full amount billed each statement, interest / plan fee included.
+    /// OLD: /// Principal portion due each month.
     var monthlyPayment: Double
     /// Extra monthly plan fee (Pay Over Time). Does not reduce remaining.
     var monthlyFee: Double?
@@ -141,9 +160,29 @@ final class PayoffPlan {
         !isEnded && remainingAmount > 0.005
     }
 
-    /// What hits the card bill each month (payment + optional fee).
+    /// Amount added to the card minimum each statement (what the issuer bills).
     var installmentTotal: Double {
-        monthlyPayment + (monthlyFee ?? 0)
+        monthlyPayment
+    }
+
+    /// Principal this statement if remaining is split evenly over remaining months.
+    var evenPrincipalThisMonth: Double? {
+        PayoffPlanMath.evenPrincipal(remaining: remainingAmount, months: termMonths)
+    }
+
+    /// Pay Over Time: payment minus even principal. My Loan: remaining × APR / 12.
+    var impliedMonthlyFee: Double? {
+        if kind == .myLoan {
+            return PayoffPlanMath.amortizingInterest(
+                remaining: remainingAmount,
+                aprPercent: aprPercent
+            )
+        }
+        return PayoffPlanMath.impliedFee(
+            payment: monthlyPayment,
+            remaining: remainingAmount,
+            months: termMonths
+        )
     }
 
     init(
@@ -222,7 +261,12 @@ final class PayoffPlan {
                 return nextMonthly(from: startDate, after: today, calendar: cal)
             }
             if due >= today { return due }
-            return cal.date(byAdding: .month, value: 1, to: due)
+            // FIX: adding a single month to a due date that is several months stale (a
+            // Plaid item that stopped refreshing liabilities) still returned a past date,
+            // so the plan showed as "due" on a day that has already gone. Roll forward
+            // month by month until the date is actually in the future.
+            // OLD: return cal.date(byAdding: .month, value: 1, to: due)
+            return nextMonthly(from: due, after: today, calendar: cal)
         }
         let next = nextMonthly(from: startDate, after: today, calendar: cal)
         if let end = endDate, let next, next > cal.startOfDay(for: end) { return nil }
@@ -241,14 +285,27 @@ final class PayoffPlan {
         return cursor
     }
 
-    /// Whole months of `monthlyPayment` still needed (ignores fee).
-    var monthsToPayOff: Int {
-        guard monthlyPayment > 0, remainingAmount > 0 else { return 0 }
-        return Int(ceil(remainingAmount / monthlyPayment))
+    /// FIX: this divided remaining by payment and ignored interest, while recordPayment()
+    /// correctly takes interest out of the payment first. A My Chase Loan or a non-zero
+    /// promo APR therefore reported a payoff date earlier than it could ever happen, and
+    /// missesEndDate() under-fired. Now amortised at the plan's APR (0% behaves as before).
+    /// Whole months of `monthlyPayment` still needed. nil = the payment never clears the
+    /// balance because it does not cover the monthly interest.
+    /// OLD:
+    /// var monthsToPayOff: Int {
+    ///     guard monthlyPayment > 0, remainingAmount > 0 else { return 0 }
+    ///     return Int(ceil(remainingAmount / monthlyPayment))
+    /// }
+    var monthsToPayOff: Int? {
+        PayoffPlanMath.monthsToPayOff(
+            remaining: remainingAmount,
+            payment: monthlyPayment,
+            aprPercent: aprPercent
+        )
     }
 
     func projectedPayoffDate(from now: Date = Date()) -> Date? {
-        let months = monthsToPayOff
+        guard let months = monthsToPayOff else { return nil }
         guard months > 0 else { return now }
         return Calendar.current.date(byAdding: .month, value: months, to: now)
     }
@@ -266,25 +323,48 @@ final class PayoffPlan {
         return max(1, months)
     }
 
-    /// Equal monthly principal to clear `remainingAmount` by `endDate`.
+    /// Level monthly payment that clears `remainingAmount` by `endDate` at this plan's APR.
+    /// FIX: was `remaining / months`, which is only right at 0% — on a promo with a real
+    /// APR it suggested a payment that leaves a balance when the promo expires.
+    /// OLD: return remainingAmount / Double(months)
     func suggestedMonthlyPayment(from now: Date = Date()) -> Double? {
         guard let months = monthsUntilEnd(from: now), months > 0, remainingAmount > 0 else {
             return nil
         }
-        return remainingAmount / Double(months)
+        return PayoffPlanMath.levelPayment(
+            remaining: remainingAmount,
+            months: months,
+            aprPercent: aprPercent
+        )
     }
 
     /// True when a promo/end date exists and the current payment would miss it.
     func missesEndDate(from now: Date = Date()) -> Bool {
-        guard let end = endDate, let projected = projectedPayoffDate(from: now) else {
-            return false
-        }
+        guard let end = endDate else { return false }
+        // FIX: a payment too small to cover the interest now yields a nil projection.
+        // That is the worst case, not "no problem", so it must report as missing the date.
+        guard let projected = projectedPayoffDate(from: now) else { return true }
         return Calendar.current.startOfDay(for: projected) > Calendar.current.startOfDay(for: end)
     }
 
-    /// Subtract one monthly principal payment. Marks ended at ~zero.
+    /// Subtract one month of principal. Fee / interest is not principal.
     func recordPayment() {
-        remainingAmount = max(0, remainingAmount - monthlyPayment)
+        let principal: Double
+        if kind == .myLoan,
+           let interest = PayoffPlanMath.amortizingInterest(
+                remaining: remainingAmount,
+                aprPercent: aprPercent
+           ) {
+            principal = max(0, monthlyPayment - interest)
+        } else if let even = evenPrincipalThisMonth {
+            principal = even
+        } else {
+            principal = monthlyPayment
+        }
+        remainingAmount = max(0, remainingAmount - principal)
+        if let months = termMonths, months > 0 {
+            termMonths = months - 1
+        }
         if remainingAmount <= 0.005 {
             remainingAmount = 0
             isEnded = true
@@ -318,5 +398,97 @@ enum PayoffPlanProgress {
         plans
             .filter { $0.isActive && !$0.kind.followsCardStatement && $0.isOn(account: account) }
             .reduce(0) { $0 + $1.monthlyPayment }
+    }
+
+    /// Chase “Interest saving balance”: all non-loan balances + this statement’s
+    /// loan/installment payments (not leftover loan principal). Paying this each
+    /// cycle avoids purchase interest and keeps My Loan on its billing-cycle schedule.
+    static func interestSavingBalance(on account: BankAccount, plans: [PayoffPlan]) -> Double {
+        let issuer = plans.filter {
+            $0.isActive && $0.kind.followsCardStatement && $0.isOn(account: account)
+        }
+        let leftoverFinancing = issuer.reduce(0) { $0 + $1.remainingAmount }
+        let dueThisStatement = issuer.reduce(0) { $0 + $1.installmentTotal }
+        let otherBalances = max(0, account.currentBalance - leftoverFinancing)
+        return otherBalances + dueThisStatement
+    }
+}
+
+/// Split a level statement payment into principal vs fee/interest.
+enum PayoffPlanMath {
+    static func evenPrincipal(remaining: Double, months: Int?) -> Double? {
+        guard let months, months > 0, remaining > 0 else { return nil }
+        return remaining / Double(months)
+    }
+
+    static func impliedFee(payment: Double, remaining: Double, months: Int?) -> Double? {
+        guard let principal = evenPrincipal(remaining: remaining, months: months) else { return nil }
+        return payment - principal
+    }
+
+    /// Level-payment APR (percent) from remaining, months, and the statement payment.
+    /// Interest this statement for a fixed-APR loan: remaining × APR / 12.
+    static func amortizingInterest(remaining: Double, aprPercent: Double?) -> Double? {
+        guard let aprPercent, remaining > 0 else { return nil }
+        return remaining * (aprPercent / 100.0) / 12.0
+    }
+
+    /// FIX: added so payoff projections stop ignoring interest (see PayoffPlan.monthsToPayOff).
+    /// Whole months to clear `remaining` paying `payment` per month at `aprPercent`.
+    /// nil when the payment never covers the monthly interest, so the balance never clears.
+    static func monthsToPayOff(remaining: Double, payment: Double, aprPercent: Double?) -> Int? {
+        guard remaining > 0.005 else { return 0 }
+        guard payment > 0 else { return nil }
+        let monthlyRate = max(0, (aprPercent ?? 0) / 100.0 / 12.0)
+        if monthlyRate <= 0 {
+            return Int(ceil(remaining / payment - 1e-9))
+        }
+        // A payment at or below one month's interest leaves the balance flat or growing.
+        guard payment > remaining * monthlyRate + 0.005 else { return nil }
+        let months = -log(1 - monthlyRate * remaining / payment) / log(1 + monthlyRate)
+        guard months.isFinite, months > 0 else { return nil }
+        return Int(ceil(months - 1e-9))
+    }
+
+    /// Level monthly payment that clears `remaining` in `months` at `aprPercent`.
+    /// At 0% this is just remaining ÷ months.
+    static func levelPayment(remaining: Double, months: Int, aprPercent: Double?) -> Double? {
+        guard months > 0, remaining > 0 else { return nil }
+        let n = Double(months)
+        let monthlyRate = max(0, (aprPercent ?? 0) / 100.0 / 12.0)
+        if monthlyRate <= 0 { return remaining / n }
+        let growth = pow(1 + monthlyRate, n)
+        guard growth.isFinite, growth > 1 else { return remaining / n }
+        return remaining * monthlyRate * growth / (growth - 1)
+    }
+
+    static func impliedAPR(payment: Double, remaining: Double, months: Int?) -> Double? {
+        guard let months, months > 0, remaining > 0, payment > 0 else { return nil }
+        let n = Double(months)
+        let total = payment * n
+        if total < remaining - 0.05 { return nil }
+        if abs(total - remaining) < 0.05 { return 0 }
+        var r = 0.01
+        for _ in 0..<60 {
+            let one = 1 + r
+            guard one > 0 else { return nil }
+            let powN = pow(one, n)
+            let denom = powN - 1
+            guard abs(denom) > 1e-16 else { break }
+            let f = remaining * r * powN / denom - payment
+            let dPow = n * pow(one, n - 1)
+            let dfNum = (powN + r * dPow) * denom - r * powN * dPow
+            let df = remaining * dfNum / (denom * denom)
+            guard abs(df) > 1e-16 else { break }
+            let next = r - f / df
+            if abs(next - r) < 1e-12 {
+                r = next
+                break
+            }
+            r = next
+            if r <= -0.99 { r = 1e-8 }
+        }
+        if r < -1e-6 { return nil }
+        return max(0, r * 12 * 100)
     }
 }

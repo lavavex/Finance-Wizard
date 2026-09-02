@@ -60,21 +60,31 @@ struct AccountsBoard {
             board.totalUtilization = min(max(board.totalOwed / board.totalLimit, 0), 1)
         }
         board.totalMinimumDue = creditAccounts.compactMap(\.minimumPaymentAmount).reduce(0, +)
-        board.soonestDueDate = creditAccounts.compactMap(\.nextPaymentDueDate).min()
         board.anyOverdue = creditAccounts.contains { $0.isOverdue == true }
 
         // Upcoming bills: overdue or due within 30 days.
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
         let horizon = cal.date(byAdding: .day, value: 30, to: today)
+        // FIX: the filter had no lower bound, so a due date the bank stopped refreshing
+        // (a Plaid item in an error state) stayed pinned in Upcoming bills and drove
+        // "Next due" forever. A date more than a week past, with no overdue flag to back
+        // it up, is stale data rather than a real bill.
+        let staleBefore = cal.date(byAdding: .day, value: -7, to: today) ?? today
+        func isLiveDueDate(_ account: BankAccount) -> Bool {
+            guard let due = account.nextPaymentDueDate else { return false }
+            let day = cal.startOfDay(for: due)
+            if account.isOverdue == true { return true }
+            guard let horizon else { return false }
+            return day >= staleBefore && day <= horizon
+        }
+        // OLD: board.soonestDueDate = creditAccounts.compactMap(\.nextPaymentDueDate).min()
+        board.soonestDueDate = creditAccounts
+            .filter(isLiveDueDate)
+            .compactMap(\.nextPaymentDueDate)
+            .min()
         board.upcomingBills = creditAccounts
-            .filter { account in
-                guard let due = account.nextPaymentDueDate else { return false }
-                let day = cal.startOfDay(for: due)
-                if account.isOverdue == true { return true }
-                guard let horizon else { return false }
-                return day <= horizon
-            }
+            .filter(isLiveDueDate)
             .sorted {
                 // Missing dates sort last.
                 ($0.nextPaymentDueDate ?? .distantFuture) < ($1.nextPaymentDueDate ?? .distantFuture)
@@ -94,8 +104,15 @@ struct AccountsBoard {
             let primary = methods.sorted().first ?? account.plaidDisplayName
             let cardTxs = transactions.filter { methods.contains(TransactionAnalytics.cardName(for: $0)) }
             let closeDay = StatementCycle.closeDay(from: account.lastStatementIssueDate)
-            let statementGroups = StatementCycle.group(cardTxs, closeDay: closeDay)
-            let currentStatement = statementGroups.first(where: { $0.bucket.isOpen })
+            // Pass the issuer's last statement date so "open" means "not yet billed"
+            // rather than "ends on or after today" — matches CardDetailView.
+            let statementGroups = StatementCycle.group(
+                cardTxs,
+                closeDay: closeDay,
+                lastStatement: account.lastStatementIssueDate
+            )
+            // OLD: let currentStatement = statementGroups.first(where: { $0.bucket.isOpen })
+            let currentStatement = StatementCycle.currentGroup(in: statementGroups)
             let statementRows = currentStatement?.rows ?? []
             let statementPayments: [CreditCardPayment] = {
                 let matched = paymentsMatching(
@@ -126,7 +143,14 @@ struct AccountsBoard {
                         on: account,
                         plans: payoffPlans
                     ),
-                    spendIsThisStatement: true
+                    // OLD: spendIsThisStatement: true,
+                    statementSpendLabel: currentStatement.map {
+                        $0.bucket.isOpen ? "This statement " : "Last statement "
+                    } ?? "Spend ",
+                    interestSavingBalance: PayoffPlanProgress.interestSavingBalance(
+                        on: account,
+                        plans: payoffPlans
+                    )
                 )
             )
         }
@@ -193,7 +217,11 @@ struct AccountsBoard {
             if let credit, let id = payment.creditAccountId, id == credit.accountId {
                 return true
             }
-            if let credit, let mask = credit.mask, !mask.isEmpty, payment.cardName.contains(mask) {
+            // FIX: bare substring match on a 4-digit mask could claim another card's
+            // payment. Same standalone-group rule as BankAccount.matchesPaymentMethod.
+            // OLD: if let credit, let mask = credit.mask, !mask.isEmpty, payment.cardName.contains(mask) {
+            if let credit, let mask = credit.mask, !mask.isEmpty,
+               BankAccount.containsStandaloneMask(payment.cardName, mask: mask) {
                 return true
             }
             if paymentMethods.contains(payment.cardName) { return true }
@@ -213,6 +241,7 @@ struct AccountsBoard {
 struct UpcomingBillRow: View {
     let account: BankAccount
     var installmentIncluded: Double = 0
+    var interestSavingBalance: Double? = nil
 
     // Color escalates as due date nears or utilization is high.
     private var urgencyColor: Color {
@@ -261,6 +290,11 @@ struct UpcomingBillRow: View {
                     Text("Incl. \(installmentIncluded.formatted(.currency(code: "USD"))) installment")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+                if let isb = interestSavingBalance, isb > 0.005 {
+                    MoneyText(isb, prefix: "Int. saving ")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
                 if let due = account.nextPaymentDueDate {
                     if account.isOverdue == true {
@@ -343,7 +377,11 @@ struct UnifiedCardRow: Identifiable {
     let paidInPeriod: Double
     var installmentIncludedInMin: Double = 0
     var extraPrincipalThisStatement: Double = 0
-    var spendIsThisStatement: Bool = false
+    /// FIX: replaced the `spendIsThisStatement` flag, which hard-coded the "This statement"
+    /// prefix even when the row was actually showing the last closed cycle.
+    /// OLD: var spendIsThisStatement: Bool = false
+    var statementSpendLabel: String = "Spend "
+    var interestSavingBalance: Double? = nil
 
     // Prefer credit, else depository, for logo lookups.
     var institutionId: String? {
@@ -438,6 +476,11 @@ struct UnifiedCardLabel: View {
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
+                            if let isb = row.interestSavingBalance, isb > 0.005 {
+                                MoneyText(isb, prefix: "Int. saving ")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                     }
                     if let due = credit.nextPaymentDueDate {
@@ -463,10 +506,7 @@ struct UnifiedCardLabel: View {
             }
 
             HStack {
-                MoneyText(
-                    row.spent,
-                    prefix: row.spendIsThisStatement ? "This statement " : "Spend "
-                )
+                MoneyText(row.spent, prefix: row.statementSpendLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if row.transactionCount > 0 {

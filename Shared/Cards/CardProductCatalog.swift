@@ -28,6 +28,10 @@ struct CardProductPreset: Identifiable, Hashable, Sendable {
     var annualFee: Double?
     /// Reward category → rate (Dining, Gas, …). Use only when the boost is really category-wide.
     var categoryRates: [String: Double]
+    /// FIX: caps used to live only in `notes` prose, so reward estimates ran past them.
+    /// Reward category → capped spend per window in USD (Amex $6k/yr, Gold $25k/yr
+    /// supermarkets, Freedom Flex $1,500/quarter). Missing key = uncapped.
+    var categoryCaps: [String: Double]
     /// Partner merchants: one display name, many title match needles (not a whole category).
     var merchantBoosts: [MerchantBoostPartner]
     /// Human notes / source attribution shown in benefits UI.
@@ -47,6 +51,7 @@ struct CardProductPreset: Identifiable, Hashable, Sendable {
         pointValueCents: Double,
         annualFee: Double?,
         categoryRates: [String: Double],
+        categoryCaps: [String: Double] = [:],
         merchantBoosts: [MerchantBoostPartner] = [],
         notes: String,
         benefits: [CardBenefitItem],
@@ -61,6 +66,7 @@ struct CardProductPreset: Identifiable, Hashable, Sendable {
         self.pointValueCents = pointValueCents
         self.annualFee = annualFee
         self.categoryRates = categoryRates
+        self.categoryCaps = categoryCaps
         self.merchantBoosts = merchantBoosts
         self.notes = notes
         self.benefits = benefits
@@ -117,16 +123,32 @@ enum CardProductCatalog {
             defaultRate: 1, // 1.3% @ 1.25¢
             pointValueCents: 1.25,
             annualFee: 0,
+            // FIX: "Gas": 5 shipped as a permanent boost to stand in for the rotating 5%
+            // category, so 3 quarters out of 4 every gas purchase over-reported at 5x — and
+            // the migration re-seed put it back whenever the user corrected it. The rotating
+            // category now belongs in a TemporaryBoost with the quarter's end date, which
+            // survives migration and expires on its own.
+            // OLD:
+            // categoryRates: [
+            //     "Travel (Portal)": 5,
+            //     "Dining": 3,
+            //     "Drugstores": 3,
+            //     "Gas": 5 // rotating quarterly often — edit when inactive
+            // ],
             categoryRates: [
                 "Travel (Portal)": 5,
                 "Dining": 3,
-                "Drugstores": 3,
-                "Gas": 5 // rotating quarterly often — edit when inactive
+                "Drugstores": 3
+            ],
+            categoryCaps: [
+                // Rotating 5% is capped at $1,500 of spend per quarter.
+                "Everything Else": 1_500
             ],
             notes: """
             Source: maxrewards.com/credit-cards/chase-freedom-flex
-            • 5x Chase Travel · 3x drugstores · 1x base · rotating 5% quarterly (up to $1,500)
-            • Set Gas (or other) to 5x only while that quarterly category is active
+            • 5x Chase Travel · 3x dining & drugstores · 1x base · rotating 5% quarterly
+            • Add the quarterly 5% category as a temporary boost with the quarter's end date
+              (a plain rate override would apply all year). $1,500 spend cap per quarter.
             • 3% foreign transaction fee
             """,
             benefits: [
@@ -151,18 +173,31 @@ enum CardProductCatalog {
             defaultRate: 1, // 1.3% @ 1.25¢
             pointValueCents: 1.25,
             annualFee: 95,
+            // FIX: dropped "Gas": 3. Sapphire Preferred has no gas bonus — its 3x tier is
+            // dining, online grocery and select streaming; everything else travel is 2x and
+            // gas earns the 1x base. The old comment read a gas-EV row off MaxRewards that
+            // does not apply to this product.
+            // OLD:
+            // categoryRates: [
+            //     "Travel (Portal)": 5,
+            //     "Travel (Other)": 2,
+            //     "Dining": 3,
+            //     "Gas": 3,
+            //     "Online Grocery": 3,
+            //     "Streaming": 3
+            // ],
             categoryRates: [
                 "Travel (Portal)": 5,
                 "Travel (Other)": 2,
                 "Dining": 3,
-                "Gas": 3,
                 "Online Grocery": 3,
                 "Streaming": 3
             ],
             notes: """
             Source: maxrewards.com/credit-cards/chase-sapphire-preferred
-            MaxRewards earn table (at 1.25c/pt): Chase Travel 6.3%; dining / gas-EV / online grocery / streaming 3.8%; other travel 2.5%; other 1.3%.
-            Mapped to portal 5x, other travel 2x, dining/gas/online grocery/streaming 3x, base 1x.
+            • 5x Chase Travel · 3x dining, online grocery, select streaming · 2x other travel · 1x base
+            • No gas bonus on this card — gas earns the 1x base.
+            • Online grocery excludes Target, Walmart and wholesale clubs.
             """,
             benefits: [
                 .init(title: "$50 hotel credit (×2)", detail: "Chase Travel hotels; semi-annual"),
@@ -184,14 +219,27 @@ enum CardProductCatalog {
             defaultRate: 1, // 1.3% @ 1.25¢
             pointValueCents: 1.25,
             annualFee: 795,
+            // FIX: the 4x direct-booking tier was described in the note but absent from the
+            // data, so flights and hotels booked with the airline/hotel fell through to the
+            // 1x base. Sapphire Preferred already modelled its two travel tiers; Reserve now
+            // matches. "Travel (Other)" is the closest bucket available — it slightly
+            // over-credits car rentals and cruises, which earn the base rate in reality.
+            // OLD:
+            // categoryRates: [
+            //     "Travel (Portal)": 8, // Chase Travel / The Edit 10% ≈ 8x @ 1.25¢; direct flights/hotels 4x — see notes
+            //     "Dining": 3 // 3.8% worldwide ≈ 3x
+            // ],
             categoryRates: [
-                "Travel (Portal)": 8, // Chase Travel / The Edit 10% ≈ 8x @ 1.25¢; direct flights/hotels 4x — see notes
+                "Travel (Portal)": 8, // Chase Travel / The Edit 10% ≈ 8x @ 1.25¢
+                "Flights": 4, // booked direct with the airline ≈ 5% @ 1.25¢
+                "Travel (Other)": 4, // hotels booked direct — same 5% tier
                 "Dining": 3 // 3.8% worldwide ≈ 3x
             ],
             notes: """
             Source: maxrewards.com/credit-cards/chase-sapphire-reserve
-            MaxRewards: Chase Travel / The Edit 10%; flights & hotels booked direct 5%; dining 3.8%; other 1.3% (at 1.25¢/pt → ~8x / 4x / 3x / 1x).
-            Travel default set to 8x for portal-heavy use; set to 4x if you mostly book airlines/hotels direct.
+            • 8x Chase Travel / The Edit · 4x flights & hotels booked direct · 3x dining · 1x base
+            • Rates are Ultimate Rewards points valued at 1.25¢ (MaxRewards shows 10% / 5% / 3.8% / 1.3%).
+            • Car rentals and cruises earn the 1x base; they fall into Travel (Other) here.
             """,
             benefits: [
                 .init(title: "$300 Travel credit", detail: "Annual travel purchases"),
@@ -319,6 +367,13 @@ enum CardProductCatalog {
                 "Gas": 3, // U.S. gas, up to $6k/yr
                 "Online Retail": 3 // U.S. online retail, up to $6k/yr
             ],
+            // FIX: the $6,000/yr caps were prose only, so a $10k grocery year reported 3%
+            // on all of it. Each category caps separately, then drops to the 1% base.
+            categoryCaps: [
+                "Groceries": 6_000,
+                "Gas": 6_000,
+                "Online Retail": 6_000
+            ],
             notes: """
             Source: maxrewards.com/credit-cards/blue-cash-everyday
             • 3% U.S. supermarkets, U.S. gas, U.S. online retail (each up to $6,000/yr then 1%)
@@ -345,12 +400,27 @@ enum CardProductCatalog {
             defaultRate: 1,
             pointValueCents: 1,
             annualFee: 95,
+            // FIX: the note already said "3% gas/transit" but Transit was missing from the
+            // data, so commuting spend earned the 1% base. Added, plus the $6k supermarket cap.
+            // OLD:
+            // categoryRates: [
+            //     "Groceries": 6,
+            //     "Streaming": 6,
+            //     "Gas": 3
+            // ],
             categoryRates: [
                 "Groceries": 6,
                 "Streaming": 6,
-                "Gas": 3
+                "Gas": 3,
+                "Transit": 3
             ],
-            notes: "6% U.S. supermarkets (cap $6k/yr), 6% select streaming, 3% gas/transit; $95 AF. Confirm current Amex terms.",
+            categoryCaps: [
+                "Groceries": 6_000
+            ],
+            notes: """
+            • 6% U.S. supermarkets (first $6,000/yr, then 1%) · 6% select U.S. streaming
+            • 3% U.S. gas and transit · 1% everything else · $95 annual fee
+            """,
             benefits: [
                 .init(title: "Disney Bundle credit", detail: "Enrollment required"),
                 .init(title: "Annual fee", detail: "$95 (often waived year 1)")
@@ -367,11 +437,29 @@ enum CardProductCatalog {
             defaultRate: 1,
             pointValueCents: 1,
             annualFee: 325,
+            // FIX: travel earn was missing entirely and the supermarket cap was only prose.
+            // Gold is 3x on flights booked direct or through Amex Travel and 2x on prepaid
+            // hotels via Amex Travel — the new Flights bucket keeps that off car rentals and
+            // cruises, which really do earn the 1x base.
+            // OLD:
+            // categoryRates: [
+            //     "Dining": 4,
+            //     "Groceries": 4
+            // ],
             categoryRates: [
                 "Dining": 4,
-                "Groceries": 4
+                "Groceries": 4,
+                "Flights": 3,
+                "Travel (Portal)": 2
             ],
-            notes: "4x restaurants + U.S. supermarkets (cap). Credits need enrollment. Not pulled from MaxRewards in this pass.",
+            categoryCaps: [
+                "Groceries": 25_000
+            ],
+            notes: """
+            • 4x restaurants worldwide · 4x U.S. supermarkets (first $25,000/yr, then 1x)
+            • 3x flights booked direct or via Amex Travel · 2x prepaid hotels via Amex Travel
+            • Dining and Uber Cash credits require enrollment. Confirm current Amex terms.
+            """,
             benefits: [
                 .init(title: "Dining credit", detail: "Monthly at enrolled partners"),
                 .init(title: "Uber Cash", detail: "Enrollment required")
@@ -388,12 +476,22 @@ enum CardProductCatalog {
             defaultRate: 1,
             pointValueCents: 1,
             annualFee: 150,
+            // FIX: dropped "Gas": 3 — Green earns 3x on travel, transit and restaurants,
+            // never on gas, which the note already said. Transit was the missing bucket.
+            // OLD:
+            // categoryRates: [
+            //     "Travel (Other)": 3,
+            //     "Dining": 3,
+            //     "Gas": 3
+            // ],
             categoryRates: [
                 "Travel (Other)": 3,
+                "Travel (Portal)": 3,
+                "Flights": 3,
                 "Dining": 3,
-                "Gas": 3
+                "Transit": 3
             ],
-            notes: "3x travel, transit, restaurants (confirm current Amex terms).",
+            notes: "3x travel, transit and restaurants. Gas earns the 1x base (confirm current Amex terms).",
             benefits: [],
             matchNeedles: ["amex green", "green card"],
             maxRewardsPath: nil
@@ -406,12 +504,26 @@ enum CardProductCatalog {
             rewardKind: .points,
             defaultRate: 1,
             pointValueCents: 1,
-            annualFee: 695,
+            // FIX: two problems. The fee was stale ($695 → $895 as of September 2025), and
+            // "Travel (Other)": 5 paid 5x on all travel including car rentals and cruises,
+            // which earn the 1x base. Platinum's 5x is flights booked direct or via Amex
+            // Travel, plus prepaid hotels through Amex Travel — the Portal + Flights buckets.
+            // OLD:
+            // annualFee: 695,
+            // categoryRates: [
+            //     "Travel (Portal)": 5,
+            //     "Travel (Other)": 5
+            // ],
+            annualFee: 895,
             categoryRates: [
-                "Travel (Portal)": 5,
-                "Travel (Other)": 5
+                "Travel (Portal)": 5, // prepaid hotels + flights booked through Amex Travel
+                "Flights": 5 // booked direct with the airline
             ],
-            notes: "5x flights/hotels with complex rules. High AF / credits — edit for your usage.",
+            notes: """
+            • 5x flights booked direct or via Amex Travel · 5x prepaid hotels via Amex Travel
+            • Car rentals, cruises and pay-at-property hotels earn the 1x base.
+            • $895 annual fee (Sept 2025). Heavy credit card — edit rates for your usage.
+            """,
             benefits: [
                 .init(title: "Lounge access", detail: "Centurion / Priority Pass (terms)"),
                 .init(title: "Statement credits", detail: "Airline, Uber, digital, etc.")
@@ -465,10 +577,20 @@ enum CardProductCatalog {
                     matchNeedles: ["panera"],
                     rate: 3
                 ),
+                // FIX: the bare "mobil" needle matched "t-mobile", so a phone bill earned
+                // the 3% ExxonMobil partner rate. "exxon" already covers every ExxonMobil
+                // descriptor (EXXONMOBIL, EXXON MOBIL, EXXON #1234).
+                // OLD:
+                // MerchantBoostPartner(
+                //     id: "exxon_mobil",
+                //     displayName: "ExxonMobil",
+                //     matchNeedles: ["exxon", "mobil", "exxonmobil"],
+                //     rate: 3
+                // ),
                 MerchantBoostPartner(
                     id: "exxon_mobil",
                     displayName: "ExxonMobil",
-                    matchNeedles: ["exxon", "mobil", "exxonmobil"],
+                    matchNeedles: ["exxon", "exxonmobil", "exxon mobil"],
                     rate: 3
                 ),
                 MerchantBoostPartner(
@@ -593,6 +715,8 @@ enum CardProductCatalog {
         profile.categoryMultipliers = product.categoryRates.filter {
             abs($0.value - product.defaultRate) > 0.000_1
         }
+        // Caps travel with the product so reward estimates stop at $6k/$25k/$1,500.
+        profile.categoryCaps = product.categoryCaps.isEmpty ? nil : product.categoryCaps
         profile.merchantBoosts = product.merchantBoosts.filter {
             abs($0.rate - product.defaultRate) > 0.000_1
         }
@@ -606,6 +730,9 @@ enum CardProductCatalog {
         profile.productKey = product.id
         profile.productDisplayName = product.displayName
         profile.compactRatesMatchingDefault()
+        // Last: a fresh product pick is catalog defaults, not hand edits, so migrations may
+        // still re-seed it. Set after compacting so no helper can flip it on the way past.
+        profile.ratesCustomizedByUser = false
         return profile
     }
 }

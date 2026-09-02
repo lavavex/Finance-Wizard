@@ -180,6 +180,15 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
     var productDisplayName: String?
     /// Rotating / promo boosts with optional end date (decoded optional for older profiles).
     var temporaryBoosts: [TemporaryBoost]?
+    /// True once the user edits a rate / partner by hand. Blocks the catalog re-seed in
+    /// migrateIfNeeded so an app update cannot silently revert their edits.
+    /// Optional so profiles saved before this flag existed decode as nil (= never edited).
+    var ratesCustomizedByUser: Bool?
+    /// FIX: reward caps used to exist only as prose in `notes`, so estimates were unbounded
+    /// (Amex BCE/BCP $6k/yr, Amex Gold $25k supermarkets, Freedom Flex $1,500/quarter).
+    /// Reward category → capped spend in USD per cap window; spend past it earns the base
+    /// rate. nil / missing key = uncapped. See `cappedRewardUnits` for how it is applied.
+    var categoryCaps: [String: Double]?
 
     static func accountKey(_ accountId: String) -> String { "account:\(accountId)" }
     static func methodKey(_ method: String) -> String { "method:\(method)" }
@@ -211,8 +220,17 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
             merchantMultipliers: nil,
             productKey: nil,
             productDisplayName: nil,
-            temporaryBoosts: nil
+            temporaryBoosts: nil,
+            ratesCustomizedByUser: nil,
+            categoryCaps: nil
         )
+    }
+
+    /// Annual (or per-window) capped spend for a reward category, when the product has one.
+    func cap(forCategory category: String) -> Double? {
+        let key = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let c = categoryCaps?[key] { return c }
+        return categoryCaps?.first { $0.key.caseInsensitiveCompare(key) == .orderedSame }?.value
     }
 
     /// Pretty label for a merchant needle (“whole foods” → “Whole Foods”).
@@ -398,10 +416,18 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
                 categoryMultipliers.removeValue(forKey: key)
             }
         }
-        // Drop Everything Else override when it just restates the base
-        if let v = lookupOverride(RewardCategory.everythingElse.rawValue),
-           abs(v - defaultMultiplier) < 0.000_1 {
-            removeRate(forCategory: RewardCategory.everythingElse.rawValue)
+        // Drop Everything Else override when it just restates the base.
+        // Must NOT route through removeRate: this is bookkeeping that runs on every save
+        // and inside makeProfile, and removeRate stamps ratesCustomizedByUser — which would
+        // mark every profile as hand-edited and permanently freeze out catalog corrections.
+        // OLD: removeRate(forCategory: RewardCategory.everythingElse.rawValue)
+        let everythingElse = RewardCategory.everythingElse.rawValue
+        if let v = lookupOverride(everythingElse), abs(v - defaultMultiplier) < 0.000_1 {
+            categoryMultipliers.removeValue(forKey: everythingElse)
+            for key in categoryMultipliers.keys
+            where key.caseInsensitiveCompare(everythingElse) == .orderedSame {
+                categoryMultipliers.removeValue(forKey: key)
+            }
         }
         partnerBoosts = partnerBoosts.filter { rateDiffersFromDefault($0.rate) }
     }
@@ -410,6 +436,9 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        // FIX: stamp the hand-edit flag so migrateIfNeeded stops re-seeding this
+        // profile from the catalog and reverting the change on the next app update.
+        ratesCustomizedByUser = true
         // Known reward categories → category map. Anything else is a merchant partner.
         if let known = RewardCategory.canonicalName(for: trimmed) {
             setCategoryRate(rate, name: known)
@@ -440,6 +469,8 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
     mutating func setMerchantPartnerRate(_ rate: Double?, displayName: String) {
         let label = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !label.isEmpty else { return }
+        // FIX: see setRate — hand edits must survive a catalog re-seed.
+        ratesCustomizedByUser = true
         var list = partnerBoosts
         let idx = list.firstIndex {
             $0.displayName.caseInsensitiveCompare(label) == .orderedSame
@@ -472,6 +503,8 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
     }
 
     mutating func removeRate(forCategory category: String) {
+        // FIX: deleting a rate is a hand edit too — a re-seed would put it back.
+        ratesCustomizedByUser = true
         let name = category.trimmingCharacters(in: .whitespacesAndNewlines)
         categoryMultipliers.removeValue(forKey: name)
         for key in categoryMultipliers.keys where key.caseInsensitiveCompare(name) == .orderedSame {
@@ -487,6 +520,9 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         categoryMultipliers = [:]
         merchantBoosts = nil
         merchantMultipliers = nil
+        // FIX: "reset to nothing" is an explicit user choice; clearing the flag here
+        // would let the next migration silently repopulate the catalog rates.
+        ratesCustomizedByUser = true
     }
 
     private func lookupOverride(_ category: String) -> Double? {
@@ -572,8 +608,15 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         case .points:
             return rate
         case .cashback:
-            // Prefer percent form: 3 → 0.03. Accept legacy 0.03 as-is.
-            return rate > 1 ? rate / 100 : rate
+            // FIX: `rate > 1` treated an exact 1% base as the fraction 1.0 → 100% cash back.
+            // Every 1%-base catalog card (Blue Cash Everyday/Preferred, Prime Visa,
+            // Amazon Visa) reported $100 back on a $100 purchase. Legacy fraction
+            // profiles are already converted to percent by migrateIfNeeded step 1,
+            // so percent is now the only stored form and the guard is unnecessary.
+            // OLD:
+            // // Prefer percent form: 3 → 0.03. Accept legacy 0.03 as-is.
+            // return rate > 1 ? rate / 100 : rate
+            return rate / 100
         }
     }
 
@@ -600,6 +643,53 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         }
     }
 
+    /// FIX: caps were documented in `notes` but never applied, so a $10,000 year of Amex
+    /// BCE groceries reported 3% on all of it instead of 3% to $6,000 then 1%.
+    /// Reward units for `spendDollars` in a capped category, given how much of the cap this
+    /// card already used in the same window. `priorCategorySpend` is that card's earlier
+    /// spend in the category for the cap window (calendar year for the Amex $6k / $25k caps,
+    /// the quarter for a rotating 5% category). Uncapped categories behave as before.
+    func cappedRewardUnits(
+        spendDollars: Double,
+        category: String,
+        priorCategorySpend: Double,
+        on date: Date = Date()
+    ) -> Double {
+        let dollars = abs(spendDollars)
+        guard let cap = cap(forCategory: category), cap > 0 else {
+            return rewardUnits(spendDollars: dollars, category: category, on: date)
+        }
+        let headroom = max(0, cap - max(0, priorCategorySpend))
+        let boosted = min(dollars, headroom)
+        let overflow = dollars - boosted
+        // Past the cap the card drops to its base rate (Everything Else / default).
+        return rewardUnits(spendDollars: boosted, category: category, on: date)
+            + rewardUnits(
+                spendDollars: overflow,
+                category: RewardCategory.everythingElse.rawValue,
+                on: date
+            )
+    }
+
+    /// Estimated USD value of `cappedRewardUnits`.
+    func cappedRewardValueUSD(
+        spendDollars: Double,
+        category: String,
+        priorCategorySpend: Double,
+        on date: Date = Date()
+    ) -> Double {
+        let units = cappedRewardUnits(
+            spendDollars: spendDollars,
+            category: category,
+            priorCategorySpend: priorCategorySpend,
+            on: date
+        )
+        switch rewardKind {
+        case .cashback: return units
+        case .points: return units * (pointValueCents / 100)
+        }
+    }
+
     func rewardUnits(
         spendDollars: Double,
         generalCategory: String,
@@ -612,7 +702,11 @@ struct CardBenefitsProfile: Codable, Equatable, Identifiable {
         case .points:
             return dollars * r
         case .cashback:
-            let factor = r > 1 ? r / 100 : r
+            // FIX: same 1% → 100% bug as earnFactor(forCategory:). Percent is the only
+            // stored form after migration, so divide unconditionally.
+            // OLD:
+            // let factor = r > 1 ? r / 100 : r
+            let factor = r / 100
             return dollars * factor
         }
     }
@@ -679,7 +773,10 @@ enum CardBenefitsStore {
     private static let key = "card.benefits.profiles.v1"
     private static let migrationVersionKey = "card.benefits.migration.v"
     /// Bump when migrateIfNeeded logic changes so old profiles re-run once.
-    private static let currentMigrationVersion = 6
+    /// v7: corrected catalog rates (CSP gas, CSR direct travel, Flex rotating, Amex transit /
+    /// fees / caps) plus the ratesCustomizedByUser guard around the catalog re-seed.
+    // OLD: private static let currentMigrationVersion = 6
+    private static let currentMigrationVersion = 7
     /// In-memory profiles after migration — avoid re-migrating + disk I/O on every tile.
     private static var memoryProfiles: [String: CardBenefitsProfile]?
     private static let memoryLock = NSLock()
@@ -823,13 +920,21 @@ enum CardBenefitsStore {
     }
 
     /// Configure BankAccount debit/ACH reward fields for X Money (and similar).
+    /// Seeds defaults only — never overwrites a rate the user typed in Card detail.
     static func applyDepositoryRailRewards(to account: BankAccount) {
         guard account.isDepository else { return }
         if account.institutionName.localizedCaseInsensitiveContains("x money")
             || account.displayName.localizedCaseInsensitiveContains("x money") {
-            // Percent form consistent with Benefits cash-back rates
-            account.debitRewardMultiplier = 3
-            account.achRewardMultiplier = 0
+            // FIX: this ran on every account upsert during Sync, so it reverted the
+            // debit/ACH rates the user saved in CardDetailView on the very next pull.
+            // Only fill the slots that are still empty.
+            // OLD:
+            // // Percent form consistent with Benefits cash-back rates
+            // account.debitRewardMultiplier = 3
+            // account.achRewardMultiplier = 0
+            // Percent form consistent with Benefits cash-back rates (3 = 3%, not 0.03).
+            if account.debitRewardMultiplier == nil { account.debitRewardMultiplier = 3 }
+            if account.achRewardMultiplier == nil { account.achRewardMultiplier = 0 }
         }
     }
 
@@ -1045,15 +1150,44 @@ enum CardBenefitsStore {
             p.defaultMultiplier = product.defaultRate
             p.pointValueCents = product.pointValueCents
             p.annualFee = product.annualFee
-            // Only keep rates that differ from default (flat cash-back cards stay clean)
-            p.categoryMultipliers = product.categoryRates.filter {
+            p.categoryCaps = product.categoryCaps.isEmpty ? nil : product.categoryCaps
+            // FIX: this block used to overwrite categoryMultipliers / merchantBoosts
+            // unconditionally, so every migration-version bump silently reverted rates the
+            // user had edited by hand. That broke the documented Freedom Flex workflow
+            // ("set Gas to 5x only while the quarterly category is active") — the next app
+            // update put 5x back. Now hand-edited profiles keep their rates and only pick up
+            // genuinely new catalog categories/partners they have never seen.
+            // OLD:
+            // // Only keep rates that differ from default (flat cash-back cards stay clean)
+            // p.categoryMultipliers = product.categoryRates.filter {
+            //     abs($0.value - product.defaultRate) > 0.000_1
+            // }
+            // // Merchant partners (Amazon 5% with many needles, Walgreens 3%, …)
+            // p.merchantBoosts = product.merchantBoosts.filter {
+            //     abs($0.rate - product.defaultRate) > 0.000_1
+            // }
+            // if p.merchantBoosts?.isEmpty == true { p.merchantBoosts = nil }
+            let seedCategories = product.categoryRates.filter {
                 abs($0.value - product.defaultRate) > 0.000_1
             }
-            // Merchant partners (Amazon 5% with many needles, Walgreens 3%, …)
-            p.merchantBoosts = product.merchantBoosts.filter {
+            let seedPartners = product.merchantBoosts.filter {
                 abs($0.rate - product.defaultRate) > 0.000_1
             }
-            if p.merchantBoosts?.isEmpty == true { p.merchantBoosts = nil }
+            if p.ratesCustomizedByUser == true {
+                // Additive only: never touch a key the user already has an opinion about.
+                for (name, rate) in seedCategories where p.categoryMultipliers[name] == nil {
+                    p.categoryMultipliers[name] = rate
+                }
+                var partners = p.partnerBoosts
+                for seed in seedPartners where !partners.contains(where: { $0.id == seed.id }) {
+                    partners.append(seed)
+                }
+                p.partnerBoosts = partners
+            } else {
+                p.categoryMultipliers = seedCategories
+                p.merchantBoosts = seedPartners
+                if p.merchantBoosts?.isEmpty == true { p.merchantBoosts = nil }
+            }
             p.merchantMultipliers = nil
             p.productDisplayName = product.displayName
             // Refresh canned perks when empty

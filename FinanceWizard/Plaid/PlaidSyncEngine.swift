@@ -1502,7 +1502,13 @@ enum PlaidSyncEngine {
                 } else if t.contains("balance_transfer") || t.contains("balance transfer") {
                     account.balanceTransferApr = pct
                 } else if t.contains("special") || t.contains("promo") {
-                    account.specialApr = pct
+                    // FIX: this assigned unconditionally, so with several special APRs —
+                    // routine on Amex, where each Plan It plan reports one — only the last
+                    // entry in the payload survived, and CardDetailView defaulted a promo
+                    // payoff plan off whichever one that happened to be. There is one slot,
+                    // so keep the lowest: that is the promo rate the user is tracking.
+                    // OLD: account.specialApr = pct
+                    account.specialApr = min(account.specialApr ?? pct, pct)
                 } else if account.purchaseApr == nil {
                     // Unknown type → first unknown becomes purchase APR so something shows.
                     account.purchaseApr = pct

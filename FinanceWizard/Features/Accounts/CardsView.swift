@@ -166,6 +166,10 @@ struct CardsView: View {
                                 installmentIncluded: PayoffPlanProgress.installmentIncludedInMin(
                                     on: account,
                                     plans: Array(payoffPlans)
+                                ),
+                                interestSavingBalance: PayoffPlanProgress.interestSavingBalance(
+                                    on: account,
+                                    plans: Array(payoffPlans)
                                 )
                             )
                         }
@@ -345,9 +349,11 @@ struct CardsView: View {
            let account = accounts.first(where: { $0.accountId == id }) {
             return account.institutionId
         }
+        // OLD: return payment.cardName.contains(mask)
         if let maskMatch = creditAccounts.first(where: { account in
             guard let mask = account.mask, !mask.isEmpty else { return false }
-            return payment.cardName.contains(mask)
+            // Standalone last-four only — see BankAccount.containsStandaloneMask.
+            return BankAccount.containsStandaloneMask(payment.cardName, mask: mask)
         }) {
             return maskMatch.institutionId
         }

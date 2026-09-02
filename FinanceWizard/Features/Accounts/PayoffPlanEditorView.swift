@@ -33,10 +33,16 @@ struct PayoffPlanEditorView: View {
     @State private var originalText: String = ""
     @State private var remainingText: String = ""
     @State private var monthlyText: String = ""
-    @State private var feeText: String = ""
+    // FIX: `feeText` was written and read but had no field anywhere in the Form, so
+    // monthlyFee was always nil for custom/promo plans. Issuer plans derive the fee from
+    // payment − principal, so no manual entry is needed at all. `hasEndDate` was likewise
+    // set in loadDraft but never gated anything — save() always wrote endDate for
+    // schedule-driven kinds. Both removed.
+    // OLD:
+    // @State private var feeText: String = ""
+    // @State private var hasEndDate = false
     @State private var aprText: String = ""
     @State private var startDate: Date = Date()
-    @State private var hasEndDate = false
     @State private var endDate: Date = Date()
     @State private var termText: String = ""
     @State private var notes: String = ""
@@ -169,12 +175,44 @@ struct PayoffPlanEditorView: View {
                 moneyField("Original amount", text: $originalText)
                 moneyField("Remaining", text: $remainingText)
                 moneyField("Monthly payment", text: $monthlyText)
-                if kind == .payOverTime {
-                    moneyField("Monthly fee", text: $feeText)
-                }
-                if kind == .myLoan || kind == .promoAPR {
+                if kind.followsCardStatement {
                     HStack {
-                        Text(kind == .promoAPR ? "Promo APR %" : "APR %")
+                        Text("Remaining months")
+                        Spacer()
+                        TextField("required", text: $termText)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 100)
+                    }
+                    if kind == .myLoan {
+                        HStack {
+                            Text("APR %")
+                            Spacer()
+                            TextField("from email", text: $aprText)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(maxWidth: 100)
+                        }
+                    }
+                    if let breakdown = issuerBreakdown {
+                        LabeledContent("Principal this statement") {
+                            MoneyText(breakdown.principal)
+                        }
+                        LabeledContent(kind == .payOverTime ? "Monthly fee" : "Interest this statement") {
+                            MoneyText(breakdown.fee)
+                                .foregroundStyle(breakdown.fee < -0.005 ? .red : .secondary)
+                        }
+                        if kind == .myLoan, aprText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           let apr = breakdown.apr {
+                            LabeledContent("Implied APR") {
+                                Text("\(apr.formatted(.number.precision(.fractionLength(0...2))))%")
+                            }
+                        }
+                    }
+                }
+                if kind == .promoAPR {
+                    HStack {
+                        Text("Promo APR %")
                         Spacer()
                         TextField("0", text: $aprText)
                             .keyboardType(.decimalPad)
@@ -198,14 +236,6 @@ struct PayoffPlanEditorView: View {
                         Text("Due on the same day as this card’s statement payment. It is included in the minimum due.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("Remaining months")
-                        Spacer()
-                        TextField("optional", text: $termText)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 100)
                     }
                 } header: {
                     Text("Card statement")
@@ -322,11 +352,11 @@ struct PayoffPlanEditorView: View {
     private var amountsFooter: some View {
         switch kind {
         case .payOverTime:
-            Text("The fee is added to each month’s bill and does not reduce remaining.")
+            Text("Monthly payment is what hits the statement. Fee is the rest after remaining ÷ months (principal). Fee is not principal.")
         case .promoAPR:
             Text("Set remaining to the promo balance (not the whole card). Monthly payment should clear it before the promo ends.")
         case .myLoan:
-            Text("Use the loan’s fixed payment and APR. Original amount should match the loan charge on the card.")
+            Text("From the loan email: amount, fixed APR, billing cycles, and monthly payment. Interest this statement is remaining × APR ÷ 12. Principal is the rest of the payment. The minimum due includes this payment.")
         case .custom:
             EmptyView()
         }
@@ -344,6 +374,30 @@ struct PayoffPlanEditorView: View {
         }
     }
 
+    private var issuerBreakdown: (principal: Double, fee: Double, apr: Double?)? {
+        guard kind.followsCardStatement,
+              let remaining = parseAmount(remainingText), remaining > 0,
+              let payment = parseAmount(monthlyText), payment > 0,
+              let months = Int(termText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              months > 0
+        else { return nil }
+        if kind == .myLoan {
+            let enteredAPR = parseOptionalAmount(aprText)
+            let apr = enteredAPR
+                ?? PayoffPlanMath.impliedAPR(payment: payment, remaining: remaining, months: months)
+            let interest = PayoffPlanMath.amortizingInterest(remaining: remaining, aprPercent: apr) ?? 0
+            return (payment - interest, interest, apr)
+        }
+        guard let principal = PayoffPlanMath.evenPrincipal(remaining: remaining, months: months),
+              let fee = PayoffPlanMath.impliedFee(payment: payment, remaining: remaining, months: months)
+        else { return nil }
+        return (principal, fee, nil)
+    }
+
+    /// FIX: both of these divided remaining by the payment and ignored the promo APR, so on
+    /// a non-zero APR the suggested payment left a balance when the promo expired and the
+    /// pace warning stayed silent. Both now amortise at the entered APR (0% is unchanged).
+    /// OLD: return remaining / Double(count)
     private var suggestedMonthly: Double? {
         guard showsSchedule, let remaining = parseAmount(remainingText), remaining > 0 else {
             return nil
@@ -356,16 +410,29 @@ struct PayoffPlanEditorView: View {
         ).month ?? 0
         let count = endDate < Date() ? 0 : max(1, months)
         guard count > 0 else { return nil }
-        return remaining / Double(count)
+        return PayoffPlanMath.levelPayment(
+            remaining: remaining,
+            months: count,
+            aprPercent: parseOptionalAmount(aprText)
+        )
     }
 
+    /// OLD: let months = Int(ceil(remaining / monthly))
     private var paceWarning: String? {
         guard showsSchedule,
               let remaining = parseAmount(remainingText), remaining > 0,
               let monthly = parseAmount(monthlyText), monthly > 0 else {
             return nil
         }
-        let months = Int(ceil(remaining / monthly))
+        let apr = parseOptionalAmount(aprText)
+        guard let months = PayoffPlanMath.monthsToPayOff(
+            remaining: remaining,
+            payment: monthly,
+            aprPercent: apr
+        ) else {
+            // Payment does not even cover one month of interest at this APR.
+            return "At this payment the balance never clears — it is below the monthly interest."
+        }
         guard let projected = Calendar.current.date(byAdding: .month, value: months, to: Date()) else {
             return nil
         }
@@ -383,11 +450,10 @@ struct PayoffPlanEditorView: View {
             originalText = formatMoney(plan.originalAmount)
             remainingText = formatMoney(plan.remainingAmount)
             monthlyText = formatMoney(plan.monthlyPayment)
-            feeText = plan.monthlyFee.map(formatMoney) ?? ""
+            // OLD: feeText = plan.monthlyFee.map(formatMoney) ?? ""
             aprText = plan.aprPercent.map { formatNumber($0) } ?? (plan.kind == .promoAPR ? "0" : "")
             startDate = plan.startDate
             if let end = plan.endDate {
-                hasEndDate = true
                 endDate = end
             }
             termText = plan.termMonths.map(String.init) ?? ""
@@ -410,10 +476,10 @@ struct PayoffPlanEditorView: View {
         } else if let apr = defaultApr {
             aprText = formatNumber(apr)
         }
-        hasEndDate = !defaultKind.followsCardStatement
+        // OLD: hasEndDate = !defaultKind.followsCardStatement
         if let end = defaultEndDate {
             endDate = end
-        } else if hasEndDate {
+        } else if !defaultKind.followsCardStatement {
             endDate = Calendar.current.date(byAdding: .month, value: 6, to: Date()) ?? Date()
         }
     }
@@ -440,9 +506,31 @@ struct PayoffPlanEditorView: View {
             saveError = "Monthly payment must be greater than 0."
             return
         }
-        let fee = parseOptionalAmount(feeText)
-        let apr = parseOptionalAmount(aprText)
         let term = Int(termText.trimmingCharacters(in: .whitespacesAndNewlines))
+        if kind.followsCardStatement {
+            guard let months = term, months > 0 else {
+                saveError = "Remaining months is required so fee and principal can be calculated."
+                return
+            }
+            if let fee = PayoffPlanMath.impliedFee(payment: monthly, remaining: remaining, months: months),
+               fee < -0.05 {
+                saveError = "Monthly payment is less than remaining ÷ months. Check remaining, months, or payment."
+                return
+            }
+        }
+        // OLD: guard kind.followsCardStatement else { return parseOptionalAmount(feeText) }
+        let fee: Double? = {
+            guard kind.followsCardStatement else { return nil }
+            return PayoffPlanMath.impliedFee(payment: monthly, remaining: remaining, months: term)
+        }()
+        let apr: Double? = {
+            if kind == .promoAPR { return parseOptionalAmount(aprText) ?? 0 }
+            if kind == .myLoan {
+                return parseOptionalAmount(aprText)
+                    ?? PayoffPlanMath.impliedAPR(payment: monthly, remaining: remaining, months: term)
+            }
+            return nil
+        }()
 
         let accountId = selectedAccountId.isEmpty ? defaultAccountId : selectedAccountId
         let method = paymentMethodLabel.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -456,9 +544,14 @@ struct PayoffPlanEditorView: View {
             plan.originalAmount = original
             plan.remainingAmount = ended ? 0 : remaining
             plan.monthlyPayment = monthly
-            plan.monthlyFee = kind == .payOverTime ? fee : nil
+            plan.monthlyFee = kind.followsCardStatement ? fee : nil
             plan.aprPercent = apr
-            plan.startDate = selectedAccount?.nextPaymentDueDate ?? startDate
+            // FIX: editing re-stamped startDate with whatever the card's due date happened
+            // to be at that moment. For a promo / custom plan startDate drives the whole
+            // schedule (nextMonthly walks from it), so every save nudged the schedule
+            // forward. An edit must not move a date the plan already has.
+            // OLD: plan.startDate = selectedAccount?.nextPaymentDueDate ?? startDate
+            plan.startDate = startDate
             plan.endDate = kind.followsCardStatement ? nil : endDate
             plan.termMonths = term
             plan.linkedTransactionId = linkedTransactionId
@@ -477,8 +570,11 @@ struct PayoffPlanEditorView: View {
                 originalAmount: original,
                 remainingAmount: ended ? 0 : remaining,
                 monthlyPayment: monthly,
-                monthlyFee: kind == .payOverTime ? fee : nil,
+                monthlyFee: kind.followsCardStatement ? fee : nil,
                 aprPercent: apr ?? (kind == .promoAPR ? 0 : nil),
+                // A brand-new plan still seeds from the card's due date — the form has no
+                // start-date field, and "due with the card" is the right default. Only the
+                // edit path above changed, so an existing schedule stops drifting.
                 startDate: selectedAccount?.nextPaymentDueDate ?? startDate,
                 endDate: kind.followsCardStatement ? nil : endDate,
                 termMonths: term,
