@@ -2,16 +2,18 @@
 //  VendorRulesStore.swift
 //  Finance Wizard
 //
-//  Local “learn” rules: vendor (+ optional card) → category / multiplier.
+//  Local “learn” rules: vendor (+ optional card) → category.
 //  Applied on Plaid sync when a row is not user-locked.
 //
-//  Example: user sets “STARBUCKS” on Chase Sapphire → Dining with 3x rewards.
-//  Next sync of that merchant reuses the learned category/multiplier.
+//  Example: user sets “STARBUCKS” on Chase Sapphire → Dining.
+//  Next sync of that merchant reuses the learned category.
 //
 
 import Foundation
 
-/// One learned mapping from a merchant (and optional card) to category + rewards multiplier.
+/// One learned mapping from a merchant (and optional card) to a spend category.
+/// `multiplier` was dropped with the rewards feature; older stored rules still decode
+/// because the extra JSON key is simply ignored.
 struct VendorRule: Codable, Equatable, Sendable {
     /// Normalized vendor name (lowercased, trimmed) used as the lookup key.
     var vendorKey: String
@@ -19,8 +21,6 @@ struct VendorRule: Codable, Equatable, Sendable {
     var paymentMethodKey: String
     /// App category name to apply (e.g. "Dining").
     var category: String
-    /// Rewards multiplier (e.g. 3.0 for 3x points).
-    var multiplier: Double
 }
 
 /// Persist and look up vendor learn-rules in UserDefaults.
@@ -48,8 +48,7 @@ enum VendorRulesStore {
     ///   - vendor: Merchant name (will be normalized).
     ///   - paymentMethod: Card/account label, or nil for “any card.”
     ///   - category: Category to apply on future syncs.
-    ///   - multiplier: Rewards multiplier to apply.
-    static func upsert(vendor: String, paymentMethod: String?, category: String, multiplier: Double) {
+    static func upsert(vendor: String, paymentMethod: String?, category: String) {
         let vKey = normalize(vendor)
         let pKey = paymentMethod.map { normalize($0) } ?? ""
         var rules = load()
@@ -57,14 +56,12 @@ enum VendorRulesStore {
             $0.vendorKey == vKey && $0.paymentMethodKey == pKey
         }) {
             rules[idx].category = category
-            rules[idx].multiplier = multiplier
         } else {
             rules.append(
                 VendorRule(
                     vendorKey: vKey,
                     paymentMethodKey: pKey,
-                    category: category,
-                    multiplier: multiplier
+                    category: category
                 )
             )
         }

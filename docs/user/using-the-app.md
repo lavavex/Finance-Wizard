@@ -33,7 +33,7 @@ Your charges and income for the selected period.
 
 **Needs review** — items that still need a category, rate, or bill-pay check. Swipe to fix.
 
-Tap a row for **Transaction** detail. You can change **category** and **points multiplier**. **Save** remembers that so later Syncs don’t overwrite it. Turn on **learn** to apply the same category to future charges from that merchant.
+Tap a row for **Transaction** detail. You can change the **category** and **payment method**. **Save** remembers that so later Syncs don’t overwrite it. Turn on **learn** to apply the same category to future charges from that merchant.
 
 **Recurring** on that screen: **Auto-detect**, **Yearly**, **Monthly**, **Weekly**, or **Not recurring**. Use **Monthly** or **Yearly** for bills whose amount changes, like phone and electric — the Recurring tab groups that merchant even when the dollar amount is different each time.
 
@@ -55,7 +55,7 @@ Credit cards plus checking and savings.
 
 Open a card to see **all** activity by **statement period** (not the Accounts week/month filter). The card row on Accounts and the card screen always show the same cycle: **This statement** while one is open, **Last statement** when nothing has posted since the close.
 
-On checking, you can set **Debit** vs **ACH** reward rates. These are **percent** — enter `3` for 3% cash back, not `0.03`. Pull down to Sync.
+Pull down to Sync.
 
 ### Loans, installments, and pay-off-by-date
 
@@ -70,19 +70,9 @@ On a **credit card**:
 
 Open a card from Accounts to see **all** activity grouped by **statement** (close day from the bank). The Accounts week/month filter does not apply on that screen.
 
-### Rewards on a card
-
-On a credit card you can pick a **product** (so rates match the real card), edit earn rates and boosts, and see estimated rewards vs annual fee. Transaction detail can lock **travel earn** (Auto / Portal / Direct), and shows the estimate in the card’s own units — **points** at that card’s point value (Chase Ultimate Rewards at 1.25¢) or **cash back** as dollars.
-
-There are two kinds of categories: **spend** categories (Dining, Gas, …) and **reward** categories (Drugstores, Travel portal, Flights, …). The app maps a purchase into a reward bucket for estimates. **Flights** is separate from **Travel (Other)** because several cards pay a flight-only rate (Amex Platinum 5x, Amex Gold 3x, Sapphire Reserve 4x) that does not apply to car rentals or cruises.
-
-**Rates you edit are yours.** Once you change a rate or a merchant boost on a card, app updates stop re-applying the built-in defaults over it — they only add categories the card has never had. Use a **temporary boost** with an end date for anything that rotates, such as the Chase Freedom Flex quarterly 5% category, so it expires by itself instead of paying 5x all year.
-
-Cards with a spend cap (Amex Blue Cash $6,000/yr, Amex Gold $25,000/yr supermarkets, Freedom Flex $1,500/quarter) carry that cap with the product, so estimates drop to the base rate past it.
-
 ## Ask
 
-Circular **Ask** button, bottom-right, above the tab bar (not a sixth tab — that would open iOS **More**). It reserves its own space, so it no longer covers the last row of a list or its swipe actions. On-device chat (Apple Intelligence). It looks up **totals, balances, recurring, and recent charges** when needed. Card names match the nicknames you set in Accounts (not the bank’s “Credit Card” label). Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
+Circular **Ask** button, bottom-right, above the tab bar (not a sixth tab — that would open iOS **More**). On-device chat (Apple Intelligence). It looks up **totals, balances, recurring, and recent charges** when needed. Card names match the nicknames you set in Accounts (not the bank’s “Credit Card” label). Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
 
 Transaction detail: **Suggest with Apple Intelligence** picks a category from the app’s list.
 

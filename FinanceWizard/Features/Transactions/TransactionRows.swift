@@ -90,14 +90,11 @@ struct TransactionRowView: View {
                     Text("Installment")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(CategoryStyle.services)
-                } else if transaction.multiplier > 0 {
-                    Text("\(transaction.multiplier.formatted())x")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 } else {
-                    Text("No rewards")
+                    Text(transaction.category)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
             }
         }

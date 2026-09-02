@@ -144,7 +144,7 @@ App Store Connect → your app → **Xcode Cloud** → workflow → **Environmen
 | SwiftData models + domain enums | `Shared/Models/` (both targets) |
 | ModelContainer / SharedStore | `Shared/Store/` |
 | Analytics, search, period helpers | `Shared/Analytics/` |
-| Card catalog / benefits / nicknames | `Shared/Cards/` |
+| Card nicknames | `Shared/Cards/` |
 | Category charts, icons, privacy UI | `Shared/UI/` |
 | Institution logos | `Shared/Branding/` |
 | Widget UI | `Widget/Widgets/` |

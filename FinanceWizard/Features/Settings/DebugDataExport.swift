@@ -176,8 +176,6 @@ enum DebugDataExporter {
         var balanceTransferApr: Double?
         var specialApr: Double?
         var liabilitiesSyncedAt: String?
-        var debitRewardMultiplier: Double?
-        var achRewardMultiplier: Double?
         var displayName: String
     }
 
@@ -189,9 +187,7 @@ enum DebugDataExporter {
         var date: String
         var category: String
         var paymentMethod: String
-        var multiplier: Double
         var categoryLocked: Bool?
-        var multiplierLocked: Bool?
         var overrideSource: String?
         var plaidPaymentChannel: String?
         var paymentRail: String?
@@ -319,8 +315,6 @@ enum DebugDataExporter {
                     balanceTransferApr: a.balanceTransferApr,
                     specialApr: a.specialApr,
                     liabilitiesSyncedAt: d(a.liabilitiesSyncedAt),
-                    debitRewardMultiplier: a.debitRewardMultiplier,
-                    achRewardMultiplier: a.achRewardMultiplier,
                     displayName: a.displayName
                 )
             }
@@ -335,9 +329,7 @@ enum DebugDataExporter {
                     date: dReq(t.date),
                     category: t.category,
                     paymentMethod: t.paymentMethod,
-                    multiplier: t.multiplier,
                     categoryLocked: t.categoryLocked,
-                    multiplierLocked: t.multiplierLocked,
                     overrideSource: t.overrideSource,
                     plaidPaymentChannel: t.plaidPaymentChannel,
                     paymentRail: t.paymentRail,

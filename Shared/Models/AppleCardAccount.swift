@@ -70,35 +70,6 @@ enum AppleCardAccount {
             modelContext.insert(account)
         }
 
-        // Benefits: Apple Card product @ 2% default (higher category rates win)
-        let existing = CardBenefitsStore.profile(
-            accountId: accountId,
-            paymentMethod: paymentMethod
-        )
-        if existing.productKey == nil || existing.productKey != productId,
-           let product = CardProductCatalog.product(id: productId) {
-            // Don't clobber user-edited rates if they already saved a custom profile
-            // without product key — only auto-apply when empty / unmatched.
-            if existing.productKey == nil,
-               existing.categoryMultipliers.isEmpty,
-               abs(existing.defaultMultiplier - 1) < 0.001 {
-                CardBenefitsStore.applyProduct(
-                    product,
-                    accountId: accountId,
-                    paymentMethod: paymentMethod,
-                    mask: nil
-                )
-            } else if existing.productKey == nil {
-                // Profile exists (method key) but no product — attach product rates
-                CardBenefitsStore.applyProduct(
-                    product,
-                    accountId: accountId,
-                    paymentMethod: paymentMethod,
-                    mask: nil
-                )
-            }
-        }
-
         // Bundled Apple mark (cleaned from screenshot) — not from Plaid
         InstitutionLogoCache.seedBundledLogos()
         // Do NOT re-walk every transaction here — that freezes the UI on launch.
@@ -132,27 +103,12 @@ enum AppleCardAccount {
         didEnsureThisSession = true
     }
 
-    /// Unlocked Apple Card rows → product rate (2% base or higher category).
+    /// Normalize the Apple Card payment-method label so account matching stays stable.
+    /// (Was `reapplyUnlockedMultipliers`, which also re-derived reward rates.)
     @MainActor
-    static func reapplyUnlockedMultipliers(in modelContext: ModelContext) {
+    static func normalizePaymentMethodLabels(in modelContext: ModelContext) {
         let all = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
-        let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         for tx in all where isAppleCard(paymentMethod: tx.paymentMethod) {
-            if tx.isMultiplierLocked { continue }
-            if TransactionAnalytics.isExcludedFromSpendCategory(tx.category) {
-                tx.multiplier = 0
-                continue
-            }
-            tx.multiplier = CardBenefitsStore.resolvedMultiplier(
-                accountId: accountId,
-                paymentMethod: paymentMethod,
-                generalCategory: tx.category,
-                title: tx.title,
-                accounts: accounts,
-                on: tx.date,
-                rewardCategoryOverride: tx.rewardCategoryOverride
-            )
-            // Normalize label so account matching is stable
             if tx.paymentMethod != paymentMethod {
                 tx.paymentMethod = paymentMethod
             }

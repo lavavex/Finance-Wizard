@@ -76,16 +76,6 @@ Those are card credits, not paychecks. Sync files them as **Refund** (not Total 
 
 Fixed. Any charge whose description contained **autopay** (VERIZON \*AUTOPAY, T‑MOBILE AUTOPAY, GEICO AUTOPAY) used to be filed as a credit‑card bill payment and dropped out of Total Spend and Budget. Those words now only count as a card payment on money **coming in** to a credit card, or when the description also names a card issuer. Pull down to **Sync** to re‑file older rows.
 
-### My card rates went back to the defaults after an update
-
-Fixed. App updates used to re-apply the built-in product rates over anything you had edited. Once you change a rate or merchant boost, updates leave it alone and only add categories your card has never had. For anything that rotates — the Freedom Flex quarterly 5% — use a **temporary boost** with the quarter’s end date so it expires on its own.
-
-One-time note: edits made **before** this release cannot be told apart from defaults, so they are re-seeded once. Re-apply them and they will stick from then on.
-
-### Cash back estimates looked far too high
-
-Fixed. Cards whose base rate is exactly 1% (Blue Cash Everyday and Preferred, Prime Visa, Amazon Visa) reported 100% back on non-category purchases. The estimate is correct now.
-
 ### Statement grouping looked wrong on a card that closes on the 29th–31st
 
 Fixed. Those cards produced windows stamped in the following month with a date range that did not match the rows under it. Statement periods now clamp to the length of each month, so February closes on the 28th (29th in a leap year) and the windows line up.
@@ -93,6 +83,12 @@ Fixed. Those cards produced windows stamped in the following month with a date r
 ### Phone or electric bill doesn’t show on Recurring
 
 Auto-detect looks for the **same amount** on a schedule, so a bill that changes each month may be missing. Open one of those charges → **Recurring** → **Monthly** (or **Yearly**) → **Save**. The Recurring tab groups that merchant even when the amount varies. **Not recurring** on a single charge hides only that row; **Not Recurring** on the Recurring tab hides the whole vendor.
+
+## Rewards
+
+Rewards tracking was removed. Finance Wizard focuses on spending, income, budgets and card
+debt; earn rates, points and statement credits are no longer tracked. Nothing else changed —
+your transactions, categories, budgets and payoff plans are untouched.
 
 ## Welcome screen
 

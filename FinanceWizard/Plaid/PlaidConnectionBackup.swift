@@ -21,7 +21,7 @@
 //  Restore safety (default = safeMerge):
 //  • NEVER overwrites an existing access_token already on this device
 //  • NEVER overwrites non-empty Plaid API secret / client_id already configured
-//  • Upserts app data by unique ids; preserves local category/multiplier/rail locks
+//  • Upserts app data by unique ids; preserves local category/rail locks
 //  • Never deletes local-only banks or rows that are absent from the backup
 //
 //  Use replaceConnections when the backup’s tokens/keys should win.
@@ -83,7 +83,6 @@ enum PlaidConnectionBackup {
         try modelContext.save()
         PlaidItemStore.removeAll()
         AppPreferenceBackup.wipe()
-        CardBenefitsStore.resetMemoryCache()
         InstitutionLogoCache.wipeAllLogoFiles()
         AskStore.wipe()
     }
@@ -140,7 +139,6 @@ enum PlaidConnectionBackup {
         var payoffPlans: [PayoffPlanSnapshot]?
         var cardLabels: [String: String]?
         var vendorRules: [VendorRule]?
-        var cardBenefitsProfiles: [CardBenefitsProfile]?
         var screenshotPrivacy: Bool?
         /// All UserDefaults keys with app prefixes (`plaid.`, `card.`, `settings.`).
         /// New prefs under those prefixes are included automatically.
@@ -175,14 +173,11 @@ enum PlaidConnectionBackup {
         var date: Date
         var category: String
         var paymentMethod: String
-        var multiplier: Double
         var categoryLocked: Bool?
-        var multiplierLocked: Bool?
         var overrideSource: String?
         var plaidPaymentChannel: String?
         var paymentRail: String?
         var paymentRailLocked: Bool?
-        var rewardCategoryOverride: String?
         var subscriptionCadenceOverride: String?
         var authorizedDate: Date?
         var pendingTransactionId: String?
@@ -237,8 +232,6 @@ enum PlaidConnectionBackup {
         var balanceTransferApr: Double?
         var specialApr: Double?
         var liabilitiesSyncedAt: Date?
-        var debitRewardMultiplier: Double?
-        var achRewardMultiplier: Double?
     }
 
     struct PaymentSnapshot: Codable, Equatable, Sendable {
@@ -317,7 +310,6 @@ enum PlaidConnectionBackup {
         var payoffPlanCount: Int
         var cardLabelCount: Int
         var vendorRuleCount: Int
-        var benefitsProfileCount: Int
         var isConnectionsOnly: Bool
 
         var itemsToAddCount: Int { itemsToAdd.count }
@@ -363,7 +355,6 @@ enum PlaidConnectionBackup {
             || !txs.isEmpty || !incomes.isEmpty || !accounts.isEmpty || !payments.isEmpty
             || !streams.isEmpty || !plans.isEmpty || !payoffs.isEmpty
             || !VendorRulesStore.load().isEmpty
-            || !CardBenefitsStore.allProfiles().isEmpty
             || !CardLabelStore.debugExportMap().isEmpty
 
         guard hasAnything else { throw BackupError.nothingToBackup }
@@ -404,7 +395,6 @@ enum PlaidConnectionBackup {
             payoffPlans: payoffs.map(snapshot(payoff:)),
             cardLabels: CardLabelStore.debugExportMap(),
             vendorRules: VendorRulesStore.load(),
-            cardBenefitsProfiles: CardBenefitsStore.allProfiles(),
             screenshotPrivacy: UserDefaults.standard.bool(forKey: ScreenshotPrivacy.storageKey),
             preferenceDefaults: AppPreferenceBackup.capture(),
             logoFiles: InstitutionLogoCache.exportAllLogoFiles()
@@ -502,7 +492,6 @@ enum PlaidConnectionBackup {
             payoffPlanCount: payload.payoffPlans?.count ?? 0,
             cardLabelCount: payload.cardLabels?.count ?? 0,
             vendorRuleCount: payload.vendorRules?.count ?? 0,
-            benefitsProfileCount: payload.cardBenefitsProfiles?.count ?? 0,
             isConnectionsOnly: isConnectionsOnly
         )
     }
@@ -563,11 +552,6 @@ enum PlaidConnectionBackup {
         if let rules = payload.vendorRules, !rules.isEmpty {
             mergeVendorRules(rules)
         }
-        if let profiles = payload.cardBenefitsProfiles, !profiles.isEmpty {
-            for profile in profiles {
-                CardBenefitsStore.save(profile)
-            }
-        }
         if let privacy = payload.screenshotPrivacy {
             // Only set if true in backup or local never customized — always restore the value for full restore feel.
             UserDefaults.standard.set(privacy, forKey: ScreenshotPrivacy.storageKey)
@@ -576,7 +560,6 @@ enum PlaidConnectionBackup {
         if policy.wipesLocalData {
             if let prefs = payload.preferenceDefaults, !prefs.isEmpty {
                 AppPreferenceBackup.restore(prefs)
-                CardBenefitsStore.resetMemoryCache()
             }
             if let logos = payload.logoFiles, !logos.isEmpty {
                 InstitutionLogoCache.importLogoFiles(logos)
@@ -764,9 +747,7 @@ private extension PlaidConnectionBackup {
     /// Preserve user locks on the device; fill other fields from backup.
     static func mergeTransaction(live: Transaction, from row: TransactionSnapshot) {
         let keepCategory = live.isCategoryLocked
-        let keepMultiplier = live.isMultiplierLocked
         let keepRail = live.paymentRailLocked == true
-        let keepReward = !(live.rewardCategoryOverride ?? "").isEmpty
         let keepSub = !(live.subscriptionCadenceOverride ?? "").isEmpty
 
         if !keepCategory {
@@ -775,10 +756,6 @@ private extension PlaidConnectionBackup {
             live.categoryLocked = row.categoryLocked
             live.overrideSource = row.overrideSource
         }
-        if !keepMultiplier {
-            live.multiplier = row.multiplier
-            live.multiplierLocked = row.multiplierLocked
-        }
         live.amount = row.amount
         live.date = row.date
         live.paymentMethod = row.paymentMethod
@@ -786,9 +763,6 @@ private extension PlaidConnectionBackup {
             live.plaidPaymentChannel = row.plaidPaymentChannel
             live.paymentRail = row.paymentRail
             live.paymentRailLocked = row.paymentRailLocked
-        }
-        if !keepReward {
-            live.rewardCategoryOverride = row.rewardCategoryOverride
         }
         if !keepSub {
             live.subscriptionCadenceOverride = row.subscriptionCadenceOverride
@@ -812,14 +786,11 @@ private extension PlaidConnectionBackup {
             date: row.date,
             category: row.category,
             paymentMethod: row.paymentMethod,
-            multiplier: row.multiplier,
             categoryLocked: row.categoryLocked ?? false,
-            multiplierLocked: row.multiplierLocked ?? false,
             overrideSource: row.overrideSource,
             plaidPaymentChannel: row.plaidPaymentChannel,
             paymentRail: row.paymentRail,
             paymentRailLocked: row.paymentRailLocked ?? false,
-            rewardCategoryOverride: row.rewardCategoryOverride,
             subscriptionCadenceOverride: row.subscriptionCadenceOverride,
             authorizedDate: row.authorizedDate,
             pendingTransactionId: row.pendingTransactionId,
@@ -905,13 +876,6 @@ private extension PlaidConnectionBackup {
                 live.balanceTransferApr = row.balanceTransferApr
                 live.specialApr = row.specialApr
                 live.liabilitiesSyncedAt = row.liabilitiesSyncedAt
-                // Prefer local reward overrides when already set.
-                if live.debitRewardMultiplier == nil {
-                    live.debitRewardMultiplier = row.debitRewardMultiplier
-                }
-                if live.achRewardMultiplier == nil {
-                    live.achRewardMultiplier = row.achRewardMultiplier
-                }
             } else {
                 modelContext.insert(
                     BankAccount(
@@ -939,9 +903,7 @@ private extension PlaidConnectionBackup {
                         cashApr: row.cashApr,
                         balanceTransferApr: row.balanceTransferApr,
                         specialApr: row.specialApr,
-                        liabilitiesSyncedAt: row.liabilitiesSyncedAt,
-                        debitRewardMultiplier: row.debitRewardMultiplier,
-                        achRewardMultiplier: row.achRewardMultiplier
+                        liabilitiesSyncedAt: row.liabilitiesSyncedAt
                     )
                 )
             }
@@ -1155,14 +1117,11 @@ private extension PlaidConnectionBackup {
             date: t.date,
             category: t.category,
             paymentMethod: t.paymentMethod,
-            multiplier: t.multiplier,
             categoryLocked: t.categoryLocked,
-            multiplierLocked: t.multiplierLocked,
             overrideSource: t.overrideSource,
             plaidPaymentChannel: t.plaidPaymentChannel,
             paymentRail: t.paymentRail,
             paymentRailLocked: t.paymentRailLocked,
-            rewardCategoryOverride: t.rewardCategoryOverride,
             subscriptionCadenceOverride: t.subscriptionCadenceOverride,
             authorizedDate: t.authorizedDate,
             pendingTransactionId: t.pendingTransactionId,
@@ -1220,9 +1179,7 @@ private extension PlaidConnectionBackup {
             cashApr: a.cashApr,
             balanceTransferApr: a.balanceTransferApr,
             specialApr: a.specialApr,
-            liabilitiesSyncedAt: a.liabilitiesSyncedAt,
-            debitRewardMultiplier: a.debitRewardMultiplier,
-            achRewardMultiplier: a.achRewardMultiplier
+            liabilitiesSyncedAt: a.liabilitiesSyncedAt
         )
     }
 

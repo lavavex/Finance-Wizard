@@ -2,7 +2,7 @@
 //  TransactionDetailView.swift
 //  Finance Wizard
 //
-//  Tap a transaction → view details, edit category / multiplier (local only).
+//  Tap a transaction → view details, edit category and payment rail (local only).
 //
 
 import SwiftUI
@@ -17,10 +17,7 @@ struct TransactionDetailView: View {
 
     // Local drafts: Save copies onto the model. Separate so back-navigation doesn’t persist half-edits.
     @State private var categoryText: String = ""
-    @State private var multiplierText: String = ""
     @State private var selectedRail: PaymentRail = .other
-    /// nil = auto from general category + title; else locked reward bucket name
-    @State private var rewardOverrideMode: RewardTravelMode = .auto
     @State private var subscriptionMode: SubscriptionDeclareMode = .auto
     @State private var learn = true
     @State private var scopePaymentMethod = true
@@ -37,22 +34,6 @@ struct TransactionDetailView: View {
     @Query private var allTransactions: [Transaction]
     @Query private var bankAccounts: [BankAccount]
     @Query private var payoffPlans: [PayoffPlan]
-
-    /// Rewards profile for the card this purchase is on — drives the estimate section's
-    /// units (points vs cash back) and point valuation.
-    private var rewardProfile: CardBenefitsProfile {
-        CardBenefitsStore.profile(
-            accountId: transaction.plaidAccountId,
-            paymentMethod: transaction.paymentMethod,
-            accounts: Array(bankAccounts)
-        )
-    }
-
-    /// "1¢" / "1.25¢" for the estimate label.
-    private var pointValueLabel: String {
-        let cents = rewardProfile.pointValueCents
-        return "\(cents.formatted(.number.precision(.fractionLength(0...2))))¢"
-    }
 
     /// User control for subscription radar (yearly is the common missing case).
     private enum SubscriptionDeclareMode: String, CaseIterable, Identifiable {
@@ -96,24 +77,6 @@ struct TransactionDetailView: View {
         }
     }
 
-    /// Travel-specific reward bucket (portal vs direct) when the general category is Travel.
-    private enum RewardTravelMode: String, CaseIterable, Identifiable {
-        case auto
-        case portal
-        case otherTravel
-        case clear
-
-        var id: String { rawValue }
-
-        var label: String {
-            switch self {
-            case .auto: return "Auto"
-            case .portal: return "Portal"
-            case .otherTravel: return "Direct / other"
-            case .clear: return "Auto"
-            }
-        }
-    }
 
     private var selectedPreset: String? {
         categoryOptions.first { $0 == categoryText }
@@ -142,47 +105,6 @@ struct TransactionDetailView: View {
         if suggestedPayoffKind != nil || linkedPayoffPlan != nil { return false }
         let category = categoryText.isEmpty ? transaction.category : categoryText
         return !TransactionAnalytics.isExcludedFromSpendCategory(category)
-    }
-
-    private var benefitsProfile: CardBenefitsProfile {
-        CardBenefitsStore.profile(
-            accountId: linkedAccount?.accountId,
-            paymentMethod: transaction.paymentMethod,
-            accounts: bankAccounts
-        )
-    }
-
-    // Maps general spend category (+ optional override) into a reward earn bucket.
-    private var mappedRewardCategory: RewardCategory {
-        if rewardOverrideMode == .portal { return .travelPortal }
-        if rewardOverrideMode == .otherTravel { return .travelOther }
-        if let raw = transaction.rewardCategoryOverride,
-           let match = RewardCategory.allCases.first(where: {
-               $0.rawValue.caseInsensitiveCompare(raw) == .orderedSame
-           }) {
-            return match
-        }
-        return RewardCategory.forTransaction(
-            generalCategory: categoryText.isEmpty ? transaction.category : categoryText,
-            title: transaction.title
-        )
-    }
-
-    private var suggestedRewardRate: Double {
-        benefitsProfile.rate(
-            forCategory: mappedRewardCategory.rawValue,
-            on: transaction.date
-        )
-    }
-
-    // Show the travel earn picker only when travel-related.
-    private var showsTravelRewardPicker: Bool {
-        let general = (categoryText.isEmpty ? transaction.category : categoryText).lowercased()
-        let reward = mappedRewardCategory
-        return general.contains("travel")
-            || reward == .travelPortal
-            || reward == .travelOther
-            || transaction.rewardCategoryOverride != nil
     }
 
     var body: some View {
@@ -246,7 +168,7 @@ struct TransactionDetailView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
-                if transaction.isCategoryLocked || transaction.isMultiplierLocked || transaction.isPaymentRailLocked {
+                if transaction.isCategoryLocked || transaction.isPaymentRailLocked {
                     LabeledContent("Locked") {
                         Text(lockSummary)
                             .font(.caption)
@@ -293,58 +215,16 @@ struct TransactionDetailView: View {
             }
 
             Section {
-                LabeledContent("Earn bucket") {
-                    HStack(spacing: 6) {
-                        Image(systemName: CategoryStyle.symbolName(forReward: mappedRewardCategory.rawValue))
-                            .foregroundStyle(CategoryStyle.color(forReward: mappedRewardCategory.rawValue))
-                        Text(mappedRewardCategory.rawValue)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.trailing)
-                    }
-                }
-                LabeledContent("Card rate") {
-                    Text(benefitsProfile.formatRate(suggestedRewardRate))
-                        .foregroundStyle(.secondary)
-                }
-
-                if showsTravelRewardPicker {
-                    Picker("Travel earn", selection: $rewardOverrideMode) {
-                        Text("Auto").tag(RewardTravelMode.auto)
-                        Text("Portal").tag(RewardTravelMode.portal)
-                        Text("Direct / other").tag(RewardTravelMode.otherTravel)
-                    }
-                    .onChange(of: rewardOverrideMode) { _, mode in
-                        applyTravelModeToMultiplier(mode)
-                    }
-                }
-
                 Picker("Payment rail", selection: $selectedRail) {
                     ForEach(PaymentRail.allCases) { rail in
                         Label(rail.displayName, systemImage: rail.systemImage)
                             .tag(rail)
                     }
                 }
-                .onChange(of: selectedRail) { _, newRail in
-                    if !transaction.isMultiplierLocked,
-                       let suggested = linkedAccount?.rewardMultiplier(for: newRail) {
-                        multiplierText = formatMultiplier(suggested)
-                    }
-                }
-
-                HStack {
-                    Text("Points / rewards mult.")
-                    Spacer()
-                    TextField("1", text: $multiplierText)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(maxWidth: 100)
-                    Text(benefitsProfile.rewardKind.rateSuffix)
-                        .foregroundStyle(.secondary)
-                }
             } header: {
-                Text("Rewards")
+                Text("Payment method")
             } footer: {
-                Text("How this card pays points or cash back. Separate from the spend category above.")
+                Text("How the money left the account — card swipe versus bank transfer.")
             }
 
             if showsRecurringPicker {
@@ -398,40 +278,6 @@ struct TransactionDetailView: View {
                 Text("Remember")
             }
 
-            // FIX: this always said "Points" and always valued them at 1¢, whatever the
-            // card was. On a cash-back card a 3% rate rendered as "Points 300" for a $100
-            // purchase, and on a Chase UR card it undervalued by 20% — the catalog stores
-            // Ultimate Rewards at 1.25¢/pt and the screen ignored it. Read the card's own
-            // reward kind and point value instead.
-            // OLD:
-            // Section("Points (estimate)") {
-            //     let points = abs(transaction.amount) * (Double(multiplierText…) ?? transaction.multiplier)
-            //     LabeledContent("Points") { Text(points, format: …) }
-            //     LabeledContent("~ Value @ 1¢/pt") { MoneyText(points * 0.01) }
-            // }
-            Section(rewardProfile.rewardKind == .points ? "Points (estimate)" : "Cash back (estimate)") {
-                let rate = Double(multiplierText.replacingOccurrences(of: ",", with: "."))
-                    ?? transaction.multiplier
-                let spend = abs(transaction.amount)
-                switch rewardProfile.rewardKind {
-                case .points:
-                    let points = spend * rate
-                    LabeledContent("Points") {
-                        Text(points, format: .number.precision(.fractionLength(0...2)))
-                    }
-                    LabeledContent("~ Value @ \(pointValueLabel)/pt") {
-                        MoneyText(points * (rewardProfile.pointValueCents / 100))
-                    }
-                case .cashback:
-                    LabeledContent("Rate") {
-                        Text("\(rate.formatted(.number.precision(.fractionLength(0...2))))%")
-                    }
-                    LabeledContent("~ Cash back") {
-                        MoneyText(spend * rate / 100)
-                    }
-                }
-            }
-
             if didSave {
                 Section {
                     Label(saveStatusMessage ?? "Saved on this device", systemImage: "checkmark.circle.fill")
@@ -474,20 +320,8 @@ struct TransactionDetailView: View {
         }
         .onAppear {
             categoryText = transaction.category
-            multiplierText = formatMultiplier(transaction.multiplier)
             selectedRail = transaction.effectivePaymentRail
             subscriptionMode = .from(transaction: transaction)
-            if let raw = transaction.rewardCategoryOverride {
-                if raw.caseInsensitiveCompare(RewardCategory.travelPortal.rawValue) == .orderedSame {
-                    rewardOverrideMode = .portal
-                } else if raw.caseInsensitiveCompare(RewardCategory.travelOther.rawValue) == .orderedSame {
-                    rewardOverrideMode = .otherTravel
-                } else {
-                    rewardOverrideMode = .auto
-                }
-            } else {
-                rewardOverrideMode = .auto
-            }
             var merged = KnownCategory.defaultNames
             if !merged.contains(transaction.category), !transaction.category.isEmpty {
                 merged.insert(transaction.category, at: 0)
@@ -499,7 +333,6 @@ struct TransactionDetailView: View {
     private var lockSummary: String {
         var parts: [String] = []
         if transaction.isCategoryLocked { parts.append("category") }
-        if transaction.isMultiplierLocked { parts.append("multiplier") }
         if transaction.isPaymentRailLocked { parts.append("rail") }
         return parts.joined(separator: " + ")
     }
@@ -517,30 +350,6 @@ struct TransactionDetailView: View {
         )
     }
 
-    private func formatMultiplier(_ value: Double) -> String {
-        // Whole numbers show without decimals (“3” not “3.0”).
-        if value.rounded() == value {
-            return String(Int(value))
-        }
-        return value.formatted()
-    }
-
-    /// When travel mode changes, rewrite the multiplier draft to the card’s rate for that bucket.
-    private func applyTravelModeToMultiplier(_ mode: RewardTravelMode) {
-        let reward: RewardCategory = {
-            switch mode {
-            case .portal: return .travelPortal
-            case .otherTravel: return .travelOther
-            case .auto, .clear:
-                return RewardCategory.forTransaction(
-                    generalCategory: categoryText.isEmpty ? transaction.category : categoryText,
-                    title: transaction.title
-                )
-            }
-        }()
-        let rate = benefitsProfile.rate(forCategory: reward.rawValue, on: transaction.date)
-        multiplierText = formatMultiplier(rate)
-    }
 
     @MainActor
     private func suggestCategoryFromModel() async {
@@ -565,14 +374,6 @@ struct TransactionDetailView: View {
             return
         }
 
-        let normalized = multiplierText
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: ",", with: ".")
-        guard let multiplier = Double(normalized), multiplier >= 0 else {
-            saveError = "Multiplier must be a number 0 or greater."
-            return
-        }
-
         isSaving = true
         defer { isSaving = false }
 
@@ -581,19 +382,9 @@ struct TransactionDetailView: View {
 
             // Local row — lock fields so future Plaid syncs don’t overwrite user choices.
             transaction.category = trimmedCategory
-            transaction.multiplier = multiplier
             transaction.categoryLocked = true
-            transaction.multiplierLocked = true
             transaction.paymentRail = selectedRail.rawValue
             transaction.paymentRailLocked = true
-            switch rewardOverrideMode {
-            case .portal:
-                transaction.rewardCategoryOverride = RewardCategory.travelPortal.rawValue
-            case .otherTravel:
-                transaction.rewardCategoryOverride = RewardCategory.travelOther.rawValue
-            case .auto, .clear:
-                transaction.rewardCategoryOverride = nil
-            }
             transaction.subscriptionCadenceOverride = subscriptionMode.storageValue
             transaction.overrideSource = "user"
             propagateRecurringCadence()
@@ -606,17 +397,13 @@ struct TransactionDetailView: View {
                 VendorRulesStore.upsert(
                     vendor: transaction.title,
                     paymentMethod: cardScoped ? transaction.paymentMethod : nil,
-                    category: trimmedCategory,
-                    multiplier: multiplier
+                    category: trimmedCategory
                 )
             }
 
             var localExtra = 0
             if applyToMatching {
-                localExtra = applyLocalMatching(
-                    category: trimmedCategory,
-                    multiplier: multiplier
-                )
+                localExtra = applyLocalMatching(category: trimmedCategory)
             }
 
             try modelContext.save()
@@ -682,9 +469,9 @@ struct TransactionDetailView: View {
         }
     }
 
-    /// Apply category/multiplier to other transactions with the same title + card.
+    /// Apply the category to other transactions with the same title + card.
     @discardableResult
-    private func applyLocalMatching(category: String, multiplier: Double) -> Int {
+    private func applyLocalMatching(category: String) -> Int {
         let vendor = transaction.title
         let card = transaction.paymentMethod
         var count = 0
@@ -695,9 +482,7 @@ struct TransactionDetailView: View {
             guard row.paymentMethod.caseInsensitiveCompare(card) == .orderedSame else { continue }
 
             row.category = category
-            row.multiplier = multiplier
             row.categoryLocked = true
-            row.multiplierLocked = true
             row.subscriptionCadenceOverride = subscriptionMode.storageValue
             row.overrideSource = "user"
             count += 1

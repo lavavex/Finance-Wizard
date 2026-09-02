@@ -28,15 +28,11 @@ struct CardDetailView: View {
     @State private var nicknameDraft: String = ""
     @State private var didSaveNickname = false
     @State private var titleName: String = ""
-    @State private var debitMultText: String = ""
-    @State private var achMultText: String = ""
-    @State private var didSaveRewards = false
     @State private var showAddPayoff = false
     /// FIX: the "Saved" confirmations used detached Task.sleep calls that kept running
     /// after the view was popped and then wrote to @State on a dead view. Held here so
     /// they can be cancelled on disappear and replaced instead of stacking up.
     @State private var savedNameResetTask: Task<Void, Never>?
-    @State private var savedRewardsResetTask: Task<Void, Never>?
 
     // Always have at least the raw method in the set used to filter purchases.
     private var methods: Set<String> {
@@ -263,50 +259,6 @@ struct CardDetailView: View {
                 Text("Summary")
             }
 
-            if let bank = bankAccount, bank.isDepository || creditAccount == nil && bankAccount != nil {
-                if bank.isDepository {
-                    // FIX: these fields are stored as percent (X Money seeds 3 = 3%, and
-                    // PlaidSyncEngine writes the value straight onto Transaction.multiplier
-                    // alongside cash-back percents), but the UI prompted for "0.03" and
-                    // labelled the unit "×". Anyone following the placeholder saved 0.03%.
-                    // OLD: TextField("e.g. 0.03", …) with a trailing Text("×")
-                    Section {
-                        HStack {
-                            Text("Debit card rewards")
-                            Spacer()
-                            TextField("e.g. 3", text: $debitMultText)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(maxWidth: 100)
-                            Text("%")
-                                .foregroundStyle(.secondary)
-                        }
-                        HStack {
-                            Text("ACH rewards")
-                            Spacer()
-                            TextField("e.g. 0", text: $achMultText)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(maxWidth: 100)
-                            Text("%")
-                                .foregroundStyle(.secondary)
-                        }
-                        Button("Save rewards") {
-                            saveRewardMultipliers()
-                        }
-                        if didSaveRewards {
-                            Label("Saved", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .font(.caption)
-                        }
-                    } header: {
-                        Text("Debit vs ACH rewards")
-                    } footer: {
-                        Text("Cash back earned on this account's own card and ACH spend. 3 means 3%.")
-                    }
-                }
-            }
-
             if let credit = creditAccount, credit.hasLiabilitiesDetails {
                 Section {
                     if credit.isOverdue == true {
@@ -487,14 +439,9 @@ struct CardDetailView: View {
         .onAppear {
             titleName = displayName
             nicknameDraft = displayName
-            if let bank = bankAccount {
-                debitMultText = formatOptionalMult(bank.debitRewardMultiplier)
-                achMultText = formatOptionalMult(bank.achRewardMultiplier)
-            }
         }
         .onDisappear {
             savedNameResetTask?.cancel()
-            savedRewardsResetTask?.cancel()
         }
     }
 
@@ -526,36 +473,7 @@ struct CardDetailView: View {
         }
     }
 
-    /// Write debit/ACH reward multipliers onto the BankAccount and save SwiftData.
-    private func saveRewardMultipliers() {
-        guard let bank = bankAccount else { return }
-        bank.debitRewardMultiplier = parseOptionalMult(debitMultText)
-        bank.achRewardMultiplier = parseOptionalMult(achMultText)
-        try? modelContext.save()
-        didSaveRewards = true
-        onNicknameChanged?()
-        // OLD: Task { try? await Task.sleep(…); didSaveRewards = false }
-        savedRewardsResetTask?.cancel()
-        savedRewardsResetTask = Task {
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard !Task.isCancelled else { return }
-            didSaveRewards = false
-        }
-    }
 
-    /// Empty string when nil; otherwise a compact number string for the TextField.
-    private func formatOptionalMult(_ value: Double?) -> String {
-        guard let value else { return "" }
-        return value.formatted(.number.precision(.fractionLength(0...4)))
-    }
-
-    /// Parse TextField text into Double?; blank → nil (clear the stored rate).
-    private func parseOptionalMult(_ text: String) -> Double? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: ",", with: ".")
-        if trimmed.isEmpty { return nil }
-        return Double(trimmed)
-    }
 
     private func formatAPR(_ value: Double) -> String {
         "\(value.formatted(.number.precision(.fractionLength(0...2))))%"

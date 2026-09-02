@@ -79,9 +79,17 @@ Should not happen if upsert by `transactionId` works. Re-linking can mint new Pl
 
 `PlaidCategoryMapper.looksLikeCardPaymentTitle(_:allowWeakSignals:)` splits its needles. Strong ones (“payment thank you”, “credit card payment”, “payment to <issuer>”, `looksLikeIssuerBillPayTitle`) always count. Weak ones — `autopay`, `automatic payment`, `ach pmt`, `payment received` — are ordinary merchant-descriptor words and only count when `allowWeakSignals` is true, which `isCreditCardPayment` passes **only** for money-in on a credit account. Do not move a needle back into the unconditional set without checking it against real utility / phone / insurance descriptors.
 
-### A rate is wrong for one card
+### Where did rewards go?
 
-Fix `CardProductCatalog`, then bump `CardBenefitsStore.currentMigrationVersion` so saved profiles re-run `migrateIfNeeded`. The re-seed is **additive** for profiles with `ratesCustomizedByUser == true`: it adds catalog categories they have never had but never overwrites an existing key. Non-customised profiles are replaced wholesale, which is how a catalog correction reaches existing users.
+Removed. `CardBenefitsStore`, `CardProductCatalog` and `RewardCategory` are deleted, along
+with `Transaction.multiplier` / `multiplierLocked` / `rewardCategoryOverride`,
+`BankAccount.debitRewardMultiplier` / `achRewardMultiplier`, and `VendorRule.multiplier`.
+The app tracks spending, income, budgets and card debt — not earn rates.
+
+SwiftData drops the removed columns by lightweight migration; this was verified against a
+real 3,268-transaction store with no row loss. Older `.fwbackup` files still restore: the
+extra JSON keys are ignored on decode. Vendor learn-rules likewise keep working, since the
+stored `multiplier` key is simply no longer read.
 
 ### Statement periods look off
 

@@ -17,7 +17,6 @@ Defined in `Shared/Models/Transaction.swift`.
 | `date` | `Date` | Parsed from `YYYY-MM-DD` |
 | `category` | `String` | Budget category (e.g. Dining, Gas (Car)). **Loan** / **Refund** / **Installment** / **Credit Card Payment** are excluded from Total Spend. |
 | `paymentMethod` | `String` | Card / account name |
-| `multiplier` | `Double` | Points rate (e.g. 5 = 5x) |
 | `subscriptionCadenceOverride` | `String?` | Recurring: `nil` = auto; `"yearly"` / `"monthly"` / `"weekly"` = treat that vendor as recurring (amount may vary); `"cancelled"` / `"none"` (Not Recurring); cleared in Debug |
 
 ### Amount sign convention (expenses)
@@ -69,7 +68,7 @@ JSON field names use snake_case (`transaction_id`, `account_name`, `payment_meth
 On **Plaid Sync** (`PlaidSyncEngine`):
 
 1. For each linked Item, page through `/transactions/sync`.  
-2. Expenses (`amount ≥ 0`) → upsert `Transaction` (stored negative); honor category/multiplier locks.  
+2. Expenses (`amount ≥ 0`) → upsert `Transaction` (stored negative); honor category locks.  
 3. Income (`amount < 0`) → upsert `Income` (stored positive).  
 4. Removed ids → delete local rows.  
 5. Persist cursor; `modelContext.save()`; reload widgets.
@@ -122,22 +121,6 @@ Card bill payments only (`Shared/Models/CreditCardPayment.swift`). Never counted
 Payoff projections are amortised, not `remaining ÷ payment`: `PayoffPlanMath.monthsToPayOff(remaining:payment:aprPercent:)` returns `nil` when the payment does not cover one month of interest (the balance never clears), and `levelPayment(remaining:months:aprPercent:)` sizes a payment that finishes on time at a given APR. Both fall back to the plain division at 0%.
 
 `startDate` is only overwritten with the card’s `nextPaymentDueDate` for issuer kinds (`followsCardStatement`). Promo / custom plans keep the date the user chose, because `nextPaymentDate` walks their schedule from it.
-
-## Card rewards: `CardBenefitsProfile`
-
-Stored as JSON in UserDefaults (`Shared/Cards/CardBenefitsStore.swift`), keyed `account:<plaid id>` or `method:<label>`.
-
-| Property | Notes |
-|----------|--------|
-| `defaultMultiplier` | Points `x`, or cash back as **percent** (`3` = 3%, never `0.03`) |
-| `categoryMultipliers` | `RewardCategory` name → rate, overrides only |
-| `merchantBoosts` | Partner merchants: one label, many title needles |
-| `temporaryBoosts` | Time-boxed rate with an end date — use for rotating quarterly categories |
-| `categoryCaps` | Reward category → capped spend per window in USD; past it the base rate applies |
-| `ratesCustomizedByUser` | Set by any hand edit. Blocks the catalog re-seed in `migrateIfNeeded` so app updates cannot revert user rates (they may only **add** unseen categories) |
-| `pointValueCents` | Cents per point for USD estimates (Chase UR `1.25`, Amex MR `1.0`) |
-
-Cash-back rates are stored as percent throughout; `earnFactor` divides by 100 unconditionally. (It previously guarded on `rate > 1`, which read an exact `1` as the fraction `1.0` and reported 100% back on every 1%-base card.) Cap-aware totals come from `cappedRewardUnits(spendDollars:category:priorCategorySpend:)`; the per-transaction multiplier stamped at Sync time has no year-to-date context and stays uncapped.
 
 ## App Group store
 

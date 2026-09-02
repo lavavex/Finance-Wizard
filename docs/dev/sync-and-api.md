@@ -138,7 +138,7 @@ Plaid amount convention:
 
 Editing a transaction **Save**s on device only:
 
-- Sets `categoryLocked` / `multiplierLocked` so later syncs do not overwrite.  
+- Sets `categoryLocked` so later syncs do not overwrite.  
 - Optional **learn** stores a vendor rule (`VendorRulesStore`) applied on future Plaid upserts.
 
 ## File import

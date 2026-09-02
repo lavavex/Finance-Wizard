@@ -887,7 +887,6 @@ private struct PlaidRestorePlanSheet: View {
                         LabeledContent("Payoff plans", value: "\(plan.payoffPlanCount)")
                         LabeledContent("Nicknames", value: "\(plan.cardLabelCount)")
                         LabeledContent("Vendor rules", value: "\(plan.vendorRuleCount)")
-                        LabeledContent("Card benefits", value: "\(plan.benefitsProfileCount)")
                     } header: {
                         Text(policy.wipesLocalData ? "App data (replace)" : "App data (upsert)")
                     }

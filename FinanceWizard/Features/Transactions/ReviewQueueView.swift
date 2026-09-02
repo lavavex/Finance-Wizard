@@ -66,24 +66,6 @@ struct ReviewQueueView: View {
                                 }
                                 .tint(.orange)
                             }
-                            if item.reasons.contains(.unlockedDefaultMultiplier) {
-                                Button("Lock rate") {
-                                    lockCurrentRate(item.transaction)
-                                }
-                                .tint(.gray)
-                            }
-                        }
-                        .swipeActions(edge: .leading) {
-                            if item.reasons.contains(.ambiguousRail) {
-                                Button("Debit") {
-                                    setRail(item.transaction, .debit)
-                                }
-                                .tint(.green)
-                                Button("ACH") {
-                                    setRail(item.transaction, .ach)
-                                }
-                                .tint(.purple)
-                            }
                         }
                     }
                 }
@@ -101,30 +83,9 @@ struct ReviewQueueView: View {
     private func markBillPay(_ tx: Transaction) {
         tx.category = KnownCategory.creditCardPayment.rawValue
         tx.categoryLocked = true
-        tx.multiplier = 0
-        tx.multiplierLocked = true
         tx.overrideSource = "user"
         mirrorPayment(tx)
         save("Marked as Credit Card Payment")
-    }
-
-    private func lockCurrentRate(_ tx: Transaction) {
-        tx.multiplierLocked = true
-        tx.categoryLocked = true
-        tx.overrideSource = "user"
-        save("Locked rate on \(tx.title)")
-    }
-
-    private func setRail(_ tx: Transaction, _ rail: PaymentRail) {
-        tx.paymentRail = rail.rawValue
-        tx.paymentRailLocked = true
-        if let account = BankAccount.matching(paymentMethod: tx.paymentMethod, in: bankAccounts),
-           let mult = account.rewardMultiplier(for: rail) {
-            tx.multiplier = mult
-            tx.multiplierLocked = true
-        }
-        tx.overrideSource = "user"
-        save("Set \(rail.shortLabel) on \(tx.title)")
     }
 
     /// Upsert a CreditCardPayment that mirrors this bill-pay transaction.
@@ -190,8 +151,6 @@ private struct ReviewQueueRow: View {
                 Text("·")
                 Text(item.transaction.date, style: .date)
                 Spacer()
-                Text("\(item.transaction.multiplier.formatted())x")
-                    .foregroundStyle(.secondary)
             }
             .font(.caption)
             .foregroundStyle(.secondary)

@@ -2,16 +2,15 @@
 //  ReviewQueueAnalytics.swift
 //  Finance Wizard
 //
-//  “Needs review” queue: unlocked defaults, ambiguous rails, bill-pay
-//  candidates, and weak categories.
+//  “Needs review” queue: bill-pay candidates and weak categories.
+//  The rewards-driven reasons (unlocked rate, ambiguous debit/ACH rail) were
+//  removed with the rewards feature — nothing depends on the rail rate now.
 //
 
 import Foundation
 
 /// Why a transaction landed in the review queue.
 enum ReviewQueueReason: String, CaseIterable, Identifiable, Sendable {
-    case unlockedDefaultMultiplier
-    case ambiguousRail
     case billPayCandidate
     case weakCategory
 
@@ -19,8 +18,6 @@ enum ReviewQueueReason: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .unlockedDefaultMultiplier: return "Check rate"
-        case .ambiguousRail: return "Debit or transfer?"
         case .billPayCandidate: return "Bill pay?"
         case .weakCategory: return "Category"
         }
@@ -28,8 +25,6 @@ enum ReviewQueueReason: String, CaseIterable, Identifiable, Sendable {
 
     var systemImage: String {
         switch self {
-        case .unlockedDefaultMultiplier: return "number.circle"
-        case .ambiguousRail: return "arrow.left.arrow.right.circle"
         case .billPayCandidate: return "creditcard.circle"
         case .weakCategory: return "questionmark.circle"
         }
@@ -37,10 +32,6 @@ enum ReviewQueueReason: String, CaseIterable, Identifiable, Sendable {
 
     var shortHint: String {
         switch self {
-        case .unlockedDefaultMultiplier:
-            return "Rewards rate not locked; Sync may overwrite"
-        case .ambiguousRail:
-            return "Debit vs ACH unclear (matters for debit cashback)"
         case .billPayCandidate:
             return "Looks like a card payment but isn’t bill pay"
         case .weakCategory:
@@ -68,8 +59,6 @@ enum ReviewQueueAnalytics {
         let cutoff = cal.date(byAdding: .day, value: -120, to: Date()) ?? .distantPast
         let recent = spend.filter { $0.date >= cutoff }
 
-        // Cache profiles so we do not rebuild the same card benefits for every row.
-        var profileCache: [String: CardBenefitsProfile] = [:]
         var rows: [ReviewQueueItem] = []
 
         for tx in recent {
@@ -80,12 +69,6 @@ enum ReviewQueueAnalytics {
             }
             if looksBillPayCandidate(tx) {
                 reasons.append(.billPayCandidate)
-            }
-            if looksAmbiguousRail(tx, accounts: accounts) {
-                reasons.append(.ambiguousRail)
-            }
-            if looksUnlockedDefault(tx, accounts: accounts, profileCache: &profileCache) {
-                reasons.append(.unlockedDefaultMultiplier)
             }
 
             if !reasons.isEmpty {
@@ -125,61 +108,5 @@ enum ReviewQueueAnalytics {
             "epay", "e-pay", "epmt", "ach payment"
         ]
         return needles.contains { t.contains($0) }
-    }
-
-    /// Debit vs ACH unclear on a rewards checking account where the two rates differ.
-    private static func looksAmbiguousRail(_ tx: Transaction, accounts: [BankAccount]) -> Bool {
-        guard let account = BankAccount.matching(paymentMethod: tx.paymentMethod, in: accounts),
-              account.isDepository else {
-            return false
-        }
-        let debit = account.debitRewardMultiplier
-        let ach = account.achRewardMultiplier
-        let railsDiffer: Bool = {
-            if let debit, let ach, abs(debit - ach) > 0.0001 { return true }
-            return CardBenefitsStore.hasDebitRewards(account)
-        }()
-        guard railsDiffer else { return false }
-        if tx.isPaymentRailLocked { return false }
-        return tx.effectivePaymentRail == .other
-    }
-
-    /// Multiplier looks like a stale default (not locked, and does not match the profile).
-    private static func looksUnlockedDefault(
-        _ tx: Transaction,
-        accounts: [BankAccount],
-        profileCache: inout [String: CardBenefitsProfile]
-    ) -> Bool {
-        if tx.isMultiplierLocked { return false }
-        if TransactionAnalytics.isExcludedFromSpendCategory(tx.category) { return false }
-
-        let account = BankAccount.matching(paymentMethod: tx.paymentMethod, in: accounts)
-        guard CardBenefitsStore.isRewardsEligible(account: account, paymentMethod: tx.paymentMethod) else {
-            return false
-        }
-
-        let cacheKey = account?.accountId ?? tx.paymentMethod
-        let profile: CardBenefitsProfile = {
-            if let cached = profileCache[cacheKey] { return cached }
-            let p = CardBenefitsStore.profile(
-                accountId: account?.accountId,
-                paymentMethod: tx.paymentMethod,
-                accounts: accounts
-            )
-            profileCache[cacheKey] = p
-            return p
-        }()
-
-        let expected = profile.rate(
-            forTransactionCategory: tx.category,
-            title: tx.title,
-            on: tx.date
-        )
-        let stored = tx.multiplier
-        if abs(stored - expected) > 0.05 { return true }
-        if profile.rewardKind == .points, abs(stored - 1) < 0.001, abs(profile.defaultMultiplier - 1) > 0.05 {
-            return true
-        }
-        return false
     }
 }

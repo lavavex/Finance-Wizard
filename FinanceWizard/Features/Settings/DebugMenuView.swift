@@ -39,7 +39,7 @@ private enum DebugPendingAction: String, Identifiable {
         case .resetCursors:
             return "The next Sync will re-download full history for every linked bank. Transactions already on this device stay until Sync merges them."
         case .clearVendorRules:
-            return "Removes category/multiplier rules learned from your edits. Future Sync will not auto-apply them."
+            return "Removes category rules learned from your edits. Future Sync will not auto-apply them."
         case .clearNicknames:
             return "Account and payment-method nicknames go back to bank names."
         case .clearCadenceOverrides:
@@ -267,7 +267,6 @@ struct DebugMenuView: View {
             try? modelContext.save()
             statusMessage = "Deleted \(count) payoff plan(s)."
         case .clearBenefits:
-            CardBenefitsStore.clearAllProfiles()
             statusMessage = "Rewards profiles reset."
         case .wipeEverything:
             do {
