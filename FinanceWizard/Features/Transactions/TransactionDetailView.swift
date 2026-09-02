@@ -28,8 +28,19 @@ struct TransactionDetailView: View {
     @State private var didSave = false
     @State private var saveStatusMessage: String?
     @State private var isSuggestingCategory = false
-    @State private var showPayoffEditor = false
-    @State private var payoffEditorKind: PayoffPlanKind = .payOverTime
+    /// FIX: this was `showPayoffEditor: Bool` + a separate `payoffEditorKind`, set in the same
+    /// button action. `.sheet(isPresented:)` can build its content before the companion state
+    /// lands, so the editor opened with the stale default — a My Chase Loan charge created a
+    /// `payOverTime` plan with a flat monthly fee instead of a `myLoan` plan with an APR, and
+    /// the whole payoff schedule was wrong. Carrying the kind *with* the presentation via
+    /// `.sheet(item:)` makes that impossible to get wrong.
+    @State private var payoffEditorRequest: PayoffEditorRequest?
+
+    /// Identity wrapper so the editor's kind travels with the sheet presentation.
+    private struct PayoffEditorRequest: Identifiable {
+        let id = UUID()
+        let kind: PayoffPlanKind
+    }
 
     @Query private var allTransactions: [Transaction]
     @Query private var bankAccounts: [BankAccount]
@@ -251,8 +262,7 @@ struct TransactionDetailView: View {
                         }
                     } else if let kind = suggestedPayoffKind {
                         Button(kind == .myLoan ? "My Loan…" : "Pay over time…") {
-                            payoffEditorKind = kind
-                            showPayoffEditor = true
+                            payoffEditorRequest = PayoffEditorRequest(kind: kind)
                         }
                     }
                 } header: {
@@ -287,10 +297,10 @@ struct TransactionDetailView: View {
         }
         .navigationTitle("Transaction")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showPayoffEditor) {
+        .sheet(item: $payoffEditorRequest) { request in
             NavigationStack {
                 PayoffPlanEditorView(
-                    defaultKind: payoffEditorKind,
+                    defaultKind: request.kind,
                     defaultName: transaction.title,
                     defaultAccountId: linkedAccount?.accountId,
                     defaultPaymentMethod: transaction.paymentMethod,
@@ -380,17 +390,38 @@ struct TransactionDetailView: View {
         do {
             let cardScoped = scopePaymentMethod || applyToMatching
 
-            // Local row — lock fields so future Plaid syncs don’t overwrite user choices.
-            transaction.category = trimmedCategory
-            transaction.categoryLocked = true
-            transaction.paymentRail = selectedRail.rawValue
-            transaction.paymentRailLocked = true
-            transaction.subscriptionCadenceOverride = subscriptionMode.storageValue
-            transaction.overrideSource = "user"
+            // FIX: Save used to rewrite and lock every field unconditionally and stamp
+            // overrideSource = "user". Opening a row and pressing Save with no edits therefore
+            // froze it against all future Sync corrections, and it erased provenance markers —
+            // a My Chase Loan charge adopted by the payoff editor ("my-loan") became "user",
+            // which is how a $4,000 loan picked up a bill-payment row. Only touch what changed.
+            let categoryChanged =
+                trimmedCategory.caseInsensitiveCompare(transaction.category) != .orderedSame
+            let railChanged = selectedRail != transaction.effectivePaymentRail
+            let cadenceChanged = subscriptionMode.storageValue != transaction.subscriptionCadenceOverride
+
+            if categoryChanged {
+                transaction.category = trimmedCategory
+                transaction.categoryLocked = true
+            }
+            if railChanged {
+                transaction.paymentRail = selectedRail.rawValue
+                transaction.paymentRailLocked = true
+            }
+            if cadenceChanged {
+                transaction.subscriptionCadenceOverride = subscriptionMode.storageValue
+            }
+            // Provenance survives a no-op save; a real edit is the user's.
+            if categoryChanged || railChanged || cadenceChanged {
+                transaction.overrideSource = "user"
+            }
             propagateRecurringCadence()
 
-            // Keep CreditCardPayment table + spend exclusion in sync with category choice
-            syncCreditPaymentRecord(for: transaction, category: trimmedCategory)
+            // Keep CreditCardPayment table + spend exclusion in sync with the category choice.
+            // Only when it actually moved — this is what mirrors (or drops) the payment row.
+            if categoryChanged {
+                syncCreditPaymentRecord(for: transaction, category: trimmedCategory)
+            }
 
             // Learn rule for future Plaid syncs (skip bill-payment category)
             if learn, !TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {

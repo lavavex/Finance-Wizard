@@ -131,6 +131,20 @@ bill-payment row for it — re-inflating Total paid by the charge amount. The gu
 `cleanLegacyMisclassifiedRows` drops payment rows left behind by the old behaviour: a
 transaction excluded from spend but *not* categorised Credit Card Payment must not have one.
 
+### Transaction detail: Save must not rewrite what it did not change
+
+`saveEdits` used to set every field, lock category and rail, and stamp
+`overrideSource = "user"` unconditionally. Two consequences: opening a row and pressing Save
+with no edits froze it against all future Sync corrections, and it erased provenance markers —
+a My Chase Loan charge adopted by the payoff editor (`"my-loan"`) became `"user"`. It now
+compares against the model and only touches fields that actually moved.
+
+Presenting the payoff editor uses `.sheet(item:)`, not `.sheet(isPresented:)` plus a companion
+`@State` for the kind. The old pair was set in one button action and SwiftUI could build the
+sheet before the kind landed, so a My Chase Loan opened the editor as **Pay Over Time** — a
+flat-fee plan instead of an APR one, with the wrong principal/interest split every cycle. Keep
+any value the sheet needs inside the `item`.
+
 ### Card financing fees
 
 `PLAN FEE - <merchant>` (My Chase Plan) and `ANNUAL MEMBERSHIP FEE` map to **Fees**, not

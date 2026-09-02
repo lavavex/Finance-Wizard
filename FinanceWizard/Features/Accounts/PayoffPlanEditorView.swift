@@ -69,8 +69,15 @@ struct PayoffPlanEditorView: View {
         return transactions.first { $0.transactionId == id }
     }
 
+    /// FIX: an existing plan's kind was fixed forever (`[existing.kind]`), so a plan created
+    /// as the wrong product had to be deleted and rebuilt. The two issuer products differ only
+    /// in how the monthly amount splits — My Loan is APR-based, Pay Over Time is a flat plan
+    /// fee — so switching between them is a legitimate correction.
+    /// OLD: if let existing { return [existing.kind] }
     private var availableKinds: [PayoffPlanKind] {
-        if let existing { return [existing.kind] }
+        if let existing {
+            return existing.kind.followsCardStatement ? [.myLoan, .payOverTime] : [existing.kind]
+        }
         if defaultKind.followsCardStatement { return [defaultKind] }
         return [.promoAPR, .custom]
     }
@@ -317,6 +324,17 @@ struct PayoffPlanEditorView: View {
         .onChange(of: kind) { _, newKind in
             if newKind == .promoAPR, aprText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 aprText = "0"
+            }
+            // Switching an existing plan to My Loan needs an APR; seed it from the payment,
+            // remaining and term so the split is sensible before the user types the real rate.
+            if newKind == .myLoan, aprText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let remaining = parseAmount(remainingText),
+               let payment = parseAmount(monthlyText),
+               let months = Int(termText.trimmingCharacters(in: .whitespacesAndNewlines)),
+               let implied = PayoffPlanMath.impliedAPR(
+                    payment: payment, remaining: remaining, months: months
+               ) {
+                aprText = formatNumber((implied * 100).rounded() / 100)
             }
         }
         .sheet(isPresented: $showTransactionPicker) {
