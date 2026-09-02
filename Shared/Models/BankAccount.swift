@@ -3,7 +3,7 @@
 //  Finance Wizard
 //
 //  Linked Plaid accounts with balances + credit Liabilities fields.
-//  One row per bank/credit account the user has connected (or Apple Card synthetic).
+//  One row per bank/credit account the user has connected.
 //
 
 import Foundation
@@ -239,10 +239,6 @@ final class BankAccount {
         // alone as a last-four group.
         // OLD: if let mask, !mask.isEmpty, m.contains(mask) { return true }
         if let mask, !mask.isEmpty, Self.containsStandaloneMask(m, mask: mask) { return true }
-        // Synthetic Apple Card account matches CSV / Wallet payment method
-        if AppleCardAccount.isAppleCard(account: self), AppleCardAccount.isAppleCard(paymentMethod: method) {
-            return true
-        }
         return false
     }
 

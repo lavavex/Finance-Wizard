@@ -193,10 +193,9 @@ struct AccountsBoard {
             )
         }
 
-        // Orphan spend methods — purchase methods with no linked BankAccount (except Apple Card handling)
+        // Orphan spend methods — purchase methods with no linked BankAccount
         let orphanMethods = index.spendByMethod.keys
             .filter { !claimed.contains($0) }
-            .filter { !AppleCardAccount.isAppleCard(paymentMethod: $0) }
             .sorted()
         for method in orphanMethods {
             let entry = index.spendByMethod[method] ?? .init(spend: 0, count: 0)

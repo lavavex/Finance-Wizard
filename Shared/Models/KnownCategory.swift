@@ -45,7 +45,7 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
     case loan = "Loan"
     /// Merchant refund / statement credit on a card (not earnings, not spend).
     case refund = "Refund"
-    /// Apple Card monthly installment billing rows (original purchase already counted).
+    /// Instalment billing of a purchase already counted (My Chase Plan, Amex Plan It).
     case installment = "Installment"
 
     /// Bill pays — excluded from Total Spend / Budget spend.
@@ -82,7 +82,7 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
         case .miscellaneous: return "Everything else"
         case .loan: return "My Loan / cash from a card’s credit line (not spend)"
         case .refund: return "Card credits and merchant refunds (not earnings)"
-        case .installment: return "Apple Card monthly installment billings (not new spend)"
+        case .installment: return "Monthly installment billings (not new spend)"
         case .creditCardPayment: return "Card bill payments (not spend)"
         }
     }

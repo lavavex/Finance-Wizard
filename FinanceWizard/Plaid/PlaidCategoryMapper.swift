@@ -164,8 +164,11 @@ enum PlaidCategoryMapper {
     }
 
     /// Public wrapper for legacy cleanup / UI.
-    static func looksLikeCardPaymentTitlePublic(_ lower: String) -> Bool {
-        looksLikeCardPaymentTitle(lower)
+    /// FIX: the parameter was named `lower` and every literal inside is lowercase, but one
+    /// call site (`upsertExpense`) passed the raw-cased title, so the guard silently returned
+    /// false for "Payment Thank You". Lowercase here rather than trusting six call sites.
+    static func looksLikeCardPaymentTitlePublic(_ title: String) -> Bool {
+        looksLikeCardPaymentTitle(title.lowercased())
     }
 
     /// Strong title heuristics that usually mean “this is a card bill payment.”

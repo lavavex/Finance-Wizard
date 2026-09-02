@@ -3,7 +3,7 @@
 //  Finance Wizard
 //
 //  Calendar toolbar control: week / month / all, plus a list of months
-//  when “Month” is selected so you can jump to past Apple Card months.
+//  when “Month” is selected so you can jump to past months.
 //
 
 import SwiftUI

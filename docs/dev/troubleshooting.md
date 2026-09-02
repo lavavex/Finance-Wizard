@@ -145,6 +145,19 @@ sheet before the kind landed, so a My Chase Loan opened the editor as **Pay Over
 flat-fee plan instead of an APR one, with the wrong principal/interest split every cycle. Keep
 any value the sheet needs inside the `item`.
 
+### Everything is dated a day early / lands in the wrong month
+
+Plaid sends calendar days ("2026-09-01"), not instants. `PlaidSyncEngine.dayFormatter` and
+`ContentView.parseExportDate` must parse them in `TimeZone.current`, because every consumer
+(`TransactionAnalytics.dateInterval`, `StatementCycle.group`, `daysUntilDue`, `Text(style:.date)`)
+reads them with `Calendar.current`. Parsing at UTC midnight put every row on the previous local
+day west of Greenwich: September spend counted in August, due dates shown a day early, statement
+close days one short.
+
+Rows written before that fix sit at UTC midnight. `reanchorStoredDays` re-stamps them to local
+midnight of their intended day, gated on `dayAnchorVersion`. It only touches values sitting
+exactly on a UTC midnight, so real timestamps are safe and re-running is a no-op.
+
 ### Card financing fees
 
 `PLAN FEE - <merchant>` (My Chase Plan) and `ANNUAL MEMBERSHIP FEE` map to **Fees**, not

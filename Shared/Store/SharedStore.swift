@@ -205,7 +205,7 @@ enum TransactionAnalytics {
     nonisolated static let loanCategory = "Loan"
     /// Card statement credit / merchant refund — not spend and not income.
     nonisolated static let refundCategory = "Refund"
-    /// Apple Card monthly installment billing — original purchase already counted.
+    /// Monthly installment billing — original purchase already counted.
     nonisolated static let installmentCategory = "Installment"
 
     /// Categories excluded from Total Spend, charts, and card spend rollups.
@@ -574,7 +574,6 @@ enum SharedStore {
         BankAccount.self,
         CreditCardPayment.self,
         BudgetPlan.self,
-        RecurringStream.self,
         PayoffPlan.self
     ])
 
@@ -586,7 +585,6 @@ enum SharedStore {
         try context.delete(model: BankAccount.self)
         try context.delete(model: CreditCardPayment.self)
         try context.delete(model: BudgetPlan.self)
-        try context.delete(model: RecurringStream.self)
         try context.delete(model: PayoffPlan.self)
     }
 

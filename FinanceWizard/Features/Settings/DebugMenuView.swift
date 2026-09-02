@@ -15,7 +15,6 @@ private enum DebugPendingAction: String, Identifiable {
     case clearLogos
     case resetBudget
     case clearPayoffPlans
-    case clearBenefits
     case wipeEverything
 
     var id: String { rawValue }
@@ -29,7 +28,6 @@ private enum DebugPendingAction: String, Identifiable {
         case .clearLogos: return "Clear cached logos?"
         case .resetBudget: return "Reset budget plan?"
         case .clearPayoffPlans: return "Delete payoff plans?"
-        case .clearBenefits: return "Reset card rewards profiles?"
         case .wipeEverything: return "Wipe all local data?"
         }
     }
@@ -50,8 +48,6 @@ private enum DebugPendingAction: String, Identifiable {
             return "Deletes the saved monthly cap, category limits, and expected income. A blank plan is created."
         case .clearPayoffPlans:
             return "Removes My Loan, Pay Over Time, and promo APR payoff plans. Cards and charges are unchanged."
-        case .clearBenefits:
-            return "Removes saved rewards profiles. Defaults rebuild the next time a card is opened."
         case .wipeEverything:
             return "Deletes transactions, income, accounts, budget, linked banks, prefs, and logos on this device. Plaid Dashboard is unchanged. You will need to link banks again."
         }
@@ -73,7 +69,6 @@ struct DebugMenuView: View {
     @Query private var accounts: [BankAccount]
     @Query private var payments: [CreditCardPayment]
     @Query private var budgetPlans: [BudgetPlan]
-    @Query private var recurringStreams: [RecurringStream]
     @Query private var payoffPlans: [PayoffPlan]
 
     @AppStorage(OnboardingStore.storageKey) private var onboardingCompleted = false
@@ -125,7 +120,6 @@ struct DebugMenuView: View {
                 LabeledContent("Accounts", value: "\(accounts.count)")
                 LabeledContent("Card payments", value: "\(payments.count)")
                 LabeledContent("Budget plans", value: "\(budgetPlans.count)")
-                LabeledContent("Recurring streams", value: "\(recurringStreams.count)")
                 LabeledContent("Payoff plans", value: "\(payoffPlans.count)")
                 LabeledContent("Recurring marks", value: "\(cadenceOverrideCount)")
                 LabeledContent("Linked banks", value: "\(linkedBanks.count)")
@@ -152,7 +146,6 @@ struct DebugMenuView: View {
                 Button("Clear cached logos") { pending = .clearLogos }
                 Button("Reset budget plan") { pending = .resetBudget }
                 Button("Delete payoff plans") { pending = .clearPayoffPlans }
-                Button("Reset card rewards profiles") { pending = .clearBenefits }
             } header: {
                 Text("Reset pieces")
             }
@@ -266,8 +259,6 @@ struct DebugMenuView: View {
             }
             try? modelContext.save()
             statusMessage = "Deleted \(count) payoff plan(s)."
-        case .clearBenefits:
-            statusMessage = "Rewards profiles reset."
         case .wipeEverything:
             do {
                 try PlaidConnectionBackup.wipeLocalAppData(modelContext: modelContext)

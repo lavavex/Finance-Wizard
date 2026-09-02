@@ -18,7 +18,6 @@
 //        apply added+modified rows; delete removed ids; save cursor.
 //     f. Institution logo branding.
 //     g. /liabilities/get → APR / due dates on credit accounts.
-//     h. /transactions/recurring/get → subscription/payroll streams.
 //  5. modelContext.save() + reload all widgets.
 //
 
@@ -40,7 +39,6 @@ struct PlaidSyncReport: Sendable {
     var cleanedLegacy: Int = 0
     var accountsUpdated: Int = 0
     var liabilitiesUpdated: Int = 0
-    var recurringStreams: Int = 0
     var refreshedItems: Int = 0
     var warnings: [String] = []
 
@@ -56,7 +54,6 @@ struct PlaidSyncReport: Sendable {
         if cleanedLegacy > 0 { lines.append("Removed mis-filed transfers: \(cleanedLegacy)") }
         if accountsUpdated > 0 { lines.append("Accounts refreshed: \(accountsUpdated)") }
         if liabilitiesUpdated > 0 { lines.append("Credit details refreshed: \(liabilitiesUpdated)") }
-        if recurringStreams > 0 { lines.append("Recurring streams: \(recurringStreams)") }
         if refreshedItems > 0 { lines.append("Forced bank refresh: \(refreshedItems)") }
         if removed > 0 { lines.append("Removed by bank: \(removed)") }
         if !warnings.isEmpty {
@@ -136,6 +133,11 @@ enum PlaidSyncEngine {
         // ~20 string ops each, so it grew with history and re-ran on every sync. The rules it
         // applies only change when the classifier changes — run it once per classifier version.
         VendorRulesStore.removeBillPayMisrules()
+        // Rows stored before day strings were parsed locally sit at UTC midnight — a day early.
+        if UserDefaults.standard.integer(forKey: dayAnchorVersionKey) < dayAnchorVersion {
+            _ = reanchorStoredDays(modelContext: modelContext)
+            UserDefaults.standard.set(dayAnchorVersion, forKey: dayAnchorVersionKey)
+        }
         if UserDefaults.standard.integer(forKey: legacyCleanupVersionKey) < legacyCleanupVersion {
             report.cleanedLegacy = cleanLegacyMisclassifiedRows(modelContext: modelContext)
             UserDefaults.standard.set(legacyCleanupVersion, forKey: legacyCleanupVersionKey)
@@ -166,7 +168,6 @@ enum PlaidSyncEngine {
                 report.skippedTransfers += itemReport.skippedTransfers
                 report.accountsUpdated += itemReport.accountsUpdated
                 report.liabilitiesUpdated += itemReport.liabilitiesUpdated
-                report.recurringStreams += itemReport.recurringStreams
                 report.refreshedItems += itemReport.refreshedItems
                 report.warnings.append(contentsOf: itemReport.warnings)
                 report.itemLines.append(
@@ -452,29 +453,6 @@ enum PlaidSyncEngine {
             }
         }
 
-        // --- Step G: Recurring streams (subscriptions / payroll) — optional add-on ---
-        progress?("\(item.institutionName): recurring…")
-        do {
-            report.recurringStreams = try await syncRecurringStreams(
-                item: item,
-                modelContext: modelContext
-            )
-        } catch {
-            if case PlaidAPIError.http(_, let code, _) = error,
-               let code, softProductCodes.contains(code) {
-                // Recurring is an add-on; stay quiet unless not-ready (retry later).
-                if code == "PRODUCT_NOT_READY" || code == "ITEM_PRODUCT_NOT_READY" {
-                    report.warnings.append(
-                        "\(item.institutionName): recurring streams still preparing."
-                    )
-                }
-            } else {
-                report.warnings.append(
-                    "\(item.institutionName) recurring: \(error.localizedDescription)"
-                )
-            }
-        }
-
         return report
     }
 
@@ -660,8 +638,15 @@ enum PlaidSyncEngine {
             existing.plaidPaymentChannel = channel
             applyEnrichment(to: existing, from: tx, authorizedDate: authorizedDate, isPending: pending)
             // Purchases Plaid tagged as CREDIT_CARD_PAYMENT (e.g. Best Buy in-store).
+            // FIX: this is the same rescue as in cleanLegacyMisclassifiedRows, and the
+            // `!looksLikeNonSpendTitle` guard added there was never mirrored here — so a
+            // transfer-worded bill pay reaching this path would have its payment row deleted
+            // and its category unlocked. It also ignored the user's category lock, which the
+            // block below honours. Both corrected.
             if TransactionAnalytics.isCreditCardPaymentCategory(existing.category),
-               !PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(title) {
+               !existing.isCategoryLocked,
+               !PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(title),
+               !PlaidCategoryMapper.looksLikeNonSpendTitle(title) {
                 existing.category = mappedCategory
                 existing.categoryLocked = false
                 existing.overrideSource = nil
@@ -993,95 +978,6 @@ enum PlaidSyncEngine {
 
     // MARK: - Recurring streams
 
-    /// Pull `/transactions/recurring/get` and upsert local `RecurringStream` rows for this Item.
-    /// Streams no longer returned by Plaid for this Item are deleted locally.
-    @MainActor
-    @discardableResult
-    private static func syncRecurringStreams(
-        item: PlaidLinkedItem,
-        modelContext: ModelContext
-    ) async throws -> Int {
-        let response = try await PlaidAPIClient.transactionsRecurringGet(
-            accessToken: item.accessToken
-        )
-        let now = Date()
-        var seen = Set<String>()
-        var count = 0
-
-        func upsert(_ stream: PlaidRecurringStream, direction: String) {
-            let id = stream.stream_id
-            seen.insert(id)
-            var descriptor = FetchDescriptor<RecurringStream>(
-                predicate: #Predicate<RecurringStream> { row in
-                    row.streamId == id
-                }
-            )
-            descriptor.fetchLimit = 1
-
-            let avg = abs(stream.average_amount?.amount ?? 0)
-            let last = abs(stream.last_amount?.amount ?? 0)
-            let firstDate = stream.first_date.flatMap(parseDate)
-            let lastDate = stream.last_date.flatMap(parseDate)
-            let isActive = stream.is_active ?? (stream.status?.uppercased() != "TOMBSTONED")
-            let ids = stream.transaction_ids ?? []
-
-            if let existing = try? modelContext.fetch(descriptor).first {
-                existing.itemId = item.id
-                existing.direction = direction
-                existing.streamDescription = stream.description ?? existing.streamDescription
-                existing.merchantName = stream.merchant_name
-                existing.averageAmount = avg
-                existing.lastAmount = last
-                existing.frequency = stream.frequency ?? existing.frequency
-                existing.firstDate = firstDate
-                existing.lastDate = lastDate
-                existing.isActive = isActive
-                existing.transactionIdsJSON = try? JSONEncoder().encode(ids)
-                existing.accountId = stream.account_id
-                existing.updatedAt = now
-            } else {
-                modelContext.insert(
-                    RecurringStream(
-                        streamId: id,
-                        itemId: item.id,
-                        direction: direction,
-                        streamDescription: stream.description ?? stream.merchant_name ?? "Recurring",
-                        merchantName: stream.merchant_name,
-                        averageAmount: avg,
-                        lastAmount: last,
-                        frequency: stream.frequency ?? "UNKNOWN",
-                        firstDate: firstDate,
-                        lastDate: lastDate,
-                        isActive: isActive,
-                        transactionIds: ids,
-                        accountId: stream.account_id,
-                        updatedAt: now
-                    )
-                )
-            }
-            count += 1
-        }
-
-        for stream in response.outflow_streams ?? [] {
-            upsert(stream, direction: "outflow")
-        }
-        for stream in response.inflow_streams ?? [] {
-            upsert(stream, direction: "inflow")
-        }
-
-        // Drop streams that vanished for this Item
-        let itemId = item.id
-        let existing = (try? modelContext.fetch(
-            FetchDescriptor<RecurringStream>(
-                predicate: #Predicate<RecurringStream> { $0.itemId == itemId }
-            )
-        )) ?? []
-        for row in existing where !seen.contains(row.streamId) {
-            modelContext.delete(row)
-        }
-
-        return count
-    }
 
     /// True for ACH bill-pay codes that should use PaymentRail.ach.
     private static func looksLikeACHBillPay(_ title: String) -> Bool {
@@ -1094,7 +990,6 @@ enum PlaidSyncEngine {
     private static func inferCardName(from title: String) -> String? {
         let lower = title.lowercased()
         let brands = [
-            ("apple card", "Apple Card"),
             ("amex", "Amex"),
             ("american express", "Amex"),
             ("chase", "Chase"),
@@ -1205,7 +1100,13 @@ enum PlaidSyncEngine {
             account.lastPaymentDate = liability.last_payment_date.flatMap(parseDate)
             account.lastStatementIssueDate = liability.last_statement_issue_date.flatMap(parseDate)
             account.lastStatementBalance = liability.last_statement_balance
+            // FIX: Chase returns 0 rather than omitting the field, and Optional(0.0) is
+            // non-nil — so every "if let min = minimumPaymentAmount" fallback was unreachable
+            // and the Accounts screen printed "Min $0.00" on a card carrying $4,000.
+            // Normalise once here so no display site has to special-case it.
+            // OLD: account.minimumPaymentAmount = liability.minimum_payment_amount
             account.minimumPaymentAmount = liability.minimum_payment_amount
+                .flatMap { $0 > 0.005 ? $0 : nil }
             account.nextPaymentDueDate = liability.next_payment_due_date.flatMap(parseDate)
             account.liabilitiesSyncedAt = now
 
@@ -1568,7 +1469,9 @@ enum PlaidSyncEngine {
     /// Delete expense + income + credit-payment local rows for one Plaid transaction_id.
     /// Returns true if anything was deleted.
     @MainActor
-    private static func deleteLocal(transactionID: String, modelContext: ModelContext) -> Bool {
+    // Called from PlaidSyncMaintenance.dedupeTransactions, so not file-private.
+    @discardableResult
+    static func deleteLocal(transactionID: String, modelContext: ModelContext) -> Bool {
         var any = false
         if deleteExpenseOnly(transactionID: transactionID, modelContext: modelContext) { any = true }
         if deleteIncomeOnly(transactionID: transactionID, modelContext: modelContext) { any = true }
@@ -1647,7 +1550,13 @@ enum PlaidSyncEngine {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        // FIX: this parsed bank day strings at UTC midnight while every consumer reads them
+        // with Calendar.current. West of Greenwich that lands on the previous local day: a
+        // 2026-09-01 charge counted in August's spend and budget, a due date of 2026-09-15
+        // displayed as "Sep 14", and statement close days came out one short. Plaid sends a
+        // calendar day, not an instant — parse it in the device's zone.
+        // OLD: formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
