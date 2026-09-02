@@ -70,7 +70,9 @@ struct MoneySnapshotTool: Tool {
                 )
             )) ?? []
             let consumption = spendInMonth.filter { !TransactionAnalytics.isExcludedFromSpendCategory($0.category) }
-            let cardPayments = spendInMonth.filter { TransactionAnalytics.isExcludedFromSpendCategory($0.category) }
+            // Only real bill payments — Loan / Refund / Installment are excluded from spend
+            // for other reasons and would overstate what was paid toward cards.
+            let cardPayments = spendInMonth.filter { TransactionAnalytics.isCreditCardPaymentCategory($0.category) }
             let spendTotal = consumption.reduce(0.0) { $0 + abs($1.amount) }
             let cardPaymentTotal = cardPayments.reduce(0.0) { $0 + abs($1.amount) }
             let incomeTotal = incomeInMonth.reduce(0.0) { $0 + $1.amount }
