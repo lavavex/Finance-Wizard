@@ -55,6 +55,24 @@ Sync in the app first, then add the widget. If it stays empty, delete it and add
 
 ## Recurring
 
+### Total paid dropped, and card payments show as "Loan"
+
+Fixed. Plaid tags the card side of some bill payments with a loan-disbursement category, and
+the app trusted that over the payment title — so payments were re-filed as Loan rows and
+removed from Total paid. Payment titles now win. Sync once and the affected rows repair
+themselves.
+
+### My Chase Loan: what to enter
+
+From the loan email: **amount**, **fixed APR**, **billing cycles**, and **monthly payment**.
+Accounts → the card → the loan charge → **My Loan**. Enter the cycles as *Remaining months* —
+the app now trusts that term rather than re-deriving it, which previously came out a month
+long because Chase bills interest daily rather than at APR ÷ 12.
+
+Pay the **Interest saving balance**, not the statement balance: the statement balance pays
+the whole loan off at once. Interest saving balance is every other balance in full plus this
+cycle's loan payment.
+
 ### How do I track Chase My Loan vs Pay Over Time vs an AmEx 0% promo?
 
 They are different things:

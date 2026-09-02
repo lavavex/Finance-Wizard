@@ -91,6 +91,26 @@ real 3,268-transaction store with no row loss. Older `.fwbackup` files still res
 extra JSON keys are ignored on decode. Vendor learn-rules likewise keep working, since the
 stored `multiplier` key is simply no longer read.
 
+### Card payments turned into "Loan" rows / Total paid collapsed
+
+`PlaidCategoryMapper.classify` must test `isCreditCardPayment` **before**
+`looksLikeLoanDisbursement`. The loan check has a PFC shortcut that fires on any
+`LOAN_DISBURSEMENTS*` tag, and Plaid applies that tag to the card side of ordinary bill
+payments — so payments were stored as positive `Loan` adjustments and their
+`CreditCardPayment` rows deleted. A strong payment title outranks a PFC guess.
+`isCreditCardPayment` already refuses titles naming a real card-line loan
+("My Chase Loan TO 1234"), so genuine disbursements still fall through.
+
+`cleanLegacyMisclassifiedRows` repairs rows an older build corrupted this way: an
+`overrideSource == "adjustment"` row categorised `Loan` whose title reads as a card payment
+is converted back, sign normalised, and its payment row recreated.
+
+### Card financing fees
+
+`PLAN FEE - <merchant>` (My Chase Plan) and `ANNUAL MEMBERSHIP FEE` map to **Fees**, not
+Installment. Installment is excluded from spend because it re-bills a purchase already in
+the list; a plan fee is a new cost and must stay visible next to `PURCHASE INTEREST CHARGE`.
+
 ### Statement periods look off
 
 `StatementCycle.clampedDate` must clamp the close day to the month’s length **before** building the date. `Calendar.date(from:)` is lenient and never returns nil for an out-of-range day — it rolls over (2026-02-31 → 2026-03-03), which silently produced February windows stamped in March. `statementStart(end:closeDay:)` derives the window start from the previous close for the same reason. `group(_:closeDay:lastStatement:)` takes the issuer’s last statement date so `isOpen` means “not yet billed” rather than “ends on or after today”; `currentGroup(in:)` is the single source of truth for which cycle the Accounts row and the card screen summarise.

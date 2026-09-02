@@ -54,16 +54,25 @@ enum PlaidCategoryMapper {
         let type = (accountType ?? "").lowercased()
         let subtype = (accountSubtype ?? "").lowercased()
 
-        // Card-line loan: charge on the card is Loan; deposit to checking is not earnings.
-        if PayoffPlanRecognition.looksLikeLoanDisbursement(title: title, pfc: detailed) {
-            if type == "credit", amount >= 0 { return .spending }
-            if amount < 0 { return .adjustment }
-        }
-
+        // FIX: the loan-disbursement branch used to run first. Its PFC shortcut fires on
+        // any `LOAN_DISBURSEMENTS*` tag, and Plaid applies that to the card side of an
+        // ordinary bill payment — so 107 "Payment Thank You" rows were re-filed as positive
+        // Loan adjustments and their CreditCardPayment rows deleted, dropping Total paid by
+        // ~$83k. A strong payment title beats a PFC guess, so the bill-pay test goes first.
+        // isCreditCardPayment already refuses titles that name a real card-line loan
+        // ("My Chase Loan TO 1234"), so genuine disbursements still fall through below.
+        // OLD: the looksLikeLoanDisbursement block was here, above isCreditCardPayment.
+        //
         // Must run before transfer/income: on credit accounts payments are amount < 0
         // and otherwise become "Other Income".
         if isCreditCardPayment(primary: primary, detailed: detailed, titleLower: lower, accountType: type, amount: amount) {
             return .creditPayment
+        }
+
+        // Card-line loan: charge on the card is Loan; deposit to checking is not earnings.
+        if PayoffPlanRecognition.looksLikeLoanDisbursement(title: title, pfc: detailed) {
+            if type == "credit", amount >= 0 { return .spending }
+            if amount < 0 { return .adjustment }
         }
 
         // Card-side money-in that is not a bill pay: refunds and issuer credits.
@@ -294,6 +303,15 @@ enum PlaidCategoryMapper {
             if lower.contains("$") || lower.contains("/year") || lower.contains("annual") {
                 return true
             }
+            // FIX: a benefit credit posts as a bare "<benefit> CREDIT" with no amount in the
+            // title — "DINING CREDIT" on the Sapphire Reserve was being counted as a bill
+            // payment, inflating Total paid. Treat a title that *ends* in "credit" as an
+            // issuer credit rather than a payment, unless it also reads like a payment.
+            let trimmed = lower.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasSuffix(" credit") || trimmed == "credit" {
+                let paymentish = ["payment", "pymt", "pmt", "thank you", "autopay", "ach"]
+                if !paymentish.contains(where: { trimmed.contains($0) }) { return true }
+            }
         }
         return false
     }
@@ -352,6 +370,17 @@ enum PlaidCategoryMapper {
     static func expenseCategory(from pfc: PlaidPFC?, title: String = "") -> String {
         if PayoffPlanRecognition.looksLikeLoanDisbursement(title: title) {
             return KnownCategory.loan.rawValue
+        }
+        // FIX: card financing *fees* are a real cost, not the re-billing of an existing
+        // purchase. Chase posts them as "PLAN FEE - <merchant>" once a month for the life of
+        // a My Chase Plan (31 such rows here, ~$134/yr), and they were landing in Shopping,
+        // Entertainment and Travel — inflating those budgets. Filing them as Installment
+        // would be worse: that category is excluded from spend, so the cost would vanish.
+        // Fees keeps them visible next to PURCHASE INTEREST CHARGE, which is where they belong.
+        let lowerTitle = title.lowercased()
+        if lowerTitle.hasPrefix("plan fee") || lowerTitle.contains("plan fee - ")
+            || lowerTitle.contains("annual membership fee") || lowerTitle.contains("annual fee") {
+            return KnownCategory.fees.rawValue
         }
         if PayoffPlanRecognition.looksLikeInstallmentBillingTitle(title) {
             return KnownCategory.installment.rawValue
