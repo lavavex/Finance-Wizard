@@ -1246,7 +1246,8 @@ enum PlaidSyncEngine {
 
     /// Bump when the classifier changes so the one-off repair pass runs again.
     /// v2: bill-pay vs loan-disbursement ordering, issuer credits, plan fees.
-    static let legacyCleanupVersion = 2
+    /// v3: stop the purchase-rescue branch deleting payment rows for transfer-worded bill pays.
+    static let legacyCleanupVersion = 3
     static let legacyCleanupVersionKey = "plaid.legacyCleanup.v"
 
     /// Re-home mis-filed spend/income that look like transfers or card payments.
@@ -1303,8 +1304,18 @@ enum PlaidSyncEngine {
                 // Only real bill-pay titles/categories — not Loan / Refund / Installment.
                 if PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower)
                     || TransactionAnalytics.isCreditCardPaymentCategory(row.category) {
+                    // FIX: this rescues a purchase Plaid mis-tagged as CREDIT_CARD_PAYMENT
+                    // (a Best Buy swipe, say) by re-categorising it and deleting the mirrored
+                    // payment row. "The title doesn't look like a payment" was far too broad a
+                    // test for "this is a purchase": a checking-side bill pay posts as
+                    // "Ach Deposit Internet Transfer From Account E", which matches no payment
+                    // needle — so 86 real payments ($29,152) had their CreditCardPayment rows
+                    // deleted and were re-filed as Shopping, after which the transfer rule
+                    // below removed the transactions entirely on the next pass. Require the
+                    // title to not read as a transfer / non-spend descriptor first.
                     if TransactionAnalytics.isCreditCardPaymentCategory(row.category),
-                       !PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower) {
+                       !PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower),
+                       !PlaidCategoryMapper.looksLikeNonSpendTitle(row.title) {
                         row.category = TitleCategoryHints.fromTitleKeywords(row.title)
                             ?? KnownCategory.shopping.rawValue
                         row.categoryLocked = false

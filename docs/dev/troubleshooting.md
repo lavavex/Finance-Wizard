@@ -105,6 +105,20 @@ payments — so payments were stored as positive `Loan` adjustments and their
 `overrideSource == "adjustment"` row categorised `Loan` whose title reads as a card payment
 is converted back, sign normalised, and its payment row recreated.
 
+### A real bill payment disappeared from Total paid
+
+`cleanLegacyMisclassifiedRows` has a branch that rescues purchases Plaid mis-tagged as
+`CREDIT_CARD_PAYMENT` — it re-files them and deletes the mirrored `CreditCardPayment` row.
+Its test used to be only "the title doesn't look like a payment", which is not the same as
+"this is a purchase". A checking-side bill pay worded as a transfer
+("Ach Deposit Internet Transfer From Account E") matched no payment needle, so its payment
+row was deleted and the transaction re-filed as Shopping — then removed altogether by the
+transfer rule on the next pass. The branch now also requires
+`!looksLikeNonSpendTitle(row.title)`.
+
+Rows already destroyed this way cannot be recovered from Plaid if they came from the Apple
+Card CSV (ids prefixed `applecard:`) — re-import the CSV to restore them.
+
 ### Card financing fees
 
 `PLAN FEE - <merchant>` (My Chase Plan) and `ANNUAL MEMBERSHIP FEE` map to **Fees**, not
