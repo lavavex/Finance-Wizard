@@ -160,7 +160,11 @@ enum SubscriptionAnalytics {
         // Auto-detect pool: recent window, skip habits / retail / explicit "not a sub"
         let autoPool = spendAll
             .filter { $0.date >= start }
-            .filter { !isHabitCategory($0.category) }
+            // FIX: isHabitCategory blocks "personal care", and PlaidCategoryMapper maps every
+            // GYM/FITNESS detail there — so a monthly Planet Fitness charge never clustered and
+            // the gym needles in looksLikeSubscriptionName were unreachable for their own
+            // merchants. looksLikeRetailHabit already has this escape hatch.
+            .filter { !isHabitCategory($0.category) || looksLikeSubscriptionName($0.title) }
             .filter { !looksLikeRetailHabit(title: $0.title) }
             .filter { !$0.isDeclaredNotSubscription }
 

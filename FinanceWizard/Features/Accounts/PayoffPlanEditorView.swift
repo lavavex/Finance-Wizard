@@ -60,8 +60,17 @@ struct PayoffPlanEditorView: View {
         creditAccounts.first { $0.accountId == selectedAccountId }
     }
 
+    /// FIX: this fell back to `defaultPaymentMethod`, which every edit entry point leaves
+    /// empty — so reopening a plan whose card the picker cannot resolve (ambiguous match, or
+    /// the account pruned after a relink) and pressing Save wrote `paymentMethod = ""`.
+    /// `isOn(account:)` then matched nothing: the plan vanished from the card, stopped
+    /// counting toward the minimum, and applyStatementProgress could no longer find a
+    /// statement date, so it silently stopped paying down. Never discard an identity we
+    /// merely failed to resolve.
     private var paymentMethodLabel: String {
-        selectedAccount?.displayName ?? defaultPaymentMethod
+        if let name = selectedAccount?.displayName, !name.isEmpty { return name }
+        if let kept = existing?.paymentMethod, !kept.isEmpty { return kept }
+        return defaultPaymentMethod
     }
 
     private var linkedTransaction: Transaction? {
@@ -105,7 +114,13 @@ struct PayoffPlanEditorView: View {
         if kind == .myLoan {
             let loans = onCard.filter { PayoffPlanRecognition.looksLikeLoanDisbursement(title: $0.title) }
                 .sorted { $0.date > $1.date }
-            let rest = onCard.filter { !PayoffPlanRecognition.looksLikeLoanDisbursement(title: $0.title) }
+            // FIX: the .myLoan branch omitted the card-payment filter the other branch has,
+            // and sorts by amount descending — so on a Chase card the biggest bill payments
+            // sorted straight to the top of "Choose loan charge". Adopting one deletes its
+            // CreditCardPayment row irreversibly (sync only replays changed rows).
+            let rest = onCard
+                .filter { !PayoffPlanRecognition.looksLikeLoanDisbursement(title: $0.title) }
+                .filter { !TransactionAnalytics.isCreditCardPaymentCategory($0.category) }
                 .sorted {
                     if abs($0.amount) == abs($1.amount) { return $0.date > $1.date }
                     return abs($0.amount) > abs($1.amount)

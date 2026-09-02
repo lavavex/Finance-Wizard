@@ -113,11 +113,18 @@ enum CreditAnalytics {
     }
 
     /// True when two rows are the checking-side and card-side of one bill pay.
+    /// FIX: the doc said "checking-side and card-side" but only the last fallback tested the
+    /// sides, so two *real* payments of equal amount within the 3-day window were merged —
+    /// two $200 payments to one card three days apart became one, and an Amex EPAY plus an
+    /// equal Chase "Payment Thank You" merged across issuers because both identity sets were
+    /// empty. A pair must straddle the two sides; mask/issuer then only confirm it.
     static func isSamePayment(_ a: CreditCardPayment, _ b: CreditCardPayment) -> Bool {
+        guard isCardSide(a) != isCardSide(b) else { return false }
         let ia = paymentIdentities(a)
         let ib = paymentIdentities(b)
-        let ma = ia.first { $0.hasPrefix("mask:") }
-        let mb = ib.first { $0.hasPrefix("mask:") }
+        // Set order is undefined — sort so the chosen mask is deterministic across runs.
+        let ma = ia.filter { $0.hasPrefix("mask:") }.sorted().first
+        let mb = ib.filter { $0.hasPrefix("mask:") }.sorted().first
         // Last-four of the *card* is the strongest match; different fours are different cards.
         if let ma, let mb { return ma == mb }
         let issuersA = ia.filter { $0.hasPrefix("issuer:") }
@@ -125,8 +132,8 @@ enum CreditAnalytics {
         if !issuersA.isEmpty, !issuersB.isEmpty {
             return !issuersA.isDisjoint(with: issuersB)
         }
-        // Unlabeled funding (EPAY) vs a card Thank You of the same amount.
-        return isCardSide(a) != isCardSide(b)
+        // Sides already differ (guarded above) and neither carries an identity — accept.
+        return true
     }
 
     private static func preferredPayment(in group: [CreditCardPayment]) -> CreditCardPayment {

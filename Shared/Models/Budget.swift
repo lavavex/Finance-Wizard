@@ -234,8 +234,12 @@ final class BudgetPlan {
     }
 
     /// Look up a category cap; tries exact key then case-insensitive match.
+    /// FIX: `setLimit` canonicalises ("Gas" → "Gas (Car)") but this reader did not, so a
+    /// limit set from the picker could never be found by a category the user typed by hand.
+    /// Budget then showed "Gas (Car) $0 of $300" and "Gas $180, no limit" at the same time.
     func limit(forCategory category: String) -> Double? {
-        let key = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = KnownCategory.canonicalName(for: category)
+            ?? category.trimmingCharacters(in: .whitespacesAndNewlines)
         if let v = categoryLimits[key], v > 0 { return v }
         if let hit = categoryLimits.first(where: {
             $0.key.caseInsensitiveCompare(key) == .orderedSame

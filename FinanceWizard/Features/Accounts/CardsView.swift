@@ -43,8 +43,14 @@ struct CardsView: View {
     }
 
     /// Dependency string for .task(id:): when any piece changes, rebuild the board.
+    /// FIX: this keyed on counts alone, so editing a payoff plan's monthly payment or syncing
+    /// new balances from another tab left the token identical and the board stale — the card
+    /// row kept showing the old "includes $350.39 loan/installment". Fold in the newest
+    /// mutation stamps so content changes invalidate it too.
     private var refreshToken: String {
-        "\(period.rawValue)|\(referenceDate.timeIntervalSince1970)|\(transactions.count)|\(accounts.count)|\(payments.count)|\(payoffPlans.count)|\(nicknameEpoch)"
+        let planStamp = payoffPlans.map(\.updatedAt).max()?.timeIntervalSince1970 ?? 0
+        let accountStamp = accounts.map(\.lastSyncedAt).max()?.timeIntervalSince1970 ?? 0
+        return "\(period.rawValue)|\(referenceDate.timeIntervalSince1970)|\(transactions.count)|\(accounts.count)|\(payments.count)|\(payoffPlans.count)|\(planStamp)|\(accountStamp)|\(nicknameEpoch)"
     }
 
     var body: some View {

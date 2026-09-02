@@ -92,13 +92,6 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
         allCases.map(\.rawValue)
     }
 
-    /// Spend categories only (excludes bill pays) — Budget limits + spend charts.
-    static var spendNames: [String] {
-        allCases.filter {
-            $0 != .creditCardPayment && $0 != .loan && $0 != .refund && $0 != .installment
-        }.map(\.rawValue)
-    }
-
     /// Logical order for Budget “add limit” picker (essentials first).
     static var budgetPickerOrder: [KnownCategory] {
         [

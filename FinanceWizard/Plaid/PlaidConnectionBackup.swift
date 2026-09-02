@@ -675,6 +675,12 @@ private extension PlaidConnectionBackup {
         var count = 0
         for row in rows {
             if let live = byId[row.accountId] {
+                // FIX: every field was copied unconditionally, so restoring an old backup to
+                // recover one nickname rewrote balances, limits, minimums, due dates and APRs
+                // with stale values and moved lastSyncedAt backwards — while the restore sheet
+                // promises "Adds missing banks and data only." Live data that has been synced
+                // more recently than the backup wins; identity fields still refresh.
+                let backupIsNewer = row.lastSyncedAt >= live.lastSyncedAt
                 live.itemId = row.itemId
                 live.name = row.name
                 live.officialName = row.officialName
@@ -682,22 +688,24 @@ private extension PlaidConnectionBackup {
                 live.type = row.type
                 live.subtype = row.subtype
                 live.institutionName = row.institutionName
-                live.currentBalance = row.currentBalance
-                live.availableBalance = row.availableBalance
-                live.creditLimit = row.creditLimit
                 live.institutionId = row.institutionId
-                live.lastSyncedAt = row.lastSyncedAt
-                live.isOverdue = row.isOverdue
-                live.lastPaymentAmount = row.lastPaymentAmount
-                live.lastPaymentDate = row.lastPaymentDate
-                live.lastStatementIssueDate = row.lastStatementIssueDate
-                live.lastStatementBalance = row.lastStatementBalance
-                live.minimumPaymentAmount = row.minimumPaymentAmount
-                live.nextPaymentDueDate = row.nextPaymentDueDate
-                live.purchaseApr = row.purchaseApr
-                live.cashApr = row.cashApr
-                live.balanceTransferApr = row.balanceTransferApr
-                live.specialApr = row.specialApr
+                if backupIsNewer {
+                    live.currentBalance = row.currentBalance
+                    live.availableBalance = row.availableBalance
+                    live.creditLimit = row.creditLimit
+                    live.lastSyncedAt = row.lastSyncedAt
+                    live.isOverdue = row.isOverdue
+                    live.lastPaymentAmount = row.lastPaymentAmount
+                    live.lastPaymentDate = row.lastPaymentDate
+                    live.lastStatementIssueDate = row.lastStatementIssueDate
+                    live.lastStatementBalance = row.lastStatementBalance
+                    live.minimumPaymentAmount = row.minimumPaymentAmount
+                    live.nextPaymentDueDate = row.nextPaymentDueDate
+                    live.purchaseApr = row.purchaseApr
+                    live.cashApr = row.cashApr
+                    live.balanceTransferApr = row.balanceTransferApr
+                    live.specialApr = row.specialApr
+                }
                 live.liabilitiesSyncedAt = row.liabilitiesSyncedAt
             } else {
                 modelContext.insert(

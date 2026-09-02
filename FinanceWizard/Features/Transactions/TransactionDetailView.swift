@@ -28,6 +28,10 @@ struct TransactionDetailView: View {
     @State private var didSave = false
     @State private var saveStatusMessage: String?
     @State private var isSuggestingCategory = false
+    /// FIX: .onAppear fires again when returning from the payoff editor or the category
+    /// suggester, and it re-seeded the drafts from the model — silently discarding whatever
+    /// the user had typed. Seed once per pushed view.
+    @State private var didSeedDrafts = false
     /// FIX: this was `showPayoffEditor: Bool` + a separate `payoffEditorKind`, set in the same
     /// button action. `.sheet(isPresented:)` can build its content before the companion state
     /// lands, so the editor opened with the stale default — a My Chase Loan charge created a
@@ -329,6 +333,8 @@ struct TransactionDetailView: View {
             Text(saveError ?? "")
         }
         .onAppear {
+            guard !didSeedDrafts else { return }
+            didSeedDrafts = true
             categoryText = transaction.category
             selectedRail = transaction.effectivePaymentRail
             subscriptionMode = .from(transaction: transaction)
@@ -415,7 +421,13 @@ struct TransactionDetailView: View {
             if categoryChanged || railChanged || cadenceChanged {
                 transaction.overrideSource = "user"
             }
-            propagateRecurringCadence()
+            // FIX: this was outside the change guards, so opening a row and pressing Save
+            // re-stamped the cadence across the vendor. It also keys on vendor name alone
+            // while the detector keys declared subs on "vendor|cadence", so one merchant
+            // could not hold a monthly and a yearly charge.
+            if cadenceChanged {
+                propagateRecurringCadence()
+            }
 
             // Keep CreditCardPayment table + spend exclusion in sync with the category choice.
             // Only when it actually moved — this is what mirrors (or drops) the payment row.
@@ -424,7 +436,11 @@ struct TransactionDetailView: View {
             }
 
             // Learn rule for future Plaid syncs (skip bill-payment category)
-            if learn, !TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
+            // FIX: `learn` defaults to true and this was outside the category guard, so
+            // merely opening a Miscellaneous row and tapping Save wrote a permanent
+            // vendor+card → Miscellaneous rule that then beat Plaid's PFC on every future
+            // row, with no UI to remove it.
+            if learn, categoryChanged, !TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
                 VendorRulesStore.upsert(
                     vendor: transaction.title,
                     paymentMethod: cardScoped ? transaction.paymentMethod : nil,
@@ -433,8 +449,12 @@ struct TransactionDetailView: View {
             }
 
             var localExtra = 0
-            if applyToMatching {
-                localExtra = applyLocalMatching(category: trimmedCategory)
+            if applyToMatching, categoryChanged || cadenceChanged {
+                localExtra = applyLocalMatching(
+                    category: trimmedCategory,
+                    applyCategory: categoryChanged,
+                    applyCadence: cadenceChanged
+                )
             }
 
             try modelContext.save()
@@ -490,16 +510,26 @@ struct TransactionDetailView: View {
                 existing.cardName = row.paymentMethod
                 existing.title = row.title
             } else {
+                // FIX: cardName was the *funding* account, but cardName is what
+                // AccountsBoard.paymentsMatching and paymentIdentities treat as the card's
+                // identity — so re-filing "ONLINE PAYMENT TO CHASE CARD ENDING 1234" produced
+                // a payment attributed to checking, missing from that card's Total paid and
+                // deduplicated against the wrong mask. Resolve the card from the title.
+                let maskMatch = CreditAnalytics.extractMask(from: row.title).flatMap { mask in
+                    bankAccounts.first { $0.isCredit && $0.mask == mask }
+                }
+                let onCredit = linkedAccount?.isCredit == true
+                let card = maskMatch ?? (onCredit ? linkedAccount : nil)
                 modelContext.insert(
                     CreditCardPayment(
                         transactionId: row.transactionId,
                         amount: abs(row.amount),
                         date: row.date,
-                        cardName: row.paymentMethod,
-                        sourceAccount: row.paymentMethod,
+                        cardName: card?.plaidDisplayName ?? row.paymentMethod,
+                        sourceAccount: onCredit ? nil : row.paymentMethod,
                         title: row.title,
-                        creditAccountId: nil,
-                        institutionName: linkedAccount?.institutionName
+                        creditAccountId: card?.accountId,
+                        institutionName: card?.institutionName ?? linkedAccount?.institutionName
                     )
                 )
             }
@@ -509,9 +539,16 @@ struct TransactionDetailView: View {
         }
     }
 
-    /// Apply the category to other transactions with the same title + card.
+    /// Apply the changed fields to other transactions with the same title + card.
+    /// FIX: this used to write category, lock and cadence on every sibling regardless of what
+    /// actually changed — and `subscriptionMode.storageValue` is nil for `.auto`, so it erased
+    /// the "not recurring" markers written from the Recurring tab and the vendor reappeared.
     @discardableResult
-    private func applyLocalMatching(category: String) -> Int {
+    private func applyLocalMatching(
+        category: String,
+        applyCategory: Bool,
+        applyCadence: Bool
+    ) -> Int {
         let vendor = transaction.title
         let card = transaction.paymentMethod
         var count = 0
@@ -521,9 +558,13 @@ struct TransactionDetailView: View {
             guard row.title.caseInsensitiveCompare(vendor) == .orderedSame else { continue }
             guard row.paymentMethod.caseInsensitiveCompare(card) == .orderedSame else { continue }
 
-            row.category = category
-            row.categoryLocked = true
-            row.subscriptionCadenceOverride = subscriptionMode.storageValue
+            if applyCategory {
+                row.category = category
+                row.categoryLocked = true
+            }
+            if applyCadence {
+                row.subscriptionCadenceOverride = subscriptionMode.storageValue
+            }
             row.overrideSource = "user"
             count += 1
         }

@@ -89,8 +89,15 @@ struct CardDetailView: View {
         }
     }
 
+    /// FIX: `paidTotal` deduplicated internally but the same raw array was handed to the
+    /// disclosure list, so one $1,000 bill pay showed a $1,000 header above two $1,000 rows.
+    /// Deduplicate once and use it for both.
+    private var dedupedStatementPayments: [CreditCardPayment] {
+        CreditAnalytics.deduplicated(currentStatementPayments)
+    }
+
     private var paidTotal: Double {
-        CreditAnalytics.totalPaid(in: currentStatementPayments)
+        CreditAnalytics.sumPaid(dedupedStatementPayments)
     }
 
     /// FIX: this returned "This statement" for any credit account with a close day, even
@@ -106,6 +113,14 @@ struct CardDetailView: View {
 
     private var account: BankAccount? { creditAccount ?? bankAccount }
 
+    /// The card's promotional rate, when it genuinely has one. Only a 0% rate makes this a
+    /// promo worth planning around; a non-zero `specialApr` is just another balance rate.
+    private var promoAPRRate: Double? {
+        if creditAccount?.specialApr == 0 { return 0 }
+        if creditAccount?.purchaseApr == 0 { return 0 }
+        return nil
+    }
+
     private var cardPayoffPlans: [PayoffPlan] {
         payoffPlans.filter { plan in
             if let id = creditAccount?.accountId, plan.accountId == id { return true }
@@ -118,8 +133,11 @@ struct CardDetailView: View {
         }
     }
 
+    /// FIX: `cardPayoffPlans` sorted on isActive but never filtered it, so a finished loan
+    /// still listed at its full monthly amount under "Loans & installments" — while Accounts,
+    /// Recurring and every PayoffPlanProgress helper had already dropped it.
     private var issuerPlans: [PayoffPlan] {
-        cardPayoffPlans.filter { $0.kind.followsCardStatement }
+        cardPayoffPlans.filter { $0.isActive && $0.kind.followsCardStatement }
     }
 
     private var payoffByDatePlans: [PayoffPlan] {
@@ -247,10 +265,10 @@ struct CardDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                if creditAccount != nil || paidTotal > 0 || !currentStatementPayments.isEmpty {
+                if creditAccount != nil || paidTotal > 0 || !dedupedStatementPayments.isEmpty {
                     TotalPaidDisclosure(
                         total: paidTotal,
-                        payments: currentStatementPayments,
+                        payments: dedupedStatementPayments,
                         periodLabel: summaryPeriodLabel,
                         institutionId: account?.institutionId
                     )
@@ -424,16 +442,19 @@ struct CardDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showAddPayoff) {
             NavigationStack {
+                // FIX: the promo default triggered on "purchase APR is 0 OR special APR is
+                // 0" but seeded the rate from `specialApr` first — so a 0%-purchase card that
+                // also reports a 24.99% special rate opened a Promo plan pre-filled at 24.99.
+                // The suggested payment then over-quoted and Save persisted the wrong APR.
+                // Decide the kind and the rate from the same field.
                 PayoffPlanEditorView(
-                    defaultKind: (creditAccount?.purchaseApr == 0 || creditAccount?.specialApr == 0)
-                        ? .promoAPR : .custom,
+                    defaultKind: promoAPRRate != nil ? .promoAPR : .custom,
                     defaultAccountId: creditAccount?.accountId,
                     defaultPaymentMethod: displayName,
-                    defaultAmount: (creditAccount?.purchaseApr == 0 || creditAccount?.specialApr == 0)
+                    defaultAmount: promoAPRRate != nil
                         ? (creditAccount?.lastStatementBalance ?? creditAccount?.currentBalance)
                         : nil,
-                    defaultApr: creditAccount?.specialApr
-                        ?? ((creditAccount?.purchaseApr == 0) ? 0 : nil)
+                    defaultApr: promoAPRRate
                 )
             }
         }

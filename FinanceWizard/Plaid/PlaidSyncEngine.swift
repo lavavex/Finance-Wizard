@@ -1304,8 +1304,18 @@ enum PlaidSyncEngine {
                     fixed += 1
                     continue
                 }
-                if PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower)
-                    || PlaidCategoryMapper.looksLikeNonSpendTitle(row.source) {
+                // FIX: this also fired on looksLikeNonSpendTitle, which is true for plain
+                // transfers — so "Online Transfer From Sav ···4321" became a CreditCardPayment
+                // named after the checking account and inflated Total paid forever (sync only
+                // replays changed rows, so nothing ever removed it). The expense loop deletes
+                // transfer rows; do the same here and only create a payment for a real one.
+                if PlaidCategoryMapper.looksLikeNonSpendTitle(row.source),
+                   !PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower) {
+                    modelContext.delete(row)
+                    fixed += 1
+                    continue
+                }
+                if PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower) {
                     let id = row.transactionId
                     let title = row.source
                     let amount = abs(row.amount)
