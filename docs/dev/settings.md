@@ -32,7 +32,7 @@ Link completion uses `financewizard://hosted-link-complete` (Hosted Link). A lef
 | **Onboarding completed** / **Replay onboarding** | Flips `settings.onboardingCompleted`. Replay shows Welcome immediately via `OnboardingGate`. |
 | Local counts | Transactions, income, accounts, Recurring marks, payoff plans, linked banks, vendor rules |
 | Plaid (no secret) | Configured?, environment, client id |
-| Reset pieces | Sync cursors, vendor rules, nicknames, Recurring marks, logos, budget, payoff plans, rewards profiles |
+| Reset pieces | Sync cursors, vendor rules, nicknames, Recurring marks, logos, budget, payoff plans |
 | **Wipe all local data** | Same local wipe as wipe-then-restore (no backup). Plaid Dashboard unchanged. Turns onboarding off. |
 | Prefs list | Keys under `plaid.` / `card.` / `settings.` |
 

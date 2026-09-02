@@ -22,11 +22,9 @@ final class Transaction {
     var date: Date
     var category: String
     var paymentMethod: String
-    var multiplier: Double
 
-    /// Nil on older rows; treat as false (see isCategoryLocked / isMultiplierLocked).
+    /// Nil on older rows; treat as false (see isCategoryLocked).
     var categoryLocked: Bool?
-    var multiplierLocked: Bool?
     var overrideSource: String?
 
     /// Raw Plaid `payment_channel` (`online`, `in store`, `other`) when known.
@@ -35,10 +33,6 @@ final class Transaction {
     var paymentRail: String?
     /// When true, Sync will not overwrite `paymentRail`.
     var paymentRailLocked: Bool?
-
-    /// Optional lock for **reward** earn category (e.g. Travel (Portal) vs Travel (Other)).
-    /// Independent of general spend `category`. Nil → derive from category + title.
-    var rewardCategoryOverride: String?
 
     /// User override for subscription detection: `nil` = auto,
     /// `"yearly"` / `"monthly"` / `"weekly"` = treat that vendor as that cadence
@@ -73,7 +67,6 @@ final class Transaction {
 
     /// Effective lock flag (nil → unlocked).
     var isCategoryLocked: Bool { categoryLocked ?? false }
-    var isMultiplierLocked: Bool { multiplierLocked ?? false }
 
     /// Parsed subscription cadence override (user-declared).
     var declaredSubscriptionCadence: SubscriptionCadence? {
@@ -94,18 +87,6 @@ final class Transaction {
         return raw == "none"
     }
 
-    /// Reward earn bucket used for Benefits rates (override wins when set).
-    var effectiveRewardCategory: RewardCategory {
-        if let raw = rewardCategoryOverride?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !raw.isEmpty,
-           let match = RewardCategory.allCases.first(where: {
-               $0.rawValue.caseInsensitiveCompare(raw) == .orderedSame
-           }) {
-            return match
-        }
-        return RewardCategory.forTransaction(generalCategory: category, title: title)
-    }
-
     init(
         transactionId: String,
         title: String,
@@ -113,14 +94,11 @@ final class Transaction {
         date: Date,
         category: String,
         paymentMethod: String,
-        multiplier: Double,
         categoryLocked: Bool = false,
-        multiplierLocked: Bool = false,
         overrideSource: String? = nil,
         plaidPaymentChannel: String? = nil,
         paymentRail: String? = nil,
         paymentRailLocked: Bool = false,
-        rewardCategoryOverride: String? = nil,
         subscriptionCadenceOverride: String? = nil,
         authorizedDate: Date? = nil,
         pendingTransactionId: String? = nil,
@@ -138,14 +116,11 @@ final class Transaction {
         self.date = date
         self.category = category
         self.paymentMethod = paymentMethod
-        self.multiplier = multiplier
         self.categoryLocked = categoryLocked
-        self.multiplierLocked = multiplierLocked
         self.overrideSource = overrideSource
         self.plaidPaymentChannel = plaidPaymentChannel
         self.paymentRail = paymentRail
         self.paymentRailLocked = paymentRailLocked
-        self.rewardCategoryOverride = rewardCategoryOverride
         self.subscriptionCadenceOverride = subscriptionCadenceOverride
         self.authorizedDate = authorizedDate
         self.pendingTransactionId = pendingTransactionId

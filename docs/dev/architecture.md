@@ -44,7 +44,7 @@ Shared/                        Compiled into APP + WIDGET (must stay in sync)
   Models/                      SwiftData @Model + domain enums
   Store/                       SharedStore / ModelContainer
   Analytics/                   Spend, review queue, subscriptions, search
-  Cards/                       Product catalog, benefits, nicknames
+  Cards/                       Card nicknames
   Branding/                    Institution logo cache
   UI/                          Category style/charts, bank icons, privacy
 

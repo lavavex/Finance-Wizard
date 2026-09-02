@@ -137,7 +137,7 @@ enum PlaidSyncEngine {
         // Stale BankAccounts from unlinked/replaced Items (e.g. duped X Money after Relink)
         _ = cleanupStaleBankAccounts(modelContext: modelContext)
 
-        // Preload accounts once for reward multipliers (avoids N fetches per tx).
+        // Preload accounts once for payment-method matching (avoids N fetches per tx).
         let allAccounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
 
         // One Item at a time: failures become warnings so other banks still sync.
@@ -185,7 +185,7 @@ enum PlaidSyncEngine {
     // MARK: - Per-Item sync
 
     /// Full pipeline for one linked bank: status → balances → tx pages → logo → liabilities → recurring.
-    /// - Parameter allAccounts: Preloaded BankAccounts (reward multipliers / labels).
+    /// - Parameter allAccounts: Preloaded BankAccounts (payment-method matching / labels).
     @MainActor
     private static func syncItem(
         _ item: PlaidLinkedItem,
@@ -571,7 +571,6 @@ enum PlaidSyncEngine {
                 authorizedDate: authorizedDate,
                 paymentMethod: paymentMethod,
                 accountId: tx.account_id,
-                allAccounts: allAccounts,
                 modelContext: modelContext
             )
             report.expensesUpserted += 1
@@ -612,7 +611,7 @@ enum PlaidSyncEngine {
     // MARK: - Upserts (expense / income / credit payment)
 
     /// Insert or update a local expense Transaction from a Plaid spend row.
-    /// Respects user locks (category / multiplier / payment rail) when present.
+    /// Respects user locks (category / payment rail) when present.
     @MainActor
     private static func upsertExpense(
         tx: PlaidTransaction,
@@ -621,7 +620,6 @@ enum PlaidSyncEngine {
         authorizedDate: Date?,
         paymentMethod: String,
         accountId: String,
-        allAccounts: [BankAccount],
         modelContext: ModelContext
     ) {
         // #Predicate cannot capture function parameters directly.
@@ -638,33 +636,11 @@ enum PlaidSyncEngine {
             title: title
         )
         let isMyLoan = PayoffPlanRecognition.looksLikeLoanDisbursement(title: title)
-        // Vendor learn-rule may override category and multiplier.
+        // Vendor learn-rule may override the category.
         let rule = isMyLoan ? nil : VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod)
         let mappedCategory = isMyLoan ? KnownCategory.loan.rawValue : (rule?.category ?? defaultCategory)
         let channel = tx.payment_channel
         let inferredRail = PaymentRail.infer(plaidChannel: channel, title: title)
-        let bankAccount = allAccounts.first { $0.accountId == accountId }
-            ?? fetchBankAccount(accountId: accountId, modelContext: modelContext)
-        let railMultiplier = bankAccount?.rewardMultiplier(for: inferredRail)
-        let rewardsEligible = CardBenefitsStore.isRewardsEligible(
-            account: bankAccount,
-            paymentMethod: paymentMethod
-        )
-        let benefitsRate = CardBenefitsStore.resolvedMultiplier(
-            accountId: accountId,
-            paymentMethod: paymentMethod,
-            generalCategory: mappedCategory,
-            title: title,
-            accounts: allAccounts
-        )
-        // Preference: vendor learn → depository debit/ACH (X Money) → Benefits rates on cards only.
-        // Plain Chase checking is not rewards-eligible → multiplier 0 (no points).
-        let mappedMultiplier: Double = {
-            if let ruleMult = rule?.multiplier { return ruleMult }
-            if !rewardsEligible { return 0 }
-            if let railMultiplier { return railMultiplier }
-            return benefitsRate
-        }()
         // App stores expenses as negative amounts.
         let amount = -abs(tx.amount)
         let pending = tx.pending ?? false
@@ -681,7 +657,6 @@ enum PlaidSyncEngine {
                !PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(title) {
                 existing.category = mappedCategory
                 existing.categoryLocked = false
-                existing.multiplierLocked = false
                 existing.overrideSource = nil
                 deleteCreditPaymentOnly(transactionID: targetId, modelContext: modelContext)
             }
@@ -689,8 +664,6 @@ enum PlaidSyncEngine {
                 // Reclassify old “bill pay” filings of My Chase Loan.
                 existing.category = KnownCategory.loan.rawValue
                 existing.categoryLocked = true
-                existing.multiplier = 0
-                existing.multiplierLocked = true
                 if existing.overrideSource == "credit-payment"
                     || existing.overrideSource == "legacy-credit-payment" {
                     existing.overrideSource = "my-loan"
@@ -703,28 +676,6 @@ enum PlaidSyncEngine {
             if !existing.isCategoryLocked {
                 existing.category = mappedCategory
             }
-            if !existing.isMultiplierLocked {
-                let cat = existing.isCategoryLocked ? existing.category : mappedCategory
-                let rail = existing.effectivePaymentRail
-                if let ruleMult = rule?.multiplier {
-                    existing.multiplier = ruleMult
-                } else if !rewardsEligible {
-                    existing.multiplier = 0
-                } else if let railMult = bankAccount?.rewardMultiplier(for: rail) {
-                    // X Money: debit 3%, ACH 0%
-                    existing.multiplier = railMult
-                } else {
-                    existing.multiplier = CardBenefitsStore.resolvedMultiplier(
-                        accountId: accountId,
-                        paymentMethod: paymentMethod,
-                        generalCategory: cat,
-                        title: title,
-                        accounts: allAccounts,
-                        on: date,
-                        rewardCategoryOverride: existing.rewardCategoryOverride
-                    )
-                }
-            }
         } else {
             let row = Transaction(
                 transactionId: targetId,
@@ -733,10 +684,8 @@ enum PlaidSyncEngine {
                 date: date,
                 category: mappedCategory,
                 paymentMethod: paymentMethod,
-                multiplier: isMyLoan ? 0 : mappedMultiplier,
                 categoryLocked: isMyLoan,
-                multiplierLocked: isMyLoan,
-                overrideSource: isMyLoan ? "my-loan" : (rule != nil ? "rule" : (railMultiplier != nil ? "account-rail" : nil)),
+                overrideSource: isMyLoan ? "my-loan" : (rule != nil ? "rule" : nil),
                 plaidPaymentChannel: channel,
                 paymentRail: inferredRail.rawValue,
                 paymentRailLocked: false,
@@ -781,8 +730,6 @@ enum PlaidSyncEngine {
             existing.paymentMethod = paymentMethod
             existing.category = category
             existing.categoryLocked = true
-            existing.multiplier = 0
-            existing.multiplierLocked = true
             existing.overrideSource = "adjustment"
             applyEnrichment(to: existing, from: tx, authorizedDate: authorizedDate, isPending: pending)
         } else {
@@ -793,9 +740,7 @@ enum PlaidSyncEngine {
                 date: date,
                 category: category,
                 paymentMethod: paymentMethod,
-                multiplier: 0,
                 categoryLocked: true,
-                multiplierLocked: true,
                 overrideSource: "adjustment",
                 plaidPaymentChannel: tx.payment_channel,
                 authorizedDate: authorizedDate,
@@ -836,21 +781,6 @@ enum PlaidSyncEngine {
         row.isPending = isPending
     }
 
-    /// Look up one BankAccount by Plaid account_id (fallback if not in the preloaded array).
-    @MainActor
-    private static func fetchBankAccount(
-        accountId: String,
-        modelContext: ModelContext
-    ) -> BankAccount? {
-        let id = accountId
-        var descriptor = FetchDescriptor<BankAccount>(
-            predicate: #Predicate<BankAccount> { account in
-                account.accountId == id
-            }
-        )
-        descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
-    }
 
     /// Insert or update an Income model for a Plaid money-in row.
     /// Income amounts are stored positive (abs of Plaid’s negative inflow).
@@ -990,7 +920,7 @@ enum PlaidSyncEngine {
     }
 
     /// List-visible expense row for a bill payment; category is excluded from Total Spend.
-    /// Locks category + multiplier so learn-rules cannot reclassify EPAY as Shopping.
+    /// Locks the category so learn-rules cannot reclassify EPAY as Shopping.
     @MainActor
     private static func upsertCreditPaymentExpense(
         tx: PlaidTransaction,
@@ -1023,8 +953,6 @@ enum PlaidSyncEngine {
             // Bill pays always use this category (fixes mis-learns like EPAY → Shopping)
             existing.category = category
             existing.categoryLocked = true
-            existing.multiplier = 0
-            existing.multiplierLocked = true
             if !existing.isPaymentRailLocked {
                 // ACH bill-pay codes (EPAY) should not stay as debit
                 existing.paymentRail = looksLikeACHBillPay(title) ? PaymentRail.ach.rawValue : rail.rawValue
@@ -1040,9 +968,7 @@ enum PlaidSyncEngine {
                     date: date,
                     category: category,
                     paymentMethod: paymentMethod,
-                    multiplier: 0,
                     categoryLocked: true,
-                    multiplierLocked: true,
                     overrideSource: "credit-payment",
                     plaidPaymentChannel: channel,
                     paymentRail: (looksLikeACHBillPay(title) ? PaymentRail.ach : rail).rawValue,
@@ -1223,7 +1149,6 @@ enum PlaidSyncEngine {
                     existing.institutionId = institutionId
                 }
                 existing.lastSyncedAt = Date()
-                CardBenefitsStore.applyDepositoryRailRewards(to: existing)
             } else {
                 let account = BankAccount(
                     accountId: accountId,
@@ -1240,7 +1165,6 @@ enum PlaidSyncEngine {
                     institutionId: institutionId,
                     lastSyncedAt: Date()
                 )
-                CardBenefitsStore.applyDepositoryRailRewards(to: account)
                 modelContext.insert(account)
             }
             count += 1
@@ -1248,10 +1172,6 @@ enum PlaidSyncEngine {
 
         // Drop local rows for this Item that Plaid no longer returns (deselected on Relink).
         pruneAccounts(forItemId: item.id, keepingAccountIds: Set(details.map(\.account_id)), modelContext: modelContext)
-
-        // Seed Benefits rates for newly recognized products (won't overwrite saved profiles)
-        let allAccounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
-        _ = CardBenefitsStore.autoApplyKnownProducts(accounts: allAccounts)
 
         return count
     }
@@ -1414,7 +1334,6 @@ enum PlaidSyncEngine {
     private static func transactionKeepScore(_ tx: Transaction, accounts: [BankAccount]) -> Int {
         var score = 0
         if tx.isCategoryLocked { score += 4 }
-        if tx.isMultiplierLocked { score += 2 }
         if tx.isPaymentRailLocked { score += 1 }
         if BankAccount.matching(paymentMethod: tx.paymentMethod, in: accounts) != nil {
             score += 8
@@ -1540,8 +1459,6 @@ enum PlaidSyncEngine {
                     || row.category.caseInsensitiveCompare(TransactionAnalytics.installmentCategory) != .orderedSame {
                     row.category = TransactionAnalytics.installmentCategory
                     row.categoryLocked = true
-                    row.multiplier = 0
-                    row.multiplierLocked = true
                     fixed += 1
                     continue
                 }
@@ -1566,7 +1483,6 @@ enum PlaidSyncEngine {
                         row.category = TitleCategoryHints.fromTitleKeywords(row.title)
                             ?? KnownCategory.shopping.rawValue
                         row.categoryLocked = false
-                        row.multiplierLocked = false
                         row.overrideSource = nil
                         deleteCreditPaymentOnly(transactionID: row.transactionId, modelContext: modelContext)
                         fixed += 1
@@ -1575,8 +1491,6 @@ enum PlaidSyncEngine {
                     if !TransactionAnalytics.isCreditCardPaymentCategory(row.category) {
                         row.category = TransactionAnalytics.creditCardPaymentCategory
                         row.categoryLocked = true
-                        row.multiplier = 0
-                        row.multiplierLocked = true
                         row.overrideSource = row.overrideSource ?? "legacy-credit-payment"
                         fixed += 1
                     }
@@ -1697,8 +1611,6 @@ enum PlaidSyncEngine {
             existing.paymentMethod = paymentMethod
             existing.category = category
             existing.categoryLocked = true
-            existing.multiplier = 0
-            existing.multiplierLocked = true
             existing.overrideSource = "adjustment"
         } else {
             modelContext.insert(
@@ -1709,9 +1621,7 @@ enum PlaidSyncEngine {
                     date: date,
                     category: category,
                     paymentMethod: paymentMethod,
-                    multiplier: 0,
                     categoryLocked: true,
-                    multiplierLocked: true,
                     overrideSource: "adjustment"
                 )
             )
@@ -1763,8 +1673,6 @@ enum PlaidSyncEngine {
             existing.paymentMethod = paymentMethod
             existing.category = TransactionAnalytics.creditCardPaymentCategory
             existing.categoryLocked = true
-            existing.multiplier = 0
-            existing.multiplierLocked = true
             existing.overrideSource = existing.overrideSource ?? "legacy-credit-payment"
         } else {
             modelContext.insert(
@@ -1775,9 +1683,7 @@ enum PlaidSyncEngine {
                     date: date,
                     category: TransactionAnalytics.creditCardPaymentCategory,
                     paymentMethod: paymentMethod,
-                    multiplier: 0,
                     categoryLocked: true,
-                    multiplierLocked: true,
                     overrideSource: "legacy-credit-payment"
                 )
             )

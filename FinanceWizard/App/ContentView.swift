@@ -21,10 +21,8 @@ struct ImportedTransaction: Decodable {
     let category: String
     let amount: Double
     let payment_method: String
-    let multiplier: Double
     // Present after classify / lock on finance-sync (optional for older exports).
     let category_locked: Bool?
-    let multiplier_locked: Bool?
     let override_source: String?
 }
 
@@ -132,18 +130,11 @@ struct ContentView: View {
             loadedTabs.insert(.settings)
             selectedTab = .settings
         }
-        // FIX: this was an .overlay with a hard-coded 60pt bottom padding meant to clear
-        // the tab bar. The number does not track tab-bar height across devices or Dynamic
-        // Type, and because an overlay reserves no space it floated on top of list content
-        // — covering the last row and its swipe actions on every tab. safeAreaInset sits
-        // above the tab bar automatically and insets the scroll views underneath it.
-        // OLD:
-        // .overlay(alignment: .bottomTrailing) {
-        //     Button { showAsk = true } label: { … }
-        //         .padding(.trailing, 20)
-        //         .padding(.bottom, 60)
-        // }
-        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
+        // NOTE: an earlier attempt used .safeAreaInset(edge: .bottom) here to avoid the
+        // hard-coded offset. On the iOS 26 floating tab bar that placed the button on top
+        // of the Settings tab item, so it is back to an overlay. The offset clears the
+        // floating bar; the trade-off is that the button still floats over list content.
+        .overlay(alignment: .bottomTrailing) {
             Button {
                 showAsk = true
             } label: {
@@ -160,7 +151,7 @@ struct ContentView: View {
             .accessibilityLabel("Ask")
             .buttonStyle(.glass)
             .padding(.trailing, 20)
-            .padding(.bottom, 8)
+            .padding(.bottom, 100)
         }
         .sheet(isPresented: $showAsk) {
             OnDeviceAIChatView()
@@ -736,23 +727,18 @@ struct AllTransactionsView: View {
 
             // Missing lock flags in older exports → treat as unlocked.
             let categoryLocked = item.category_locked ?? false
-            let multiplierLocked = item.multiplier_locked ?? false
 
             // Export amounts are positive spend; the model stores signed spend (negative).
             if let existing = try modelContext.fetch(descriptor).first {
                 existing.title = item.vendor
                 existing.amount = -item.amount
                 existing.date = date
-                // Respect user locks so Sync / re-import won’t overwrite category/multiplier.
+                // Respect user locks so Sync / re-import won’t overwrite the category.
                 if !existing.isCategoryLocked {
                     existing.category = item.category
                 }
                 existing.paymentMethod = item.payment_method
-                if !existing.isMultiplierLocked {
-                    existing.multiplier = item.multiplier
-                }
                 existing.categoryLocked = categoryLocked
-                existing.multiplierLocked = multiplierLocked
                 existing.overrideSource = item.override_source
             } else {
                 modelContext.insert(
@@ -763,9 +749,7 @@ struct AllTransactionsView: View {
                         date: date,
                         category: item.category,
                         paymentMethod: item.payment_method,
-                        multiplier: item.multiplier,
                         categoryLocked: categoryLocked,
-                        multiplierLocked: multiplierLocked,
                         overrideSource: item.override_source
                     )
                 )

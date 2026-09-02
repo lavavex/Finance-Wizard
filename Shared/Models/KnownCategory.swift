@@ -3,7 +3,6 @@
 //  Finance Wizard
 //
 //  General expense categories for Transactions, Budget, charts, and Sync.
-//  These are NOT the same as card earn categories (see RewardCategory.swift).
 //
 //  Design goals:
 //  • Enough buckets for a real monthly budget without exploding into PFC noise

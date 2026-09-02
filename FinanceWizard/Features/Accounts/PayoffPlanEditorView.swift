@@ -664,8 +664,6 @@ struct PayoffPlanEditorView: View {
     private func adoptMyLoanCharge(_ tx: Transaction) {
         tx.category = KnownCategory.loan.rawValue
         tx.categoryLocked = true
-        tx.multiplier = 0
-        tx.multiplierLocked = true
         tx.overrideSource = "my-loan"
         let targetId = tx.transactionId
         var descriptor = FetchDescriptor<CreditCardPayment>(

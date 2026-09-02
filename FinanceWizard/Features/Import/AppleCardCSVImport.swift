@@ -92,7 +92,7 @@ enum AppleCardCSVImporter {
 
         // After CSV import, force account ensure + rate apply once (not on every app open).
         AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: [], force: true)
-        AppleCardAccount.reapplyUnlockedMultipliers(in: modelContext)
+        AppleCardAccount.normalizePaymentMethodLabels(in: modelContext)
         try modelContext.save()
         return report
     }
@@ -162,8 +162,6 @@ enum AppleCardCSVImporter {
                 date: date,
                 category: TransactionAnalytics.creditCardPaymentCategory,
                 categoryLocked: true,
-                multiplier: 0,
-                multiplierLocked: true,
                 overrideSource: "apple-card-csv",
                 paymentRail: PaymentRail.ach.rawValue,
                 modelContext: modelContext
@@ -179,8 +177,6 @@ enum AppleCardCSVImporter {
                 date: date,
                 category: KnownCategory.refund.rawValue,
                 categoryLocked: true,
-                multiplier: 0,
-                multiplierLocked: true,
                 overrideSource: "apple-card-csv",
                 paymentRail: PaymentRail.other.rawValue,
                 modelContext: modelContext
@@ -194,16 +190,6 @@ enum AppleCardCSVImporter {
             let isInstallment = PayoffPlanRecognition.looksLikeInstallmentBillingTitle(title)
                 || category == KnownCategory.installment.rawValue
             let isInterest = title.lowercased().contains("interest charge")
-            // 2% base Daily Cash; higher reward categories applied via CardBenefitsStore.
-            let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
-            let mult = CardBenefitsStore.resolvedMultiplier(
-                accountId: AppleCardAccount.accountId,
-                paymentMethod: paymentMethod,
-                generalCategory: category,
-                title: title,
-                accounts: accounts,
-                on: date
-            )
             upsertExpense(
                 id: stableId,
                 title: title,
@@ -211,8 +197,6 @@ enum AppleCardCSVImporter {
                 date: date,
                 category: isInterest ? KnownCategory.fees.rawValue : category,
                 categoryLocked: isInstallment || isInterest,
-                multiplier: isInstallment || isInterest ? 0 : (mult > 0 ? mult : 2),
-                multiplierLocked: isInstallment || isInterest,
                 overrideSource: "apple-card-csv",
                 paymentRail: PaymentRail.debit.rawValue,
                 modelContext: modelContext
@@ -324,7 +308,7 @@ enum AppleCardCSVImporter {
     // MARK: - Upserts
 
     /// Insert or update a Transaction (spend) with the given id.
-    /// Respects user locks: won’t overwrite category/multiplier/rail if the user locked them
+    /// Respects user locks: won’t overwrite category/rail if the user locked them
     /// (unless the previous override was from this same CSV importer).
     @MainActor
     private static func upsertExpense(
@@ -334,8 +318,6 @@ enum AppleCardCSVImporter {
         date: Date,
         category: String,
         categoryLocked: Bool,
-        multiplier: Double,
-        multiplierLocked: Bool,
         overrideSource: String,
         paymentRail: String,
         modelContext: ModelContext
@@ -356,10 +338,6 @@ enum AppleCardCSVImporter {
                 existing.category = category
                 existing.categoryLocked = categoryLocked
             }
-            if !existing.isMultiplierLocked || existing.overrideSource == "apple-card-csv" {
-                existing.multiplier = multiplier
-                existing.multiplierLocked = multiplierLocked
-            }
             existing.overrideSource = overrideSource
             if !existing.isPaymentRailLocked {
                 existing.paymentRail = paymentRail
@@ -374,9 +352,7 @@ enum AppleCardCSVImporter {
                     date: date,
                     category: category,
                     paymentMethod: paymentMethod,
-                    multiplier: multiplier,
                     categoryLocked: categoryLocked,
-                    multiplierLocked: multiplierLocked,
                     overrideSource: overrideSource,
                     plaidPaymentChannel: "other",
                     paymentRail: paymentRail,
