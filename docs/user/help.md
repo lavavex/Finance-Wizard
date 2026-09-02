@@ -62,6 +62,14 @@ the app trusted that over the payment title — so payments were re-filed as Loa
 removed from Total paid. Payment titles now win. Sync once and the affected rows repair
 themselves.
 
+### My loan was saved as “Pay Over Time”
+
+Fixed. Opening the payoff editor from a loan charge could start it on the wrong product, which
+books the monthly amount as a flat plan fee instead of interest at your APR. To correct a plan
+saved that way: Recurring → the plan → change **Type** to **My Loan** and enter the APR from
+the loan email. You no longer have to delete and rebuild it. The totals are close either way,
+but the principal/interest split — and the remaining balance — are wrong on the flat-fee model.
+
 ### My Chase Loan: what to enter
 
 From the loan email: **amount**, **fixed APR**, **billing cycles**, and **monthly payment**.
