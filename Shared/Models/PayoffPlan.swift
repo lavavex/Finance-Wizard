@@ -297,7 +297,14 @@ final class PayoffPlan {
     ///     return Int(ceil(remainingAmount / monthlyPayment))
     /// }
     var monthsToPayOff: Int? {
-        PayoffPlanMath.monthsToPayOff(
+        // FIX: for an issuer-scheduled plan the term is a contractual fact from the loan
+        // email ("12 billing cycles"), not something to infer. Re-deriving it from payment
+        // and APR came out one month long on the real $4,000 / 9.49% / $350.39 loan, because
+        // Chase bills interest on a daily periodic rate rather than APR ÷ 12. Trust the term.
+        if kind.followsCardStatement, let months = termMonths, months > 0 {
+            return months
+        }
+        return PayoffPlanMath.monthsToPayOff(
             remaining: remainingAmount,
             payment: monthlyPayment,
             aprPercent: aprPercent

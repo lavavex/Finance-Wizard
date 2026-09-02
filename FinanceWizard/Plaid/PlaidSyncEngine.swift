@@ -1475,6 +1475,22 @@ enum PlaidSyncEngine {
                     row.category = known
                     fixed += 1
                 }
+                // Repair rows a previous build mis-filed: the loan-disbursement PFC check
+                // used to outrank the bill-pay check, so card payments were stored as
+                // positive "Loan" adjustments and their CreditCardPayment rows deleted.
+                // A card-payment title on an adjustment row is always the payment.
+                if row.overrideSource == "adjustment",
+                   row.category.caseInsensitiveCompare(KnownCategory.loan.rawValue) == .orderedSame,
+                   PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower) {
+                    row.category = TransactionAnalytics.creditCardPaymentCategory
+                    row.categoryLocked = true
+                    row.amount = -abs(row.amount)
+                    row.overrideSource = "legacy-credit-payment"
+                    ensureCreditPaymentFromTransaction(row, modelContext: modelContext)
+                    fixed += 1
+                    continue
+                }
+
                 // Only real bill-pay titles/categories — not Loan / Refund / Installment.
                 if PlaidCategoryMapper.looksLikeCardPaymentTitlePublic(lower)
                     || TransactionAnalytics.isCreditCardPaymentCategory(row.category) {
