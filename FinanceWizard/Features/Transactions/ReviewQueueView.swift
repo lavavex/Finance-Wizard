@@ -20,7 +20,7 @@ struct ReviewQueueView: View {
     @State private var statusMessage: String?
 
     private var items: [ReviewQueueItem] {
-        let all = ReviewQueueAnalytics.items(in: transactions, accounts: bankAccounts)
+        let all = ReviewQueueAnalytics.items(in: transactions)
         guard let filter else { return all }
         return all.filter { $0.reasons.contains(filter) }
     }
@@ -57,7 +57,7 @@ struct ReviewQueueView: View {
                         NavigationLink {
                             TransactionDetailView(transaction: item.transaction)
                         } label: {
-                            ReviewQueueRow(item: item, accounts: bankAccounts)
+                            ReviewQueueRow(item: item)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             if item.reasons.contains(.billPayCandidate) {
@@ -134,7 +134,6 @@ struct ReviewQueueView: View {
 /// Compact row content for one review item (title, amount, reason chips).
 private struct ReviewQueueRow: View {
     let item: ReviewQueueItem
-    let accounts: [BankAccount]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

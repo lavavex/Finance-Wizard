@@ -92,7 +92,7 @@ enum PayoffPlanRecognition {
         return trimmed
     }
 
-    /// Recurring installment billing of an existing purchase (Apple Card CSV, Pay Over Time, Plan It).
+    /// Recurring installment billing of an existing purchase (My Chase Plan, Amex Plan It).
     static func looksLikeInstallmentBillingTitle(_ title: String) -> Bool {
         let t = title.lowercased()
         // FIX: the enum documents this as covering "Chase Pay Over Time, Amex Plan It" but
@@ -395,10 +395,15 @@ enum PayoffPlanProgress {
     /// Chase “Interest saving balance”: all non-loan balances + this statement’s
     /// loan/installment payments (not leftover loan principal). Paying this each
     /// cycle avoids purchase interest and keeps My Loan on its billing-cycle schedule.
-    static func interestSavingBalance(on account: BankAccount, plans: [PayoffPlan]) -> Double {
+    /// FIX: this returned a non-optional Double, so with no issuer plan it returned the card's
+    /// own balance and every card displayed "Int. saving $X" equal to its balance — a second
+    /// copy of a number already on the row. The concept only exists when the card carries a
+    /// loan or instalment plan, so return nil otherwise and let callers omit the line.
+    static func interestSavingBalance(on account: BankAccount, plans: [PayoffPlan]) -> Double? {
         let issuer = plans.filter {
             $0.isActive && $0.kind.followsCardStatement && $0.isOn(account: account)
         }
+        guard !issuer.isEmpty else { return nil }
         let leftoverFinancing = issuer.reduce(0) { $0 + $1.remainingAmount }
         let dueThisStatement = issuer.reduce(0) { $0 + $1.installmentTotal }
         let otherBalances = max(0, account.currentBalance - leftoverFinancing)

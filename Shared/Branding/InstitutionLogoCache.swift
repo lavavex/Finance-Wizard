@@ -7,7 +7,7 @@
 //
 //  File structure (top → bottom):
 //  1) Notifications — views refresh; app target fetches when needed
-//  2) Memory/disk caches + bundled Apple Card seed
+//  2) Memory/disk caches
 //  3) store / storeImageData — write logos + brand colors
 //  4) Pixel sampling — opaque canvas? sample background hex?
 //  5) Read path — memoryLogo (main-thread safe) vs loadLogo (async disk)
@@ -55,53 +55,11 @@ enum InstitutionLogoCache {
     /// Institution ids currently waiting on a network fetch (dedupe parallel requests).
     nonisolated(unsafe) private static var inFlight = Set<String>()
     nonisolated private static let lock = NSLock()
-    nonisolated(unsafe) private static var didSeedBundled = false
     /// Resolved once — logoDirectory() used to create dirs + stat group container on every tile.
     nonisolated(unsafe) private static var cachedLogoDirectory: URL?
     nonisolated(unsafe) private static var didResolveLogoDirectory = false
 
-    // MARK: - Bundled logos (screenshot-cleaned assets)
-    // Some brands (Apple Card) ship in the app asset catalog instead of Plaid.
 
-    /// Seed known brand marks shipped in the app bundle (e.g. Apple Card).
-    /// Safe to call often — runs once per process.
-    nonisolated static func seedBundledLogos() {
-        // Double-checked lock pattern: avoid seeding twice under concurrency
-        lock.lock()
-        if didSeedBundled {
-            lock.unlock()
-            return
-        }
-        didSeedBundled = true
-        lock.unlock()
-
-        seedAppleCardLogo()
-    }
-
-    nonisolated private static func seedAppleCardLogo(force: Bool = false) {
-        let id = "local:apple-card"
-        if !force, logoImage(institutionID: id) != nil { return }
-
-        // Asset lives in the app target; nil in widget process is fine (disk may already exist).
-        guard let image = UIImage(named: "AppleCardLogo"),
-              let data = image.pngData(), !data.isEmpty else {
-            return
-        }
-
-        storeImageData(
-            data,
-            institutionID: id,
-            name: "Apple Card",
-            primaryColorHex: "#1C1C1E"
-        )
-        // Extra name aliases used by CSV / labels
-        for alias in ["apple card", "apple", "applecard"] {
-            writeLogoData(data, key: "name:" + alias)
-            UserDefaults.standard.set(id, forKey: "plaid.aliasId." + alias)
-            UserDefaults.standard.set("#1C1C1E", forKey: colorPrefix + "name:" + alias)
-        }
-        memoryLogos.setObject(image, forKey: id as NSString)
-    }
 
     /// Store raw image bytes (PNG/JPEG) as the institution logo.
     /// Also writes name aliases so lookups by “Chase” or “chase bank” can find the same file.
@@ -514,10 +472,6 @@ enum InstitutionLogoCache {
     /// Synchronous lookup by Plaid institution id (may hit disk — avoid on main while scrolling).
     nonisolated static func logoImage(institutionID: String?) -> UIImage? {
         guard let institutionID, !institutionID.isEmpty else { return nil }
-        // Lazy seed so first Apple Card tile works even before app start hook runs.
-        if institutionID == "local:apple-card" {
-            seedBundledLogos()
-        }
         if let cached = memoryLogos.object(forKey: institutionID as NSString) {
             return cached
         }
@@ -544,9 +498,6 @@ enum InstitutionLogoCache {
         guard let institutionName, !institutionName.isEmpty else { return nil }
         let lower = institutionName.lowercased()
         let nameKey = "name:" + lower
-        if lower.contains("apple") {
-            seedBundledLogos()
-        }
         if let cached = memoryLogos.object(forKey: nameKey as NSString) {
             return cached
         }

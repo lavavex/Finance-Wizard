@@ -110,6 +110,12 @@ Fixed. Those cards produced windows stamped in the following month with a date r
 
 Auto-detect looks for the **same amount** on a schedule, so a bill that changes each month may be missing. Open one of those charges → **Recurring** → **Monthly** (or **Yearly**) → **Save**. The Recurring tab groups that merchant even when the amount varies. **Not recurring** on a single charge hides only that row; **Not Recurring** on the Recurring tab hides the whole vendor.
 
+## Apple Card
+
+Apple Card support and its CSV import were removed — Plaid cannot sync Apple Card, so the data
+could never stay current. Charges you imported previously are still in the app and still count
+in Total Spend; they simply will not update. Ask if you want them cleared.
+
 ## Rewards
 
 Rewards tracking was removed. Finance Wizard focuses on spending, income, budgets and card

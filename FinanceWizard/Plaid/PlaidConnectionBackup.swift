@@ -136,7 +136,6 @@ enum PlaidConnectionBackup {
         var incomeCount: Int
         var bankAccountCount: Int
         var paymentCount: Int
-        var recurringCount: Int
         var budgetPlanCount: Int
         var payoffPlanCount: Int
         var cardLabelCount: Int
@@ -159,7 +158,6 @@ enum PlaidConnectionBackup {
         var incomeUpserted: Int
         var bankAccountsUpserted: Int
         var paymentsUpserted: Int
-        var recurringUpserted: Int
         var budgetPlansUpserted: Int
         var payoffPlansUpserted: Int
         var environment: String
@@ -178,13 +176,12 @@ enum PlaidConnectionBackup {
         let incomes = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
         let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         let payments = (try? modelContext.fetch(FetchDescriptor<CreditCardPayment>())) ?? []
-        let streams = (try? modelContext.fetch(FetchDescriptor<RecurringStream>())) ?? []
         let plans = (try? modelContext.fetch(FetchDescriptor<BudgetPlan>())) ?? []
         let payoffs = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
 
         let hasAnything = !clientID.isEmpty || !secret.isEmpty || !items.isEmpty
             || !txs.isEmpty || !incomes.isEmpty || !accounts.isEmpty || !payments.isEmpty
-            || !streams.isEmpty || !plans.isEmpty || !payoffs.isEmpty
+            || !plans.isEmpty || !payoffs.isEmpty
             || !VendorRulesStore.load().isEmpty
             || !CardLabelStore.debugExportMap().isEmpty
 
@@ -221,7 +218,6 @@ enum PlaidConnectionBackup {
             income: incomes.map(snapshot(income:)),
             bankAccounts: accounts.map(snapshot(account:)),
             creditCardPayments: payments.map(snapshot(payment:)),
-            recurringStreams: streams.map(snapshot(stream:)),
             budgetPlans: plans.map(snapshot(plan:)),
             payoffPlans: payoffs.map(snapshot(payoff:)),
             cardLabels: CardLabelStore.debugExportMap(),
@@ -318,7 +314,6 @@ enum PlaidConnectionBackup {
             incomeCount: payload.income?.count ?? 0,
             bankAccountCount: payload.bankAccounts?.count ?? 0,
             paymentCount: payload.creditCardPayments?.count ?? 0,
-            recurringCount: payload.recurringStreams?.count ?? 0,
             budgetPlanCount: payload.budgetPlans?.count ?? 0,
             payoffPlanCount: payload.payoffPlans?.count ?? 0,
             cardLabelCount: payload.cardLabels?.count ?? 0,
@@ -351,7 +346,6 @@ enum PlaidConnectionBackup {
         var incomeCount = 0
         var accountCount = 0
         var paymentCount = 0
-        var streamCount = 0
         var planCount = 0
         var payoffCount = 0
 
@@ -366,9 +360,6 @@ enum PlaidConnectionBackup {
         }
         if let rows = payload.creditCardPayments {
             paymentCount = upsertPayments(rows, modelContext: modelContext)
-        }
-        if let rows = payload.recurringStreams {
-            streamCount = upsertRecurring(rows, modelContext: modelContext)
         }
         if let rows = payload.budgetPlans {
             planCount = upsertBudgetPlans(rows, modelContext: modelContext)
@@ -426,7 +417,6 @@ enum PlaidConnectionBackup {
             incomeUpserted: incomeCount,
             bankAccountsUpserted: accountCount,
             paymentsUpserted: paymentCount,
-            recurringUpserted: streamCount,
             budgetPlansUpserted: planCount,
             payoffPlansUpserted: payoffCount,
             environment: PlaidCredentialsStore.environment.displayName,
@@ -777,50 +767,6 @@ private extension PlaidConnectionBackup {
         return count
     }
 
-    static func upsertRecurring(_ rows: [RecurringStreamSnapshot], modelContext: ModelContext) -> Int {
-        let existing = ((try? modelContext.fetch(FetchDescriptor<RecurringStream>())) ?? [])
-        let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.streamId, $0) })
-        var count = 0
-        for row in rows {
-            if let live = byId[row.streamId] {
-                live.itemId = row.itemId
-                live.direction = row.direction
-                live.streamDescription = row.streamDescription
-                live.merchantName = row.merchantName
-                live.averageAmount = row.averageAmount
-                live.lastAmount = row.lastAmount
-                live.frequency = row.frequency
-                live.firstDate = row.firstDate
-                live.lastDate = row.lastDate
-                live.isActive = row.isActive
-                live.transactionIdsJSON = try? JSONEncoder().encode(row.transactionIds)
-                live.accountId = row.accountId
-                live.updatedAt = row.updatedAt
-            } else {
-                modelContext.insert(
-                    RecurringStream(
-                        streamId: row.streamId,
-                        itemId: row.itemId,
-                        direction: row.direction,
-                        streamDescription: row.streamDescription,
-                        merchantName: row.merchantName,
-                        averageAmount: row.averageAmount,
-                        lastAmount: row.lastAmount,
-                        frequency: row.frequency,
-                        firstDate: row.firstDate,
-                        lastDate: row.lastDate,
-                        isActive: row.isActive,
-                        transactionIds: row.transactionIds,
-                        accountId: row.accountId,
-                        updatedAt: row.updatedAt
-                    )
-                )
-            }
-            count += 1
-        }
-        return count
-    }
-
     static func upsertBudgetPlans(_ rows: [BudgetPlanSnapshot], modelContext: ModelContext) -> Int {
         let existing = ((try? modelContext.fetch(FetchDescriptor<BudgetPlan>())) ?? [])
         let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.planId, $0) })
@@ -1026,25 +972,6 @@ private extension PlaidConnectionBackup {
             title: p.title,
             creditAccountId: p.creditAccountId,
             institutionName: p.institutionName
-        )
-    }
-
-    static func snapshot(stream s: RecurringStream) -> RecurringStreamSnapshot {
-        RecurringStreamSnapshot(
-            streamId: s.streamId,
-            itemId: s.itemId,
-            direction: s.direction,
-            streamDescription: s.streamDescription,
-            merchantName: s.merchantName,
-            averageAmount: s.averageAmount,
-            lastAmount: s.lastAmount,
-            frequency: s.frequency,
-            firstDate: s.firstDate,
-            lastDate: s.lastDate,
-            isActive: s.isActive,
-            transactionIds: s.transactionIds,
-            accountId: s.accountId,
-            updatedAt: s.updatedAt
         )
     }
 

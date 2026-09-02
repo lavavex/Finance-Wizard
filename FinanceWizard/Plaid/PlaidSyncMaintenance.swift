@@ -28,7 +28,6 @@ extension PlaidSyncEngine {
     }
 
     /// Drop local accounts whose Plaid Item was unlinked (or replaced) but rows were left behind.
-    /// Keeps the synthetic Apple Card account.
     @MainActor
     @discardableResult
     static func pruneOrphanBankAccounts(modelContext: ModelContext) -> Int {
@@ -36,7 +35,6 @@ extension PlaidSyncEngine {
         let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         var removed = 0
         for account in all {
-            if AppleCardAccount.isAppleCard(account: account) { continue }
             if linkedIds.contains(account.itemId) { continue }
             modelContext.delete(account)
             removed += 1
@@ -53,7 +51,6 @@ extension PlaidSyncEngine {
         let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         var groups: [String: [BankAccount]] = [:]
         for account in all {
-            if AppleCardAccount.isAppleCard(account: account) { continue }
             let key = [
                 account.institutionName.lowercased(),
                 (account.mask ?? "").lowercased(),
@@ -125,6 +122,14 @@ extension PlaidSyncEngine {
 
         var removed = 0
         for (_, var rows) in groups where rows.count > 1 {
+            // FIX: the group key is day|amount|title|method with no transaction id, so two
+            // genuinely distinct purchases — the same coffee twice in one day, or equal
+            // payments to two cards — collided and one was deleted permanently, with the
+            // mirrored CreditCardPayment/Income left behind. Only collapse rows that are
+            // really the same row re-delivered under a new id: that happens when an account
+            // is relinked, so require the rows to come from different Plaid accounts.
+            let distinctAccounts = Set(rows.map { $0.plaidAccountId ?? "" })
+            guard distinctAccounts.count > 1 else { continue }
             rows.sort { a, b in
                 let aScore = transactionKeepScore(a, accounts: accounts)
                 let bScore = transactionKeepScore(b, accounts: accounts)
@@ -132,7 +137,8 @@ extension PlaidSyncEngine {
                 return a.transactionId < b.transactionId
             }
             for drop in rows.dropFirst() {
-                modelContext.delete(drop)
+                // Route through deleteLocal so the mirrored payment / income row goes too.
+                deleteLocal(transactionID: drop.transactionId, modelContext: modelContext)
                 removed += 1
             }
         }
@@ -176,7 +182,7 @@ extension PlaidSyncEngine {
         if BankAccount.matching(paymentMethod: tx.paymentMethod, in: accounts) != nil {
             score += 8
         }
-        // Prefer non–Apple Card only when both are same method family (already grouped)
+        // Both rows are already in the same method family; prefer the live one
         return score
     }
 
@@ -214,4 +220,57 @@ extension PlaidSyncEngine {
     }
 
     // MARK: - Liabilities → BankAccount
+}
+
+// MARK: - Day-string re-anchoring
+
+extension PlaidSyncEngine {
+    /// Bump when stored dates need re-anchoring again.
+    static let dayAnchorVersion = 1
+    static let dayAnchorVersionKey = "plaid.dayAnchor.v"
+
+    /// One-off repair for rows stored while day strings were parsed at UTC midnight.
+    ///
+    /// Those rows sit at 00:00 UTC, which is the *previous* day everywhere west of Greenwich,
+    /// so they were filtered, bucketed and displayed a day early. Re-stamp each one to local
+    /// midnight of the calendar day it was always meant to represent (its UTC y/m/d).
+    /// Rows already at local midnight are left alone, so running twice is harmless.
+    @MainActor
+    @discardableResult
+    static func reanchorStoredDays(modelContext: ModelContext) -> Int {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let local = Calendar.current
+
+        /// nil when the date is not sitting exactly on a UTC midnight (already local, or a
+        /// real timestamp we must not touch).
+        func reanchored(_ date: Date) -> Date? {
+            let c = utc.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+            guard c.hour == 0, c.minute == 0, c.second == 0 else { return nil }
+            var out = DateComponents()
+            out.year = c.year
+            out.month = c.month
+            out.day = c.day
+            guard let shifted = local.date(from: out), shifted != date else { return nil }
+            return shifted
+        }
+
+        var changed = 0
+        for row in (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? [] {
+            if let d = reanchored(row.date) { row.date = d; changed += 1 }
+            if let a = row.authorizedDate, let d = reanchored(a) { row.authorizedDate = d }
+        }
+        for row in (try? modelContext.fetch(FetchDescriptor<Income>())) ?? [] {
+            if let d = reanchored(row.date) { row.date = d; changed += 1 }
+        }
+        for row in (try? modelContext.fetch(FetchDescriptor<CreditCardPayment>())) ?? [] {
+            if let d = reanchored(row.date) { row.date = d; changed += 1 }
+        }
+        for account in (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? [] {
+            if let v = account.lastPaymentDate, let d = reanchored(v) { account.lastPaymentDate = d }
+            if let v = account.lastStatementIssueDate, let d = reanchored(v) { account.lastStatementIssueDate = d }
+            if let v = account.nextPaymentDueDate, let d = reanchored(v) { account.nextPaymentDueDate = d }
+        }
+        return changed
+    }
 }

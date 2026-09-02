@@ -271,13 +271,14 @@ struct CardDetailView: View {
                             MoneyText(minPay)
                         }
                     }
-                    LabeledContent("Interest saving balance") {
-                        MoneyText(
-                            PayoffPlanProgress.interestSavingBalance(
-                                on: credit,
-                                plans: cardPayoffPlans
-                            )
-                        )
+                    // Only meaningful while the card carries a loan or instalment plan.
+                    if let isb = PayoffPlanProgress.interestSavingBalance(
+                        on: credit,
+                        plans: cardPayoffPlans
+                    ) {
+                        LabeledContent("Interest saving balance") {
+                            MoneyText(isb)
+                        }
                     }
                     if let due = credit.nextPaymentDueDate {
                         LabeledContent("Payment due") {

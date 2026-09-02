@@ -106,14 +106,6 @@ struct BankIconView: View {
         monogram.count > 1 ? size * 0.32 : size * 0.42
     }
 
-    /// Apple Card assets look best edge-to-edge on the tile.
-    private var prefersAppleFullBleed: Bool {
-        let hay = [institutionId, institutionName, paymentMethod, displayName]
-            .compactMap { $0?.lowercased() }
-            .joined(separator: " ")
-        return hay.contains("apple") || institutionId == "local:apple-card"
-    }
-
     /// Update monogram/color; optionally kick off async logo load.
     private func refresh(requestFetch: Bool) {
         monogram = InstitutionLogoCache.monogram(
@@ -162,10 +154,10 @@ struct BankIconView: View {
     private func applyLogo(_ resolved: UIImage) {
         logo = resolved
         var color = cachedBrandColor()
-        var bleed = prefersAppleFullBleed
+        var bleed = false
 
         if !didSample {
-            bleed = InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || prefersAppleFullBleed
+            bleed = InstitutionLogoCache.logoHasOpaqueCanvas(resolved)
             // Only sample pixels when we still have the placeholder gray
             if isPlaceholderGray(color),
                let hex = InstitutionLogoCache.sampleBackgroundHex(from: resolved),
@@ -179,7 +171,7 @@ struct BankIconView: View {
             }
             didSample = true
         } else {
-            bleed = fullBleed || prefersAppleFullBleed
+            bleed = fullBleed
         }
 
         brandColor = color
@@ -323,13 +315,10 @@ struct InstitutionLogoHeader: View {
     private func applyLogo(_ resolved: UIImage) {
         logo = resolved
         var color = brandColor
-        let appleBleed = (institutionId == "local:apple-card")
-            || (institutionName?.localizedCaseInsensitiveContains("apple") == true)
-            || displayName.localizedCaseInsensitiveContains("apple")
-        var bleed = appleBleed
+        var bleed = false
 
         if !didSample {
-            bleed = InstitutionLogoCache.logoHasOpaqueCanvas(resolved) || appleBleed
+            bleed = InstitutionLogoCache.logoHasOpaqueCanvas(resolved)
             let ui = UIColor(color)
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
             let isGray = ui.getRed(&r, green: &g, blue: &b, alpha: &a)
@@ -346,7 +335,7 @@ struct InstitutionLogoHeader: View {
             }
             didSample = true
         } else {
-            bleed = fullBleed || appleBleed
+            bleed = fullBleed
         }
 
         brandColor = color

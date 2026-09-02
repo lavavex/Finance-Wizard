@@ -118,6 +118,8 @@ enum DebugDataExporter {
         var transactions: [TransactionDTO]
         var income: [IncomeDTO]
         var creditCardPayments: [PaymentDTO]
+        var payoffPlans: [PayoffPlanDTO]
+        var budgetPlans: [BudgetPlanDTO]
         var linkedItems: [LinkedItemDTO]
         var cardLabels: [String: String]
         var vendorRules: [VendorRule]
@@ -143,6 +145,8 @@ enum DebugDataExporter {
         var transactions: Int
         var income: Int
         var creditCardPayments: Int
+        var payoffPlans: Int
+        var budgetPlans: Int
         var linkedItems: Int
         var vendorRules: Int
         var cardLabels: Int
@@ -179,6 +183,33 @@ enum DebugDataExporter {
         var displayName: String
     }
 
+    /// Export shape for a user-declared payoff plan (My Loan / Pay Over Time / promo / custom).
+    private struct PayoffPlanDTO: Encodable {
+        var planId: String
+        var kind: String
+        var name: String
+        var accountId: String?
+        var paymentMethod: String
+        var originalAmount: Double
+        var remainingAmount: Double
+        var monthlyPayment: Double
+        var aprPercent: Double?
+        var startDate: String
+        var endDate: String?
+        var termMonths: Int?
+        var linkedTransactionId: String?
+        var isEnded: Bool
+        var lastAppliedStatementDate: String?
+    }
+
+    /// Export shape for the monthly budget plan.
+    private struct BudgetPlanDTO: Encodable {
+        var monthlyLimit: Double?
+        var categoryLimits: [String: Double]
+        var expectedIncomeStreams: Int
+        var expectedIncomeMonthlyTotal: Double
+    }
+
     /// Export shape for a spend Transaction row.
     private struct TransactionDTO: Encodable {
         var transactionId: String
@@ -192,6 +223,12 @@ enum DebugDataExporter {
         var plaidPaymentChannel: String?
         var paymentRail: String?
         var paymentRailLocked: Bool?
+        // Previously dropped — a recurring or pending bug was invisible in an export.
+        var subscriptionCadenceOverride: String?
+        var authorizedDate: String?
+        var plaidAccountId: String?
+        var merchantName: String?
+        var isPending: Bool?
         var effectivePaymentRail: String
     }
 
@@ -242,6 +279,8 @@ enum DebugDataExporter {
         let txs = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
         let income = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
         let payments = (try? modelContext.fetch(FetchDescriptor<CreditCardPayment>())) ?? []
+        let payoffs = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
+        let budgets = (try? modelContext.fetch(FetchDescriptor<BudgetPlan>())) ?? []
         let items = PlaidItemStore.loadItems()
         let labels = CardLabelStore.debugExportMap()
         let rules = VendorRulesStore.load()
@@ -334,6 +373,11 @@ enum DebugDataExporter {
                     plaidPaymentChannel: t.plaidPaymentChannel,
                     paymentRail: t.paymentRail,
                     paymentRailLocked: t.paymentRailLocked,
+                    subscriptionCadenceOverride: t.subscriptionCadenceOverride,
+                    authorizedDate: d(t.authorizedDate),
+                    plaidAccountId: t.plaidAccountId,
+                    merchantName: t.merchantName,
+                    isPending: t.isPending,
                     effectivePaymentRail: t.effectivePaymentRail.rawValue
                 )
             }
@@ -394,13 +438,16 @@ enum DebugDataExporter {
                 plaidEnvironment: PlaidCredentialsStore.environment.rawValue,
                 credentialsConfigured: PlaidCredentialsStore.isConfigured,
                 appGroupID: SharedStore.appGroupID,
-                schema: ["Transaction", "Income", "BankAccount", "CreditCardPayment"]
+                // Derived so it cannot drift from what the store actually holds.
+                schema: SharedStore.schema.entities.map(\.name).sorted()
             ),
             counts: Counts(
                 bankAccounts: accounts.count,
                 transactions: txs.count,
                 income: income.count,
                 creditCardPayments: payments.count,
+                payoffPlans: payoffs.count,
+                budgetPlans: budgets.count,
                 linkedItems: items.count,
                 vendorRules: rules.count,
                 cardLabels: labels.count
@@ -409,6 +456,34 @@ enum DebugDataExporter {
             transactions: txDTOs,
             income: incomeDTOs,
             creditCardPayments: paymentDTOs,
+            payoffPlans: payoffs.map { p in
+                PayoffPlanDTO(
+                    planId: p.planId,
+                    kind: p.kindRaw,
+                    name: p.name,
+                    accountId: p.accountId,
+                    paymentMethod: p.paymentMethod,
+                    originalAmount: p.originalAmount,
+                    remainingAmount: p.remainingAmount,
+                    monthlyPayment: p.monthlyPayment,
+                    aprPercent: p.aprPercent,
+                    startDate: dReq(p.startDate),
+                    endDate: d(p.endDate),
+                    termMonths: p.termMonths,
+                    linkedTransactionId: p.linkedTransactionId,
+                    isEnded: p.isEnded,
+                    lastAppliedStatementDate: d(p.lastAppliedStatementDate)
+                )
+            },
+            budgetPlans: budgets.map { b in
+                BudgetPlanDTO(
+                    monthlyLimit: b.monthlyLimit,
+                    categoryLimits: b.categoryLimits,
+                    expectedIncomeStreams: b.expectedIncomeStreams.count,
+                    expectedIncomeMonthlyTotal: b.expectedIncomeStreams
+                        .reduce(0) { $0 + $1.amount }
+                )
+            },
             linkedItems: linkedDTOs,
             cardLabels: labels,
             vendorRules: rules,

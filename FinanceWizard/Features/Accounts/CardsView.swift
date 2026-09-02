@@ -254,7 +254,6 @@ struct CardsView: View {
                 }
             }
             .task(id: refreshToken) {
-                AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
                 // Clear orphan/duplicate deposit accounts (e.g. X Money after Relink)
                 if PlaidSyncEngine.cleanupStaleBankAccounts(modelContext: modelContext) > 0 {
                     try? modelContext.save()

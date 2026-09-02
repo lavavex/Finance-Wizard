@@ -882,7 +882,6 @@ private struct PlaidRestorePlanSheet: View {
                         LabeledContent("Income", value: "\(plan.incomeCount)")
                         LabeledContent("Accounts", value: "\(plan.bankAccountCount)")
                         LabeledContent("Card payments", value: "\(plan.paymentCount)")
-                        LabeledContent("Recurring", value: "\(plan.recurringCount)")
                         LabeledContent("Budget plans", value: "\(plan.budgetPlanCount)")
                         LabeledContent("Payoff plans", value: "\(plan.payoffPlanCount)")
                         LabeledContent("Nicknames", value: "\(plan.cardLabelCount)")

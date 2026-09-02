@@ -131,8 +131,6 @@ struct AllTransactionsView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var isImporting = false
-    @State private var importContentTypes: [UTType] = [.json]
-    @State private var importMode: ImportMode = .json
     @State private var importError: String?
     @State private var importStatusMessage: String?
     @State private var isSyncing = false
@@ -376,7 +374,6 @@ struct AllTransactionsView: View {
                 await syncFromPlaid(resetCursors: false)
             }
             .task {
-                AppleCardAccount.ensureIfNeeded(in: modelContext, transactions: transactions)
                 InstitutionLogoCache.warmMemory(accounts: bankAccounts)
                 InstitutionLogoCache.prefetch(accounts: bankAccounts)
                 refreshToolStats()
@@ -438,22 +435,8 @@ struct AllTransactionsView: View {
                         Image(systemName: "arrow.up.arrow.down")
                     }
 
-                    Menu {
-                        Button {
-                            importMode = .json
-                            importContentTypes = [.json]
-                            isImporting = true
-                        } label: {
-                            Label("JSON export…", systemImage: "doc.text")
-                        }
-                        Button {
-                            importMode = .appleCardCSV
-                            // CSV picker: commaSeparatedText, plainText, and .csv (whichever UTTypes exist).
-                            importContentTypes = [.commaSeparatedText, .plainText, UTType(filenameExtension: "csv")].compactMap { $0 }
-                            isImporting = true
-                        } label: {
-                            Label("Apple Card CSV…", systemImage: "apple.logo")
-                        }
+                    Button {
+                        isImporting = true
                     } label: {
                         Text("Import")
                     }
@@ -461,7 +444,7 @@ struct AllTransactionsView: View {
             }
             .fileImporter(
                 isPresented: $isImporting,
-                allowedContentTypes: importContentTypes,
+                allowedContentTypes: [.json],
                 allowsMultipleSelection: false
             ) { result in
                 handleImport(result)
@@ -506,13 +489,7 @@ struct AllTransactionsView: View {
 
     // MARK: - Import / sync
 
-    /// Which file kind the import picker is targeting right now.
-    private enum ImportMode {
-        case json
-        case appleCardCSV
-    }
-
-    /// Handles the document picker’s Result: security-scope access, then CSV or JSON path.
+    /// Handles the document picker’s Result: security-scope access, then the JSON path.
     private func handleImport(_ result: Result<[URL], Error>) {
         switch result {
         case .failure(let error):
@@ -526,22 +503,9 @@ struct AllTransactionsView: View {
             }
             do {
                 let data = try Data(contentsOf: url)
-                let name = url.lastPathComponent.lowercased()
-                let mode = importMode
-                // Auto-detect by extension when the picker is ambiguous.
-                if mode == .appleCardCSV || name.hasSuffix(".csv") {
-                    let report = try AppleCardCSVImporter.importCSV(
-                        data: data,
-                        modelContext: modelContext
-                    )
-                    WidgetCenter.shared.reloadAllTimelines()
-                    importStatusMessage = report.summary
-                    importError = nil
-                } else {
-                    let count = try upsertTransactions(from: data)
-                    importStatusMessage = "Imported \(count) transaction(s) from JSON."
-                    importError = nil
-                }
+                let count = try upsertTransactions(from: data)
+                importStatusMessage = "Imported \(count) transaction(s) from JSON."
+                importError = nil
             } catch {
                 importError = error.localizedDescription
             }
@@ -649,10 +613,7 @@ struct AllTransactionsView: View {
         // Yield first so the current scroll frame can finish.
         Task(priority: .utility) { @MainActor in
             await Task.yield()
-            reviewCount = ReviewQueueAnalytics.count(
-                in: txModels,
-                accounts: accounts
-            )
+            reviewCount = ReviewQueueAnalytics.count(in: txModels)
         }
     }
 
@@ -776,12 +737,13 @@ struct AllTransactionsView: View {
         return rows.count
     }
 
-    /// Parse export date strings like "2026-07-15" into Date (UTC Gregorian, POSIX locale).
+    /// Parse export date strings like "2026-07-15" as a local calendar day.
+    /// Must match PlaidSyncEngine.dayFormatter — see the note there on why not UTC.
     private static func parseExportDate(_ string: String) -> Date? {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.date(from: string)
     }

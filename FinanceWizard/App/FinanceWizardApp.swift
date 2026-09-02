@@ -22,8 +22,6 @@ struct FinanceWizardApp: App {
             fatalError("Failed to open ModelContainer: \(error)")
         }
         InstitutionLogoFetcher.start()
-        // Bundled logos (e.g. Apple Card) so tiles work before a network fetch.
-        InstitutionLogoCache.seedBundledLogos()
     }
 
     var body: some Scene {

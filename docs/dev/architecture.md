@@ -35,7 +35,7 @@ FinanceWizard/                 Main app (SwiftUI + Plaid client)
     Accounts/                  Accounts hub, card detail, payoff plans, accounts board model
     Budget/                    Monthly budget UI
     Settings/                  Settings, backup, debug export, Debug menu
-    Import/                    Apple Card CSV, JSON import decode shapes
+    Import/                    JSON import decode shapes
     AI/                        On-device Foundation Models (skeleton; not in Settings)
   Services/                    App-only helpers (classify API stub, logo fetch)
   Plaid/                       Credentials, Link, /transactions/sync, backup wipe

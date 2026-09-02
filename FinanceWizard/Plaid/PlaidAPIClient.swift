@@ -470,32 +470,7 @@ enum PlaidAPIClient {
         return response.request_id
     }
 
-    /// Recurring inflow/outflow streams (`/transactions/recurring/get`). Optional add-on.
-    static func transactionsRecurringGet(
-        accessToken: String,
-        accountIDs: [String]? = nil
-    ) async throws -> PlaidRecurringGetResponse {
-        try PlaidCredentialsStore.requireConfigured()
 
-        struct Body: Encodable {
-            let client_id: String
-            let secret: String
-            let access_token: String
-            let account_ids: [String]?
-        }
-
-        return try await post(
-            path: "/transactions/recurring/get",
-            body: Body(
-                client_id: PlaidCredentialsStore.clientID,
-                secret: PlaidCredentialsStore.secret,
-                access_token: accessToken,
-                account_ids: accountIDs
-            )
-        )
-    }
-
-    // MARK: - Public API — Item status & institutions
 
     /// Institution id + error status + product access for a linked Item (`/item/get`).
     static func itemGet(accessToken: String) async throws -> PlaidItemGetResult {
@@ -892,32 +867,3 @@ struct PlaidItemGetResult: Sendable {
     }
 }
 
-/// Response for optional recurring streams product.
-struct PlaidRecurringGetResponse: Decodable {
-    let inflow_streams: [PlaidRecurringStream]?
-    let outflow_streams: [PlaidRecurringStream]?
-    let updated_datetime: String?
-    let request_id: String?
-}
-
-struct PlaidRecurringStream: Decodable {
-    let account_id: String?
-    let stream_id: String
-    let description: String?
-    let merchant_name: String?
-    let first_date: String?
-    let last_date: String?
-    let predicted_next_date: String?
-    let frequency: String?
-    let transaction_ids: [String]?
-    let average_amount: PlaidStreamAmount?
-    let last_amount: PlaidStreamAmount?
-    let is_active: Bool?
-    let status: String?
-    let personal_finance_category: PlaidPFC?
-}
-
-struct PlaidStreamAmount: Decodable {
-    let amount: Double?
-    let iso_currency_code: String?
-}

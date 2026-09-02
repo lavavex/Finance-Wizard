@@ -43,7 +43,7 @@ struct OnboardingView: View {
                             Text("All your charges")
                                 .font(.headline)
                                 .foregroundStyle(.primary)
-                            Text("Link banks or import Apple Card. Search, filter by month, and recategorize anything that’s wrong.")
+                            Text("Link your banks. Search, filter by month, and recategorize anything that’s wrong.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)

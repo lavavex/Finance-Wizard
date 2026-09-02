@@ -23,7 +23,6 @@ extension PlaidConnectionBackup {
         var income: [IncomeSnapshot]?
         var bankAccounts: [BankAccountSnapshot]?
         var creditCardPayments: [PaymentSnapshot]?
-        var recurringStreams: [RecurringStreamSnapshot]?
         var budgetPlans: [BudgetPlanSnapshot]?
         var payoffPlans: [PayoffPlanSnapshot]?
         var cardLabels: [String: String]?
@@ -134,22 +133,6 @@ extension PlaidConnectionBackup {
         var institutionName: String?
     }
 
-    struct RecurringStreamSnapshot: Codable, Equatable, Sendable {
-        var streamId: String
-        var itemId: String
-        var direction: String
-        var streamDescription: String
-        var merchantName: String?
-        var averageAmount: Double
-        var lastAmount: Double
-        var frequency: String
-        var firstDate: Date?
-        var lastDate: Date?
-        var isActive: Bool
-        var transactionIds: [String]
-        var accountId: String?
-        var updatedAt: Date
-    }
 
     struct BudgetPlanSnapshot: Codable, Equatable, Sendable {
         var planId: String

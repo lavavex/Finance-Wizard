@@ -50,10 +50,7 @@ struct ReviewQueueItem: Identifiable {
 /// Static helpers that scan transactions and flag rows needing a human pass.
 enum ReviewQueueAnalytics {
     /// Spend-like rows that need a human pass (newest first).
-    static func items(
-        in transactions: [Transaction],
-        accounts: [BankAccount] = []
-    ) -> [ReviewQueueItem] {
+    static func items(in transactions: [Transaction]) -> [ReviewQueueItem] {
         let recent = recentSpend(in: transactions)
         var rows: [ReviewQueueItem] = []
 
@@ -78,9 +75,9 @@ enum ReviewQueueAnalytics {
     /// PERF: was `items(...).count`, which allocated a ReviewQueueItem per hit and then sorted
     /// the whole array before throwing it away. This runs on every Transactions-tab rebuild.
     /// Count the same rows without building or ordering them.
-    static func count(in transactions: [Transaction], accounts: [BankAccount] = []) -> Int {
+    static func count(in transactions: [Transaction]) -> Int {
         recentSpend(in: transactions).reduce(into: 0) { total, tx in
-            if needsReview(tx, accounts: accounts) { total += 1 }
+            if needsReview(tx) { total += 1 }
         }
     }
 
@@ -90,7 +87,7 @@ enum ReviewQueueAnalytics {
         return TransactionAnalytics.spendOnly(transactions).filter { $0.date >= cutoff }
     }
 
-    private static func needsReview(_ tx: Transaction, accounts: [BankAccount]) -> Bool {
+    private static func needsReview(_ tx: Transaction) -> Bool {
         looksWeakCategory(tx.category) || looksBillPayCandidate(tx)
     }
 

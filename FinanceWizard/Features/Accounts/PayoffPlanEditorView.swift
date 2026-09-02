@@ -695,12 +695,30 @@ struct PayoffPlanEditorView: View {
         }
     }
 
+    /// FIX: this replaced "," with "." to accept European decimals, which destroyed US
+    /// thousands separators — "4,000" parsed as $4.00, "$4,000" as $4.00 and "4,000.00" as
+    /// nil. Entering a loan with a comma silently created a $4 plan. Decide what the comma
+    /// means from the string itself: a group separator when digits follow in threes or a
+    /// "." is also present, otherwise a decimal mark.
     private func parseAmount(_ raw: String) -> Double? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: ",", with: ".")
+        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "$", with: "")
-        guard let value = Double(trimmed) else { return nil }
-        return value
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\u{00A0}", with: "")
+        guard !t.isEmpty else { return nil }
+        if t.contains(",") {
+            if t.contains(".") {
+                // "4,000.00" — comma groups, dot decides the decimal.
+                t = t.replacingOccurrences(of: ",", with: "")
+            } else {
+                // "4,000" groups; "4,5" is a decimal comma.
+                let parts = t.split(separator: ",", omittingEmptySubsequences: false)
+                let grouped = parts.count > 1
+                    && parts.dropFirst().allSatisfy { $0.count == 3 && $0.allSatisfy(\.isNumber) }
+                t = t.replacingOccurrences(of: ",", with: grouped ? "" : ".")
+            }
+        }
+        return Double(t)
     }
 
     private func parseOptionalAmount(_ raw: String) -> Double? {

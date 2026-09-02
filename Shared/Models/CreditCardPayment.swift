@@ -79,7 +79,7 @@ enum CreditAnalytics {
         rows.reduce(0) { $0 + max(0, $1.amount) }
     }
 
-    /// Checking ACH and the card’s “Thank You” can land 0–3 days apart (Apple Card, EPAY).
+    /// Checking ACH and the card’s “Thank You” can land 0–3 days apart (EPAY, ACH bill pay).
     /// Pair same amount + same card identity; do not merge two different cards that happen
     /// to be paid the same dollars (e.g. $1000 Apple vs $1000 Amex).
     static let duplicateWindowDays = 3
