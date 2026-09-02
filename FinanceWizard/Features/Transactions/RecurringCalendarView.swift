@@ -22,8 +22,11 @@ struct RecurringCalendarView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: UICalendarView, context: Context) {
+        // FIX: reloading only the *current* set never re-asks the delegate about a day that
+        // was removed, so its dot stayed on the calendar. Reload the union of both sets.
+        let stale = context.coordinator.chargeDays
         context.coordinator.chargeDays = chargeDays
-        uiView.reloadDecorations(forDateComponents: Array(chargeDays), animated: true)
+        uiView.reloadDecorations(forDateComponents: Array(stale.union(chargeDays)), animated: true)
         
     }
     

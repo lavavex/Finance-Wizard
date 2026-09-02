@@ -30,8 +30,10 @@ enum TransactionSearch {
             .replacingOccurrences(of: ",", with: "")
         if let target = Double(amountDigits) {
             if abs(abs(tx.amount) - target) < 0.005 { return true }
+            // FIX: `contains` matched the cents, so typing "5" returned nearly every row.
+            // Require enough digits to be meaningful; hasPrefix is subsumed by contains.
             let absStr = String(format: "%.2f", abs(tx.amount))
-            if absStr.hasPrefix(amountDigits) || absStr.contains(amountDigits) {
+            if amountDigits.count >= 2, absStr.contains(amountDigits) {
                 return true
             }
         }

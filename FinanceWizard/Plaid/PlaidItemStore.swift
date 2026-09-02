@@ -176,11 +176,6 @@ enum PlaidItemStore {
         !loadItems().isEmpty
     }
 
-    /// Items that need Relink (login expired / permission revoked).
-    static var itemsNeedingRelink: [PlaidLinkedItem] {
-        loadItems().filter(\.needsRelink)
-    }
-
     // MARK: - Private metadata (no secrets)
 
     /// Metadata only (no secret access token).

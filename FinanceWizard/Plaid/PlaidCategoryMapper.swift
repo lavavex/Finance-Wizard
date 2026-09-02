@@ -486,8 +486,18 @@ enum PlaidCategoryMapper {
         case "RENT_AND_UTILITIES":
             return KnownCategory.utilities.rawValue
         case "LOAN_PAYMENTS":
+            // FIX: this returned the Credit Card Payment category, but expenseCategory only
+            // runs for rows classify() already decided are *spend* — it refuses to call a
+            // positive amount on a credit account a payment. A $412 in-store Best Buy swipe
+            // Plaid tags LOAN_PAYMENTS_CREDIT_CARD_PAYMENT was therefore filed under a
+            // category excluded from spend, with no payment row either: a ledger entry
+            // nothing summed. Real payments get their category from upsertCreditPaymentExpense.
+            // OLD: if detailed.contains("CREDIT_CARD") { return creditCardPaymentCategory }
             if detailed.contains("CREDIT_CARD") {
-                return TransactionAnalytics.creditCardPaymentCategory
+                return TitleCategoryHints.refine(
+                    category: KnownCategory.miscellaneous.rawValue,
+                    title: title
+                )
             }
             if detailed.contains("MORTGAGE") || detailed.contains("HOME") {
                 return KnownCategory.housing.rawValue

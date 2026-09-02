@@ -19,6 +19,9 @@ struct PeriodFilterMenu: View {
     var additionalDates: [Date] = []
     /// Icon-only (transactions tab) vs labeled (cards / categories).
     var showTitle: Bool = true
+    /// Which periods this screen can actually interpret. Budget compares against *monthly*
+    /// caps, so offering "This week" or "All time" there produced "1500% of monthly budget".
+    var allowedPeriods: [SnapshotPeriod] = SnapshotPeriod.allCases
 
     private var monthStarts: [Date] {
         TransactionAnalytics.availableMonthStarts(
@@ -33,7 +36,7 @@ struct PeriodFilterMenu: View {
     var body: some View {
         Menu {
             Picker("Period", selection: periodSelection) {
-                ForEach(SnapshotPeriod.allCases) { option in
+                ForEach(allowedPeriods) { option in
                     Text(option.displayName).tag(option)
                 }
             }

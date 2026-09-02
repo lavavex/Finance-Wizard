@@ -170,20 +170,6 @@ final class PayoffPlan {
         PayoffPlanMath.evenPrincipal(remaining: remainingAmount, months: termMonths)
     }
 
-    /// Pay Over Time: payment minus even principal. My Loan: remaining × APR / 12.
-    var impliedMonthlyFee: Double? {
-        if kind == .myLoan {
-            return PayoffPlanMath.amortizingInterest(
-                remaining: remainingAmount,
-                aprPercent: aprPercent
-            )
-        }
-        return PayoffPlanMath.impliedFee(
-            payment: monthlyPayment,
-            remaining: remainingAmount,
-            months: termMonths
-        )
-    }
 
     init(
         planId: String = UUID().uuidString,
@@ -241,7 +227,13 @@ final class PayoffPlan {
         if let applied = lastAppliedStatementDate {
             let appliedDay = cal.startOfDay(for: applied)
             guard stmt > appliedDay else { return }
-            let months = max(1, cal.dateComponents([.month], from: appliedDay, to: stmt).month ?? 1)
+            // FIX: dateComponents([.month]) truncates, so closes on Jan 5 / Feb 4 / Mar 3
+            // with no refresh between counted as one month for a two-cycle gap — the February
+            // payment was lost for good, leaving the loan ~one payment high and its term one
+            // cycle long. Count whole cycles from the day gap instead.
+            // OLD: let months = max(1, cal.dateComponents([.month], from: appliedDay, to: stmt).month ?? 1)
+            let days = cal.dateComponents([.day], from: appliedDay, to: stmt).day ?? 30
+            let months = max(1, Int((Double(days) / 30.44).rounded()))
             for _ in 0..<months {
                 recordPayment()
                 if !isActive { break }
@@ -273,71 +265,41 @@ final class PayoffPlan {
         return next
     }
 
+    /// FIX: this advanced from the previous *clamped* result, so a plan starting on the 31st
+    /// decayed 31 → 30 → 28 and never recovered — every later due date was wrong. Rebuild each
+    /// candidate from the original day-of-month, clamped to the target month's length.
     private func nextMonthly(from start: Date, after today: Date, calendar: Calendar) -> Date? {
-        var cursor = calendar.startOfDay(for: start)
-        if cursor >= today { return cursor }
+        let startDay = calendar.startOfDay(for: start)
+        if startDay >= today { return startDay }
+        let wantedDay = calendar.component(.day, from: startDay)
+        var monthAnchor = startDay
         var hops = 0
-        while cursor < today, hops < 360 {
-            guard let next = calendar.date(byAdding: .month, value: 1, to: cursor) else { return nil }
-            cursor = next
+        while hops < 360 {
+            guard let next = calendar.date(byAdding: .month, value: 1, to: monthAnchor) else {
+                return nil
+            }
+            monthAnchor = next
             hops += 1
+            var comps = calendar.dateComponents([.year, .month], from: monthAnchor)
+            guard let monthStart = calendar.date(from: comps),
+                  let range = calendar.range(of: .day, in: .month, for: monthStart) else {
+                continue
+            }
+            comps.day = min(wantedDay, range.count)
+            guard let candidate = calendar.date(from: comps) else { continue }
+            if calendar.startOfDay(for: candidate) >= today {
+                return calendar.startOfDay(for: candidate)
+            }
         }
-        return cursor
+        return nil
     }
 
-    /// FIX: this divided remaining by payment and ignored interest, while recordPayment()
-    /// correctly takes interest out of the payment first. A My Chase Loan or a non-zero
-    /// promo APR therefore reported a payoff date earlier than it could ever happen, and
-    /// missesEndDate() under-fired. Now amortised at the plan's APR (0% behaves as before).
-    /// Whole months of `monthlyPayment` still needed. nil = the payment never clears the
-    /// balance because it does not cover the monthly interest.
-    /// OLD:
-    /// var monthsToPayOff: Int {
-    ///     guard monthlyPayment > 0, remainingAmount > 0 else { return 0 }
-    ///     return Int(ceil(remainingAmount / monthlyPayment))
-    /// }
-    var monthsToPayOff: Int? {
-        // FIX: for an issuer-scheduled plan the term is a contractual fact from the loan
-        // email ("12 billing cycles"), not something to infer. Re-deriving it from payment
-        // and APR came out one month long on the real $4,000 / 9.49% / $350.39 loan, because
-        // Chase bills interest on a daily periodic rate rather than APR ÷ 12. Trust the term.
-        if kind.followsCardStatement, let months = termMonths, months > 0 {
-            return months
-        }
-        return PayoffPlanMath.monthsToPayOff(
-            remaining: remainingAmount,
-            payment: monthlyPayment,
-            aprPercent: aprPercent
-        )
-    }
+    // NOTE: the model-side projection chain (monthsToPayOff / projectedPayoffDate /
+    // monthsUntilEnd / missesEndDate) was removed — nothing called it, and
+    // PayoffPlanEditorView.paceWarning computes the same warning from PayoffPlanMath
+    // directly. Two copies had already drifted: the model short-circuited to termMonths for
+    // issuer plans while the editor always amortised. PayoffPlanMath remains the one source.
 
-    func projectedPayoffDate(from now: Date = Date()) -> Date? {
-        guard let months = monthsToPayOff else { return nil }
-        guard months > 0 else { return now }
-        return Calendar.current.date(byAdding: .month, value: months, to: now)
-    }
-
-    /// Months from `now` until `endDate`, at least 1 when the end is still in the future.
-    func monthsUntilEnd(from now: Date = Date()) -> Int? {
-        guard let end = endDate else { return nil }
-        let cal = Calendar.current
-        let months = cal.dateComponents(
-            [.month],
-            from: cal.startOfDay(for: now),
-            to: cal.startOfDay(for: end)
-        ).month ?? 0
-        if end < now { return 0 }
-        return max(1, months)
-    }
-
-    /// True when a promo/end date exists and the current payment would miss it.
-    func missesEndDate(from now: Date = Date()) -> Bool {
-        guard let end = endDate else { return false }
-        // FIX: a payment too small to cover the interest now yields a nil projection.
-        // That is the worst case, not "no problem", so it must report as missing the date.
-        guard let projected = projectedPayoffDate(from: now) else { return true }
-        return Calendar.current.startOfDay(for: projected) > Calendar.current.startOfDay(for: end)
-    }
 
     /// Subtract one month of principal. Fee / interest is not principal.
     func recordPayment() {

@@ -105,15 +105,24 @@ enum ReviewQueueAnalytics {
     }
 
     /// Title text that often means “paying the credit card,” not true spend.
+    /// FIX: this kept its own, laxer needle list including "autopay" / "auto pay" — the exact
+    /// words PlaidCategoryMapper stopped trusting unconditionally because VERIZON, T-MOBILE
+    /// and GEICO *AUTOPAY rows were being filed as card payments. A locked "GEICO AUTOPAY"
+    /// sat in Needs review forever, and the one swipe action offered moved $142 out of Total
+    /// Spend and into Total paid. Respect the user's decision and defer to the one classifier.
     private static func looksBillPayCandidate(_ tx: Transaction) -> Bool {
         if TransactionAnalytics.isExcludedFromSpendCategory(tx.category) { return false }
+        // The user already ruled on this row — do not keep asking.
+        if tx.isCategoryLocked || tx.overrideSource == "user" { return false }
         let t = tx.title.lowercased()
+        // Strong needles only. "autopay" / "auto pay" / bare "online payment" / "epay" are
+        // deliberately absent: they appear on ordinary utility, phone and insurance bills.
+        // This file is in Shared/ (the widget compiles it), so it cannot call
+        // PlaidCategoryMapper — keep this list a strict subset of that one's strong set.
         let needles = [
-            "payment thank you", "payment thankyou", "autopay", "auto pay",
-            "bill pay", "billpay", "credit card payment", "online payment",
+            "payment thank you", "payment thankyou", "credit card payment",
             "payment to chase", "payment to amex", "payment to american",
-            "payment to citi", "payment to capital", "payment to discover",
-            "epay", "e-pay", "epmt", "ach payment"
+            "payment to citi", "payment to capital", "payment to discover"
         ]
         return needles.contains { t.contains($0) }
     }

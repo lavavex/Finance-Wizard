@@ -378,7 +378,12 @@ struct AllTransactionsView: View {
                 InstitutionLogoCache.prefetch(accounts: bankAccounts)
                 refreshToolStats()
             }
+            // FIX: resolving a queue item changes a row's category, not the count, so the
+            // badge kept its old number until a sync added or removed a transaction.
             .onChange(of: transactions.count) { _, _ in
+                refreshToolStats()
+            }
+            .onChange(of: transactions.map(\.category).joined(separator: "|")) { _, _ in
                 refreshToolStats()
             }
             .onChange(of: bankAccounts.count) { _, _ in
@@ -503,8 +508,16 @@ struct AllTransactionsView: View {
             }
             do {
                 let data = try Data(contentsOf: url)
-                let count = try upsertTransactions(from: data)
-                importStatusMessage = "Imported \(count) transaction(s) from JSON."
+                // FIX: upsertIncome existed but nothing called it, so an income-only export
+                // (no "transactions" key) failed ExportFile decoding and surfaced a raw
+                // Swift decoding error. Fall back to the income shape before giving up.
+                do {
+                    let count = try upsertTransactions(from: data)
+                    importStatusMessage = "Imported \(count) transaction(s) from JSON."
+                } catch {
+                    let count = try upsertIncome(from: data)
+                    importStatusMessage = "Imported \(count) income row(s) from JSON."
+                }
                 importError = nil
             } catch {
                 importError = error.localizedDescription
@@ -607,7 +620,6 @@ struct AllTransactionsView: View {
     @MainActor
     private func refreshToolStats() {
         let txModels = transactions
-        let accounts = bankAccounts
 
         // Review queue needs live models (reasons attach to Transaction rows).
         // Yield first so the current scroll frame can finish.
@@ -647,8 +659,14 @@ struct AllTransactionsView: View {
                     existing.category = item.category
                 }
                 existing.paymentMethod = item.payment_method
-                existing.categoryLocked = categoryLocked
-                existing.overrideSource = item.override_source
+                // FIX: this kept the category the lock protected but then cleared the lock
+                // itself (and blanked overrideSource, which upsertExpense keys on for
+                // "my-loan"), so the next sync reclassified the row. Only ever raise a lock.
+                if categoryLocked { existing.categoryLocked = true }
+                if let source = item.override_source, !source.isEmpty,
+                   (existing.overrideSource ?? "").isEmpty {
+                    existing.overrideSource = source
+                }
             } else {
                 modelContext.insert(
                     Transaction(

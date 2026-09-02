@@ -86,11 +86,14 @@ struct BudgetView: View {
             .navigationTitle("Budget")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    // Limits and expected income are monthly figures; comparing a week or
+                    // all of history against them rendered nonsense percentages.
                     PeriodFilterMenu(
                         period: $period,
                         referenceDate: $referenceDate,
                         transactions: transactions,
-                        showTitle: true
+                        showTitle: true,
+                        allowedPeriods: [.month]
                     )
                 }
             }

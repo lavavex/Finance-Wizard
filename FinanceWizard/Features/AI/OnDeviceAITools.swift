@@ -264,9 +264,15 @@ struct SearchTransactionsTool: Tool {
             var descriptor = FetchDescriptor<Transaction>(
                 sortBy: [SortDescriptor(\.date, order: .reverse)]
             )
-            descriptor.fetchLimit = 120
+            // FIX: the cap was applied to the *fetch*, so search only ever saw the most
+            // recent ~120 rows — about a month with four cards. "How much did I spend at Home
+            // Depot in March?" asked in September matched nothing and the model answered that
+            // there were no such charges. Match across history, then cap the results.
+            // OLD: descriptor.fetchLimit = 120
             let rows = (try? modelContext.fetch(descriptor)) ?? []
-            let matches = TransactionSearch.filter(rows, query: arguments.query, accounts: accounts).prefix(limit)
+            let matches = TransactionSearch
+                .filter(rows, query: arguments.query, accounts: accounts)
+                .prefix(limit)
             let day = DateFormatter()
             day.dateStyle = .medium
             day.timeStyle = .none
@@ -291,26 +297,6 @@ struct SearchTransactionsTool: Tool {
     }
 }
 
-struct TopTransactionsTool: Tool {
-    let name = "getTopTransactions"
-    let description = "Search for biggest/largest single charges; not category totals; not a named merchant"
-    let modelContext: ModelContext
-    
-    @Generable
-    struct Arguments {
-        @Guide(description: "0 = this calendar month, -1 = last month, down to -12")
-        var monthOffset: Int
-        @Guide(description: "Max Number of transactions/rows to return, from 1 to 20")
-        var limit: Int
-    }
-    
-    func call(arguments: Arguments) async throws -> TopTransactionList {
-        try await MainActor.run {
-            return TopTransactionList(monthLabel: "month", rows: [])
-        }
-    }
-}
-
 @Generable
 struct TransactionSearchRow {
     var date: String
@@ -324,11 +310,5 @@ struct TransactionSearchRow {
 @Generable
 struct TransactionSearchList {
     var query: String
-    var rows: [TransactionSearchRow]
-}
-
-@Generable
-struct TopTransactionList {
-    var monthLabel: String
     var rows: [TransactionSearchRow]
 }

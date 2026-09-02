@@ -143,16 +143,15 @@ struct AccountsBoard {
                     displayName: account.displayName,
                     rawPaymentMethod: primary,
                     matchingPaymentMethods: methods,
+                    // FIX: `spent` counts spend rows only while the count used the whole
+                    // bucket, so "This statement $842.10 · 17" mixed two populations —
+                    // payments and refunds inflated the count beside a spend-only total.
                     spent: TransactionAnalytics.totalSpend(in: statementRows),
-                    transactionCount: statementRows.count,
+                    transactionCount: TransactionAnalytics.spendOnly(statementRows).count,
                     creditAccount: account,
                     bankAccount: account,
                     paidInPeriod: paid,
                     installmentIncludedInMin: PayoffPlanProgress.installmentIncludedInMin(
-                        on: account,
-                        plans: payoffPlans
-                    ),
-                    extraPrincipalThisStatement: PayoffPlanProgress.extraPrincipalThisStatement(
                         on: account,
                         plans: payoffPlans
                     ),
@@ -388,7 +387,10 @@ struct UnifiedCardRow: Identifiable {
     var bankAccount: BankAccount? = nil
     let paidInPeriod: Double
     var installmentIncludedInMin: Double = 0
-    var extraPrincipalThisStatement: Double = 0
+    // NOTE: `extraPrincipalThisStatement` was computed here for every card on every board
+    // rebuild — a full payoffPlans scan with string matching — and never rendered.
+    // BudgetView calls PayoffPlanProgress.extraPrincipalThisStatement directly and *does*
+    // display it, so the helper stays; only this unread copy is gone.
     /// FIX: replaced the `spendIsThisStatement` flag, which hard-coded the "This statement"
     /// prefix even when the row was actually showing the last closed cycle.
     /// OLD: var spendIsThisStatement: Bool = false

@@ -158,6 +158,24 @@ Rows written before that fix sit at UTC midnight. `reanchorStoredDays` re-stamps
 midnight of their intended day, gated on `dayAnchorVersion`. It only touches values sitting
 exactly on a UTC midnight, so real timestamps are safe and re-running is a no-op.
 
+### Two things must agree about "the same" payment
+
+`CreditAnalytics.isSamePayment` collapses the checking-side and card-side rows of one bill
+pay. It now *requires* the two rows to be on opposite sides — mask and issuer only confirm the
+pair. Without that guard two genuinely separate payments of equal amount inside the 3-day
+window merged, and Total paid under-counted.
+
+`TransactionDetailView.syncCreditPaymentRecord` must resolve `cardName` to the **card**, not
+the funding account — `AccountsBoard.paymentsMatching` and `paymentIdentities` treat it as the
+card's identity.
+
+### `expenseCategory` must never return the Credit Card Payment category
+
+It only runs for rows `classify()` already decided are spend. Returning that category filed a
+real purchase (an in-store swipe Plaid tags `LOAN_PAYMENTS_CREDIT_CARD_PAYMENT`) under a
+category excluded from spend, with no payment row either — a ledger entry nothing summed.
+Genuine payments get their category from `upsertCreditPaymentExpense`.
+
 ### Card financing fees
 
 `PLAN FEE - <merchant>` (My Chase Plan) and `ANNUAL MEMBERSHIP FEE` map to **Fees**, not
