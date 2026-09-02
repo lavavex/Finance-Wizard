@@ -1247,7 +1247,8 @@ enum PlaidSyncEngine {
     /// Bump when the classifier changes so the one-off repair pass runs again.
     /// v2: bill-pay vs loan-disbursement ordering, issuer credits, plan fees.
     /// v3: stop the purchase-rescue branch deleting payment rows for transfer-worded bill pays.
-    static let legacyCleanupVersion = 3
+    /// v4: drop payment rows mirrored for Loan / Refund / Installment edits.
+    static let legacyCleanupVersion = 4
     static let legacyCleanupVersionKey = "plaid.legacyCleanup.v"
 
     /// Re-home mis-filed spend/income that look like transfers or card payments.
@@ -1298,6 +1299,16 @@ enum PlaidSyncEngine {
                     row.overrideSource = "legacy-credit-payment"
                     ensureCreditPaymentFromTransaction(row, modelContext: modelContext)
                     fixed += 1
+                    continue
+                }
+
+                // A payment row must only exist for a card payment. Editing a charge to Loan,
+                // Refund or Installment used to mirror one, so drop any that linger.
+                if !TransactionAnalytics.isCreditCardPaymentCategory(row.category),
+                   TransactionAnalytics.isExcludedFromSpendCategory(row.category) {
+                    if deleteCreditPaymentOnly(transactionID: row.transactionId, modelContext: modelContext) {
+                        fixed += 1
+                    }
                     continue
                 }
 

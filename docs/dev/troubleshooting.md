@@ -119,6 +119,18 @@ transfer rule on the next pass. The branch now also requires
 Rows already destroyed this way cannot be recovered from Plaid if they came from the Apple
 Card CSV (ids prefixed `applecard:`) — re-import the CSV to restore them.
 
+### A charge shows up in Total paid after editing its category
+
+`TransactionDetailView.syncCreditPaymentRecord` mirrors a `CreditCardPayment` row when the
+chosen category is excluded from spend. `isExcludedFromSpendCategory` covers **Loan, Refund
+and Installment** as well as Credit Card Payment, so re-filing a charge as Loan created a
+bill-payment row for it — re-inflating Total paid by the charge amount. The guard is now
+`isCreditCardPaymentCategory`. Same distinction applies in `OnDeviceAITools`, where the
+"card payments" total counted all four categories.
+
+`cleanLegacyMisclassifiedRows` drops payment rows left behind by the old behaviour: a
+transaction excluded from spend but *not* categorised Credit Card Payment must not have one.
+
 ### Card financing fees
 
 `PLAN FEE - <merchant>` (My Chase Plan) and `ANNUAL MEMBERSHIP FEE` map to **Fees**, not

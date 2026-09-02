@@ -415,8 +415,11 @@ struct TransactionDetailView: View {
                 saveStatusMessage = "Saved as monthly recurring."
             } else if subscriptionMode == .weekly {
                 saveStatusMessage = "Saved as weekly recurring."
-            } else if TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
+            } else if TransactionAnalytics.isCreditCardPaymentCategory(trimmedCategory) {
                 saveStatusMessage = "Saved as Credit Card Payment (excluded from Total Spend)."
+            } else if TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
+                // Loan / Refund / Installment are excluded too, but they are not payments.
+                saveStatusMessage = "Saved as \(trimmedCategory) (excluded from Total Spend)."
             } else if localExtra > 0 {
                 saveStatusMessage = "Saved. Updated \(localExtra + 1) transactions on this card."
             } else {
@@ -443,7 +446,13 @@ struct TransactionDetailView: View {
         descriptor.fetchLimit = 1
         let existing = try? modelContext.fetch(descriptor).first
 
-        if TransactionAnalytics.isExcludedFromSpendCategory(category) {
+        // FIX: this used isExcludedFromSpendCategory, which is true for Loan, Refund and
+        // Installment as well as Credit Card Payment — those are excluded from spend for
+        // different reasons and are not bill payments. Re-filing the $4,000 My Chase Loan
+        // charge as Loan therefore created a $4,000 payment row, re-inflating Total paid by
+        // exactly the amount the sync-side fix had just removed. Only a card payment mirrors.
+        // OLD: if TransactionAnalytics.isExcludedFromSpendCategory(category) {
+        if TransactionAnalytics.isCreditCardPaymentCategory(category) {
             if let existing {
                 existing.amount = abs(row.amount)
                 existing.date = row.date
