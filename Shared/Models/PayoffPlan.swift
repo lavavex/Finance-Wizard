@@ -227,6 +227,17 @@ final class PayoffPlan {
         if let applied = lastAppliedStatementDate {
             let appliedDay = cal.startOfDay(for: applied)
             guard stmt > appliedDay else { return }
+            // FIX: "a later day" is not the same as "a new statement". Re-anchoring stored
+            // dates shifted the account's lastStatementIssueDate by a day while this plan's
+            // stamp still held the old value, and that one-day gap recorded a payment that
+            // never happened — silently removing a month of principal and a term month.
+            // A billing cycle is ~30 days; anything under three weeks is drift, not a cycle.
+            let driftDays = cal.dateComponents([.day], from: appliedDay, to: stmt).day ?? 0
+            guard driftDays >= 20 else {
+                lastAppliedStatementDate = stmt
+                updatedAt = now
+                return
+            }
             // FIX: dateComponents([.month]) truncates, so closes on Jan 5 / Feb 4 / Mar 3
             // with no refresh between counted as one month for a two-cycle gap — the February
             // payment was lost for good, leaving the loan ~one payment high and its term one

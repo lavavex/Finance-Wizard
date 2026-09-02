@@ -226,7 +226,9 @@ extension PlaidSyncEngine {
 
 extension PlaidSyncEngine {
     /// Bump when stored dates need re-anchoring again.
-    static let dayAnchorVersion = 1
+    /// v2: also re-anchors PayoffPlan dates. v1 missed them, so a plan's statement stamp
+    /// disagreed with its account's by a day and applyStatementProgress read that as a cycle.
+    static let dayAnchorVersion = 2
     static let dayAnchorVersionKey = "plaid.dayAnchor.v"
 
     /// One-off repair for rows stored while day strings were parsed at UTC midnight.
@@ -265,6 +267,16 @@ extension PlaidSyncEngine {
         }
         for row in (try? modelContext.fetch(FetchDescriptor<CreditCardPayment>())) ?? [] {
             if let d = reanchored(row.date) { row.date = d; changed += 1 }
+        }
+        // PayoffPlan was missed on the first pass: its statement stamp stayed at UTC
+        // midnight while the account's moved, and applyStatementProgress read that one-day
+        // gap as a whole new cycle.
+        for plan in (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? [] {
+            if let d = reanchored(plan.startDate) { plan.startDate = d; changed += 1 }
+            if let v = plan.endDate, let d = reanchored(v) { plan.endDate = d }
+            if let v = plan.lastAppliedStatementDate, let d = reanchored(v) {
+                plan.lastAppliedStatementDate = d
+            }
         }
         for account in (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? [] {
             if let v = account.lastPaymentDate, let d = reanchored(v) { account.lastPaymentDate = d }

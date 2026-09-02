@@ -158,6 +158,18 @@ Rows written before that fix sit at UTC midnight. `reanchorStoredDays` re-stamps
 midnight of their intended day, gated on `dayAnchorVersion`. It only touches values sitting
 exactly on a UTC midnight, so real timestamps are safe and re-running is a no-op.
 
+### A payoff plan lost a payment it never made
+
+`applyStatementProgress` treated *any* later statement day as a new billing cycle. When the
+day-string re-anchor moved an account's `lastStatementIssueDate` by a day and the plan's
+`lastAppliedStatementDate` still held the old value, that one-day gap recorded a payment —
+silently removing a month of principal and a term month from an active loan.
+
+Two guards now: `reanchorStoredDays` re-anchors `PayoffPlan` dates too (v1 missed them), and
+`applyStatementProgress` requires at least 20 days between the stamps before recording. A
+billing cycle is ~30 days; anything shorter is drift, and the stamp is advanced without
+charging a payment.
+
 ### Where classification lives
 
 `PlaidCategoryMapper` and `PlaidPFC` are in **`Shared/`**, not the app target, so the widget
