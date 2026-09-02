@@ -187,8 +187,6 @@ struct FinanceSnapshot {
     let cards: [CardSpendSummary]
     /// Period total across ALL cards (hide-card does NOT shrink this). Positive = money spent.
     let totalSpend: Double
-    /// Signed period balance across ALL cards (expenses are negative in our model).
-    let balance: Double
     let transactionCount: Int
     let period: SnapshotPeriod
     let isEmptyOrError: Bool
@@ -514,7 +512,6 @@ enum TransactionAnalytics {
             return FinanceSnapshot(
                 cards: [],
                 totalSpend: 0,
-                balance: 0,
                 transactionCount: 0,
                 period: period,
                 isEmptyOrError: true,
@@ -531,7 +528,6 @@ enum TransactionAnalytics {
             return FinanceSnapshot(
                 cards: [],
                 totalSpend: 0,
-                balance: 0,
                 transactionCount: 0,
                 period: period,
                 isEmptyOrError: true,
@@ -548,7 +544,6 @@ enum TransactionAnalytics {
         return FinanceSnapshot(
             cards: cards,
             totalSpend: index.totalSpend,
-            balance: index.spendBalance,
             transactionCount: index.spendTransactions.count,
             period: period,
             isEmptyOrError: false,
@@ -685,7 +680,6 @@ enum SharedStore {
             return FinanceSnapshot(
                 cards: [],
                 totalSpend: 0,
-                balance: 0,
                 transactionCount: 0,
                 period: period,
                 isEmptyOrError: true,

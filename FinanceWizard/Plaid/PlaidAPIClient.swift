@@ -830,12 +830,6 @@ struct PlaidCounterparty: Decodable {
 }
 
 /// personal_finance_category: Plaid’s taxonomy (primary + detailed codes).
-struct PlaidPFC: Decodable {
-    let primary: String?
-    let detailed: String?
-    let confidence_level: String?
-}
-
 /// Parsed result of `/item/get` with convenience flags for Relink / products.
 struct PlaidItemGetResult: Sendable {
     let itemID: String?

@@ -35,7 +35,6 @@ struct FinanceProvider: AppIntentTimelineProvider {
                     CardSpendSummary(cardName: "Amex", spent: 30.00, transactionCount: 1)
                 ],
                 totalSpend: 195.50,
-                balance: -195.50,
                 transactionCount: 12,
                 period: .month,
                 isEmptyOrError: false,
@@ -256,7 +255,6 @@ struct FinanceHomeWidget: Widget {
                 CardSpendSummary(cardName: "X Money", spent: 20.00, transactionCount: 1)
             ],
             totalSpend: 795.62,
-            balance: -795.62,
             transactionCount: 40,
             period: .month,
             isEmptyOrError: false,

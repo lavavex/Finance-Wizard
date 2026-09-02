@@ -39,6 +39,7 @@ FinanceWizard/                 Main app (SwiftUI + Plaid client)
     AI/                        On-device Foundation Models (skeleton; not in Settings)
   Services/                    App-only helpers (classify API stub, logo fetch)
   Plaid/                       Credentials, Link, /transactions/sync, backup wipe
+                               (classification lives in Shared/Analytics — see below)
                                PlaidSyncEngine (sync) · PlaidSyncMaintenance (prune,
                                dedupe, one-off repair) · PlaidConnectionBackup (restore)
                                · PlaidBackupModels (.fwbackup snapshot shapes)
@@ -46,7 +47,8 @@ FinanceWizard/                 Main app (SwiftUI + Plaid client)
 Shared/                        Compiled into APP + WIDGET (must stay in sync)
   Models/                      SwiftData @Model + domain enums
   Store/                       SharedStore / ModelContainer
-  Analytics/                   Spend, review queue, subscriptions, search
+  Analytics/                   Spend, review queue, subscriptions, search,
+                               PlaidCategoryMapper (classification)
   Cards/                       Card nicknames
   Branding/                    Institution logo cache
   UI/                          Category style/charts, bank icons, privacy
