@@ -41,7 +41,7 @@ No painted canvas: titles use `.primary`, supporting copy `.secondary`. `AccentC
 
 | Row | Title | Meaning |
 |-----|--------|---------|
-| 1 | All your charges | Link banks or import Apple Card; recategorize |
+| 1 | All your charges | Link banks; recategorize |
 | 2 | Cards and accounts | Credit, checking, savings, utilization, bills due |
 | 3 | Monthly budget | Overall cap + category limits vs real spend |
 

@@ -62,15 +62,13 @@ If Link asks you to sign in again later, **Settings** → swipe the bank → **R
 
 | Tab | What it’s for |
 |-----|----------------|
-| **Transactions** | Spend and income for a week/month, search, categories, **Sync** / **Import** |
+| **Transactions** | Spend and income for a week/month, search, categories, **Sync** |
 | **Accounts** | Cards, checking/savings, utilization, bills due |
 | **Budget** | Monthly cap and category limits vs real spend |
 | **Recurring** | Detected subscriptions, repeating bills, and card payoff plans (My Loan, Pay Over Time, promo APR) |
 | **Settings** | Plaid keys, linked banks, backup, privacy |
 
 More detail: [Using the app](using-the-app.md).
-
-**Apple Card:** there is no live Apple Card API. **Transactions → Import → Apple Card CSV** from Wallet / [card.apple.com](https://card.apple.com).
 
 ## 6. Home Screen widgets (optional)
 
@@ -94,7 +92,7 @@ After at least one Sync:
 | Link closes immediately | Allow the browser sheet; Save credentials again |
 | List empty after Sync | Wait a few seconds on first link, then **Sync → Full re-sync** |
 | Login expired | Relink that bank in Settings |
-| Welcome again / skip Welcome | Welcome is only the first launch. Rebuilds from TestFlight keep your data. |
+| Welcome again / skip Welcome | Welcome is only the first launch. Testers: **Settings → Developer → Debug → Replay onboarding**. |
 
 More: [Help](help.md).
 

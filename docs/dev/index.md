@@ -17,7 +17,7 @@ Guides for building, debugging, and changing Finance Wizard.
 | [Sync & API](sync-and-api.md) | Plaid Link, sync, mapping, webhooks |
 | [Settings & Debug](settings.md) | Code map, Debug menu, build numbers |
 | [Widgets](widgets.md) | Widget kinds, timeline, empty states |
-| [Troubleshooting](troubleshooting.md) | Xcode, console, App Group, Welcome |
+| [Troubleshooting](troubleshooting.md) | Xcode, console, classifier cases, Welcome |
 | [Publishing this wiki](github-pages.md) | GitHub Pages |
 
 End-user TestFlight steps: [User docs](../user/index.md). Back to [Home](../index.md).

@@ -9,7 +9,7 @@ import SwiftUI
 import SwiftData
 import WidgetKit
 
-/// Full detail form for a single transaction: view fields and edit category, rail, rewards.
+/// Full detail form for a single transaction: view fields and edit category and payment rail.
 struct TransactionDetailView: View {
     @Bindable var transaction: Transaction
 

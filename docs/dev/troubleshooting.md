@@ -61,7 +61,7 @@ Race after Hosted Link. The app polls `/link/token/get`. Retry or check Plaid Da
 
 ### Link failed: “closed without linking a bank (or the session timed out)”
 
-The poll used to give up after **30s** while the bank sheet was still open (easy to hit on Sandbox: search bank → `user_good` / `pass_good` → pick accounts). It now polls until the `ASWebAuthenticationSession` closes, then waits a short grace period for `/link/token/get`.
+The poll continues until the `ASWebAuthenticationSession` closes, then waits a short grace period for `/link/token/get`. Sandbox: search bank → `user_good` / `pass_good` → pick accounts.
 
 Still failing: confirm Sandbox secret, `hosted_link.is_mobile_app` + `financewizard://hosted-link-complete`, and that **First Platypus Bank** completed (not cancelled). Plaid Dashboard → Logs for that `link_token`.
 
@@ -79,106 +79,83 @@ Should not happen if upsert by `transactionId` works. Re-linking can mint new Pl
 
 `PlaidCategoryMapper.looksLikeCardPaymentTitle(_:allowWeakSignals:)` splits its needles. Strong ones (“payment thank you”, “credit card payment”, “payment to <issuer>”, `looksLikeIssuerBillPayTitle`) always count. Weak ones — `autopay`, `automatic payment`, `ach pmt`, `payment received` — are ordinary merchant-descriptor words and only count when `allowWeakSignals` is true, which `isCreditCardPayment` passes **only** for money-in on a credit account. Do not move a needle back into the unconditional set without checking it against real utility / phone / insurance descriptors.
 
-### Where did rewards go?
-
-Removed. `CardBenefitsStore`, `CardProductCatalog` and `RewardCategory` are deleted, along
-with `Transaction.multiplier` / `multiplierLocked` / `rewardCategoryOverride`,
-`BankAccount.debitRewardMultiplier` / `achRewardMultiplier`, and `VendorRule.multiplier`.
-The app tracks spending, income, budgets and card debt — not earn rates.
-
-SwiftData drops the removed columns by lightweight migration; this was verified against a
-real 3,268-transaction store with no row loss. Older `.fwbackup` files still restore: the
-extra JSON keys are ignored on decode. Vendor learn-rules likewise keep working, since the
-stored `multiplier` key is simply no longer read.
-
-### Card payments turned into "Loan" rows / Total paid collapsed
+### Card payments filed as "Loan" / Total paid collapsed
 
 `PlaidCategoryMapper.classify` must test `isCreditCardPayment` **before**
 `looksLikeLoanDisbursement`. The loan check has a PFC shortcut that fires on any
 `LOAN_DISBURSEMENTS*` tag, and Plaid applies that tag to the card side of ordinary bill
-payments — so payments were stored as positive `Loan` adjustments and their
-`CreditCardPayment` rows deleted. A strong payment title outranks a PFC guess.
-`isCreditCardPayment` already refuses titles naming a real card-line loan
-("My Chase Loan TO 1234"), so genuine disbursements still fall through.
+payments. A strong payment title outranks a PFC guess. `isCreditCardPayment` refuses titles
+naming a real card-line loan ("My Chase Loan TO 1234"), so genuine disbursements still fall
+through.
 
-`cleanLegacyMisclassifiedRows` repairs rows an older build corrupted this way: an
-`overrideSource == "adjustment"` row categorised `Loan` whose title reads as a card payment
-is converted back, sign normalised, and its payment row recreated.
+`cleanLegacyMisclassifiedRows` converts an `overrideSource == "adjustment"` row categorised
+`Loan` whose title reads as a card payment back to a payment (sign normalised, payment row
+recreated).
 
 ### A real bill payment disappeared from Total paid
 
 `cleanLegacyMisclassifiedRows` has a branch that rescues purchases Plaid mis-tagged as
 `CREDIT_CARD_PAYMENT` — it re-files them and deletes the mirrored `CreditCardPayment` row.
-Its test used to be only "the title doesn't look like a payment", which is not the same as
-"this is a purchase". A checking-side bill pay worded as a transfer
-("Ach Deposit Internet Transfer From Account E") matched no payment needle, so its payment
-row was deleted and the transaction re-filed as Shopping — then removed altogether by the
-transfer rule on the next pass. The branch now also requires
-`!looksLikeNonSpendTitle(row.title)`.
-
-Rows already destroyed this way cannot be recovered from Plaid if they came from the Apple
-Card CSV (ids prefixed `applecard:`) — re-import the CSV to restore them.
+The test is not only "the title doesn't look like a payment"; it also requires
+`!looksLikeNonSpendTitle(row.title)`. A checking-side bill pay worded as a transfer
+("Ach Deposit Internet Transfer From Account E") is not a purchase.
 
 ### A charge shows up in Total paid after editing its category
 
-`TransactionDetailView.syncCreditPaymentRecord` mirrors a `CreditCardPayment` row when the
-chosen category is excluded from spend. `isExcludedFromSpendCategory` covers **Loan, Refund
-and Installment** as well as Credit Card Payment, so re-filing a charge as Loan created a
-bill-payment row for it — re-inflating Total paid by the charge amount. The guard is now
-`isCreditCardPaymentCategory`. Same distinction applies in `OnDeviceAITools`, where the
-"card payments" total counted all four categories.
+`TransactionDetailView.syncCreditPaymentRecord` mirrors a `CreditCardPayment` row only when
+the chosen category is **Credit Card Payment** (`isCreditCardPaymentCategory`). Loan, Refund,
+and Installment are excluded from spend but are not bill pays. Same distinction in
+`OnDeviceAITools` for the "card payments" total.
 
-`cleanLegacyMisclassifiedRows` drops payment rows left behind by the old behaviour: a
-transaction excluded from spend but *not* categorised Credit Card Payment must not have one.
+`cleanLegacyMisclassifiedRows` drops a payment row on a transaction that is excluded from
+spend but *not* categorised Credit Card Payment.
 
 ### Transaction detail: Save must not rewrite what it did not change
 
-`saveEdits` used to set every field, lock category and rail, and stamp
-`overrideSource = "user"` unconditionally. Two consequences: opening a row and pressing Save
-with no edits froze it against all future Sync corrections, and it erased provenance markers —
-a My Chase Loan charge adopted by the payoff editor (`"my-loan"`) became `"user"`. It now
-compares against the model and only touches fields that actually moved.
+`saveEdits` compares against the model and only touches fields that actually moved. Do not
+stamp `overrideSource = "user"` or lock category/rail on an unchanged Save — that would freeze
+the row against later Sync corrections and erase provenance such as `"my-loan"`.
 
-Presenting the payoff editor uses `.sheet(item:)`, not `.sheet(isPresented:)` plus a companion
-`@State` for the kind. The old pair was set in one button action and SwiftUI could build the
-sheet before the kind landed, so a My Chase Loan opened the editor as **Pay Over Time** — a
-flat-fee plan instead of an APR one, with the wrong principal/interest split every cycle. Keep
-any value the sheet needs inside the `item`.
+Presenting the payoff editor uses `.sheet(item:)`. Keep any value the sheet needs inside the
+`item` so a My Chase Loan cannot open as **Pay Over Time**.
 
 ### Everything is dated a day early / lands in the wrong month
 
-Plaid sends calendar days ("2026-09-01"), not instants. `PlaidSyncEngine.dayFormatter` and
-`ContentView.parseExportDate` must parse them in `TimeZone.current`, because every consumer
-(`TransactionAnalytics.dateInterval`, `StatementCycle.group`, `daysUntilDue`, `Text(style:.date)`)
-reads them with `Calendar.current`. Parsing at UTC midnight put every row on the previous local
-day west of Greenwich: September spend counted in August, due dates shown a day early, statement
-close days one short.
+Plaid sends calendar days ("2026-09-01"), not instants. `PlaidSyncEngine.dayFormatter` must
+parse them in `TimeZone.current`, because every consumer (`TransactionAnalytics.dateInterval`,
+`StatementCycle.group`, `daysUntilDue`, `Text(style:.date)`) reads them with `Calendar.current`.
+Parsing at UTC midnight puts every row on the previous local day west of Greenwich.
 
-Rows written before that fix sit at UTC midnight. `reanchorStoredDays` re-stamps them to local
-midnight of their intended day, gated on `dayAnchorVersion`. It only touches values sitting
-exactly on a UTC midnight, so real timestamps are safe and re-running is a no-op.
+`reanchorStoredDays` re-stamps values that sit exactly on a UTC midnight to local midnight of
+that calendar day (gated on `dayAnchorVersion`). Real timestamps are left alone; re-running is
+a no-op.
 
 ### A payoff plan lost a payment it never made
 
-`applyStatementProgress` treated *any* later statement day as a new billing cycle. When the
-day-string re-anchor moved an account's `lastStatementIssueDate` by a day and the plan's
-`lastAppliedStatementDate` still held the old value, that one-day gap recorded a payment —
-silently removing a month of principal and a term month from an active loan.
-
-Two guards now: `reanchorStoredDays` re-anchors `PayoffPlan` dates too (v1 missed them), and
-`applyStatementProgress` requires at least 20 days between the stamps before recording. A
-billing cycle is ~30 days; anything shorter is drift, and the stamp is advanced without
-charging a payment.
+`applyStatementProgress` requires at least 20 days between statement stamps before recording a
+cycle. A billing cycle is ~30 days; anything shorter is drift, and the stamp advances without
+charging a payment. `reanchorStoredDays` also re-anchors `PayoffPlan` dates.
 
 ### Where classification lives
 
 `PlaidCategoryMapper` and `PlaidPFC` are in **`Shared/`**, not the app target, so the widget
-compiles them too. That is deliberate: while the mapper was app-only, `ReviewQueueAnalytics`
-(which is Shared) had to keep a parallel copy of the card-payment needles — and the two
-drifted. The queue kept `"autopay"` long after the classifier stopped trusting it
-unconditionally, so locked utility and phone bills sat in Needs review forever and the one
-action offered moved them out of Total Spend. Do not reintroduce a second list; call
-`PlaidCategoryMapper.looksLikeCardPaymentTitlePublic`.
+compiles them too. `ReviewQueueAnalytics` must call
+`PlaidCategoryMapper.looksLikeCardPaymentTitlePublic` — do not keep a second needle list.
+
+Any edit to `classify()` / `expenseCategory` / `incomeCategory` must keep
+`Shared/Analytics/ClassifierRegression.swift` green (hosted tests in `FinanceWizardTests`,
+or Debug → **Run classifier cases**). The cases are real descriptors: Payment Thank You
+(including a `LOAN_DISBURSEMENTS` PFC), MY CHASE LOAN, VERIZON/T-Mobile/GEICO AUTOPAY,
+PLAN FEE, Plan It / My Chase Plan, DINING CREDIT, AMAZON REFUND, ADP PAYROLL, DIR DEP,
+IRS tax refund. Do not delete a failing case to make the build pass.
+
+### Total Income counted refunds and loan deposits
+
+`IncomeAnalytics.totalEarned` sums earnings categories only. Merchant refunds, reimbursements
+and checking-side cash advances classify as `.adjustment` (Refund `Transaction`), not `Income`.
+Tax refunds stay income. Sync cleanup (`legacyCleanupVersion`) moves Refund income rows to a
+Refund `Transaction` and recategorises Payroll / Direct Deposit / Interest titles that landed
+in Other Income.
 
 ### Two things must agree about "the same" payment
 
@@ -206,7 +183,7 @@ the list; a plan fee is a new cost and must stay visible next to `PURCHASE INTER
 
 ### Statement periods look off
 
-`StatementCycle.clampedDate` must clamp the close day to the month’s length **before** building the date. `Calendar.date(from:)` is lenient and never returns nil for an out-of-range day — it rolls over (2026-02-31 → 2026-03-03), which silently produced February windows stamped in March. `statementStart(end:closeDay:)` derives the window start from the previous close for the same reason. `group(_:closeDay:lastStatement:)` takes the issuer’s last statement date so `isOpen` means “not yet billed” rather than “ends on or after today”; `currentGroup(in:)` is the single source of truth for which cycle the Accounts row and the card screen summarise.
+`StatementCycle.clampedDate` must clamp the close day to the month’s length **before** building the date. `Calendar.date(from:)` is lenient and never returns nil for an out-of-range day — it rolls over (2026-02-31 → 2026-03-03). `statementStart(end:closeDay:)` derives the window start from the previous close for the same reason. `group(_:closeDay:lastStatement:)` takes the issuer’s last statement date so `isOpen` means “not yet billed” rather than “ends on or after today”; `currentGroup(in:)` is the single source of truth for which cycle the Accounts row and the card screen summarise.
 
 ## Onboarding / Welcome
 
@@ -216,7 +193,7 @@ Flag is `settings.onboardingCompleted`. **Settings → Developer → Debug → R
 
 ### Splash logo does not match Welcome
 
-Both use **`AppIconImage`**. `Image("AppIcon")` does not load an `.appiconset`. The old `SplashLogo` imageset was removed.
+Both use **`AppIconImage`**. `Image("AppIcon")` does not load an `.appiconset`.
 
 ### Get Started title is the wrong color
 

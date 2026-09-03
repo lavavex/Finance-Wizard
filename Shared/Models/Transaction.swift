@@ -13,7 +13,7 @@ import SwiftData
 /// A single spend transaction persisted in the App Group SwiftData store.
 @Model
 final class Transaction {
-    /// Stable id from finance-sync (Plaid/local). Unique so re-sync cannot duplicate rows.
+    /// Stable Plaid `transaction_id`. Unique so re-sync cannot duplicate rows.
     @Attribute(.unique) var transactionId: String
 
     var title: String

@@ -85,6 +85,12 @@ enum PlaidCategoryMapper {
             return .adjustment
         }
 
+        // Checking-side merchant refunds / reimbursements are not earnings. Tax refunds
+        // stay income (they are money you can spend that was not already in Total Spend).
+        if amount < 0, looksLikeNonEarningsInflow(title: title, pfc: pfc) {
+            return .adjustment
+        }
+
         // Do not treat credit-account money-in as a generic transfer (bill pays often
         // land as TRANSFER_IN without a strong title).
         if isTransfer(primary: primary, detailed: detailed, titleLower: lower, accountSubtype: subtype),
@@ -94,6 +100,42 @@ enum PlaidCategoryMapper {
 
         // Real money out / in (Plaid: +outflow, −inflow)
         return amount >= 0 ? .spending : .income
+    }
+
+    /// Money-in that must not land in Total Income (merchant refund, reimbursement, cash advance).
+    /// Tax refunds return false — those are earnings for this app.
+    static func looksLikeNonEarningsInflow(title: String, pfc: PlaidPFC? = nil) -> Bool {
+        let primary = (pfc?.primary ?? "").uppercased()
+        let detailed = (pfc?.detailed ?? "").uppercased()
+        if looksLikeTaxRefund(title: title, primary: primary, detailed: detailed) {
+            return false
+        }
+        let lower = title.lowercased()
+        if looksLikeMerchantRefundTitle(lower) { return true }
+        if lower.contains("reimbursement") || lower.contains("reimburse") { return true }
+        if lower.contains("cash advance") { return true }
+        if detailed.contains("REFUND"), !detailed.contains("TAX") { return true }
+        return false
+    }
+
+    /// IRS / tax refunds are income, not a merchant return.
+    static func looksLikeTaxRefund(title: String, pfc: PlaidPFC? = nil) -> Bool {
+        looksLikeTaxRefund(
+            title: title,
+            primary: (pfc?.primary ?? "").uppercased(),
+            detailed: (pfc?.detailed ?? "").uppercased()
+        )
+    }
+
+    private static func looksLikeTaxRefund(title: String, primary: String, detailed: String) -> Bool {
+        if detailed.contains("TAX_REFUND") || primary.contains("TAX_REFUND") { return true }
+        let lower = title.lowercased()
+        if lower.contains("tax refund") || lower.contains("tax ref") { return true }
+        if lower.contains("irs ") || (lower.hasPrefix("irs") && lower.contains("treas")) {
+            return true
+        }
+        if lower.contains("treas") && lower.contains("tax") { return true }
+        return false
     }
 
     /// Payment toward a credit card (checking ACH out, or “Payment Thank You” on the card).
@@ -525,22 +567,33 @@ enum PlaidCategoryMapper {
     }
 
     /// Income category label for money-in rows.
+    ///
+    /// Total Income only sums earnings categories (see `IncomeAnalytics.isEarnings`).
+    /// Merchant refunds should not reach this function — `classify` sends them to `.adjustment`.
     static func incomeCategory(from pfc: PlaidPFC?, name: String) -> String {
         let primary = (pfc?.primary ?? "").uppercased()
         let detailed = (pfc?.detailed ?? "").uppercased()
         let lower = name.lowercased()
 
+        // Tax refunds are earnings (Other Income), not the Refund bucket used for returns.
+        if looksLikeTaxRefund(title: name, primary: primary, detailed: detailed) {
+            return "Other Income"
+        }
         if detailed.contains("INTEREST") || lower.contains("interest") {
             return "Interest"
         }
         if detailed.contains("REFUND") || primary.contains("REFUND") || lower.contains("refund") {
             return "Refund"
         }
-        if detailed.contains("PAYROLL") || detailed.contains("SALARY")
-            || lower.contains("payroll") || lower.contains("direct dep") {
+        if detailed.contains("PAYROLL") || detailed.contains("SALARY") || detailed.contains("WAGES")
+            || lower.contains("payroll") || lower.contains("paycheck") || lower.contains("pay cheque")
+            || lower.contains("salary") || lower.contains("wages")
+            || lower.contains("adp payroll") || lower.contains("gusto") || lower.contains("paychex")
+            || lower.contains("paycom") || lower.contains("intuit payroll") {
             return "Payroll"
         }
-        if lower.contains("direct deposit") || detailed.contains("DIRECT_DEPOSIT") {
+        if lower.contains("direct deposit") || lower.contains("dir dep") || lower.contains("dir.dep")
+            || lower.contains("dirdep") || detailed.contains("DIRECT_DEPOSIT") {
             return "Direct Deposit"
         }
         return "Other Income"

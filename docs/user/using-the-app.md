@@ -20,7 +20,7 @@ Your charges and income for the selected period.
 - **Net** — income minus spend.
 - Hiding a card from the list does **not** change the totals.
 
-**Income** and **Expenses** are separate lists. Pull down to **Sync**. Toolbar:
+**Income** and **Expenses** are separate lists. **Total Income** is earnings (paychecks, direct deposits, interest). Merchant refunds, card credits, and loan proceeds stay in the expense list as **Refund** / **Loan** and do not inflate income. Pull down to **Sync**. Toolbar:
 
 | Control | What it does |
 |---------|----------------|
@@ -29,9 +29,8 @@ Your charges and income for the selected period.
 | Calendar | This week / This month / All time |
 | Sort | Date, amount, name |
 | Eye | Hide cards from the **list only** |
-| **Import** | JSON export, or **Apple Card CSV** from Wallet / [card.apple.com](https://card.apple.com) |
 
-**Needs review** — items that still need a category, rate, or bill-pay check. Swipe to fix.
+**Needs review** — items that still need a category or bill-pay check. Swipe to fix.
 
 Tap a row for **Transaction** detail. You can change the **category** and **payment method**. **Save** remembers that so later Syncs don’t overwrite it. Turn on **learn** to apply the same category to future charges from that merchant.
 
@@ -39,7 +38,7 @@ Tap a row for **Transaction** detail. You can change the **category** and **paym
 
 **Credit Card Payment** (shown as “Bill pay”) is a payment to a card, not a purchase. It stays in the list but is **not** in Total Spend, charts, or widgets. It also shows under Accounts → Total paid. Checking ACH and the card’s “Thank You” are the **same** payment — Total paid counts it once even if the bank posts them a day or two apart.
 
-**Refund** / **Loan** / **Installment** also stay in the list but are **not** Total Spend or Total Income. Card statement credits (travel credit, merchant returns) and My Loan deposits to checking are not paychecks. Apple Card **Monthly Installments** are the billing of a purchase already in the list — use **Pay over time…** if you want them on Recurring.
+**Refund** / **Loan** / **Installment** also stay in the list but are **not** Total Spend or Total Income. Card statement credits (travel credit, merchant returns) and My Loan deposits to checking are not paychecks. Issuer **installment** billing (My Chase Plan, Amex Plan It) is the billing of a purchase already in the list — use **Pay over time…** if you want them on Recurring.
 
 ## Accounts
 
@@ -90,9 +89,9 @@ A **monthly cap**, **expected income**, and **per-category limits** compared to 
 
 [Settings](settings.md) — Plaid keys, banks, privacy, backup.
 
-## What the app does not do yet
+## Not included
 
-- Live Apple Card feed (CSV import only)
+- Apple Card (Plaid does not sync it)
 - Push alerts when you go over budget (the Budget tab still shows remaining / over)
-- Syncing the same data to another iPhone automatically (use backup, or Sync from Plaid again)
+- Automatic sync to another iPhone (use backup, or Sync from Plaid on that phone)
 - A Finance Wizard server that holds your Plaid secret (keys stay on the phone)

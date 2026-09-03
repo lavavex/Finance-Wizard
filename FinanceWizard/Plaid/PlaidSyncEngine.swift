@@ -1149,7 +1149,8 @@ enum PlaidSyncEngine {
     /// v2: bill-pay vs loan-disbursement ordering, issuer credits, plan fees.
     /// v3: stop the purchase-rescue branch deleting payment rows for transfer-worded bill pays.
     /// v4: drop payment rows mirrored for Loan / Refund / Installment edits.
-    static let legacyCleanupVersion = 4
+    /// v5: merchant refunds / reimbursements out of Income; recategorise Payroll / Direct Deposit.
+    static let legacyCleanupVersion = 5
     static let legacyCleanupVersionKey = "plaid.legacyCleanup.v"
 
     /// Re-home mis-filed spend/income that look like transfers or card payments.
@@ -1330,6 +1331,32 @@ enum PlaidSyncEngine {
                         paymentMethod: method,
                         modelContext: modelContext
                     )
+                    fixed += 1
+                    continue
+                }
+                let pfcValue = PlaidPFC(primary: nil, detailed: pfc, confidence_level: nil)
+                if PlaidCategoryMapper.looksLikeNonEarningsInflow(title: row.source, pfc: pfcValue) {
+                    let method = row.accountDisplay
+                    let id = row.transactionId
+                    let title = row.source
+                    let amount = abs(row.amount)
+                    let date = row.date
+                    modelContext.delete(row)
+                    ensureAdjustmentFromParts(
+                        transactionId: id,
+                        title: title,
+                        amount: amount,
+                        date: date,
+                        paymentMethod: method,
+                        category: KnownCategory.refund.rawValue,
+                        modelContext: modelContext
+                    )
+                    fixed += 1
+                    continue
+                }
+                let recategorized = PlaidCategoryMapper.incomeCategory(from: pfcValue, name: row.source)
+                if recategorized != row.category {
+                    row.category = recategorized
                     fixed += 1
                 }
             }

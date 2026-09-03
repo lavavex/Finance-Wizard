@@ -876,25 +876,17 @@ private struct PlaidRestorePlanSheet: View {
                     Text("Connections")
                 }
 
-                if !plan.isConnectionsOnly {
-                    Section {
-                        LabeledContent("Transactions", value: "\(plan.transactionCount)")
-                        LabeledContent("Income", value: "\(plan.incomeCount)")
-                        LabeledContent("Accounts", value: "\(plan.bankAccountCount)")
-                        LabeledContent("Card payments", value: "\(plan.paymentCount)")
-                        LabeledContent("Budget plans", value: "\(plan.budgetPlanCount)")
-                        LabeledContent("Payoff plans", value: "\(plan.payoffPlanCount)")
-                        LabeledContent("Nicknames", value: "\(plan.cardLabelCount)")
-                        LabeledContent("Vendor rules", value: "\(plan.vendorRuleCount)")
-                    } header: {
-                        Text(policy.wipesLocalData ? "App data (replace)" : "App data (upsert)")
-                    }
-                } else {
-                    Section {
-                        Text("This is an older connections-only backup (no transactions).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                Section {
+                    LabeledContent("Transactions", value: "\(plan.transactionCount)")
+                    LabeledContent("Income", value: "\(plan.incomeCount)")
+                    LabeledContent("Accounts", value: "\(plan.bankAccountCount)")
+                    LabeledContent("Card payments", value: "\(plan.paymentCount)")
+                    LabeledContent("Budget plans", value: "\(plan.budgetPlanCount)")
+                    LabeledContent("Payoff plans", value: "\(plan.payoffPlanCount)")
+                    LabeledContent("Nicknames", value: "\(plan.cardLabelCount)")
+                    LabeledContent("Vendor rules", value: "\(plan.vendorRuleCount)")
+                } header: {
+                    Text(policy.wipesLocalData ? "App data (replace)" : "App data (upsert)")
                 }
 
                 if let errorMessage {

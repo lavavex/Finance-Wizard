@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-/// One row showing a transaction: category icon, title, card, date, amount, rewards.
+/// One row showing a transaction: category icon, title, card, date, amount.
 /// Reused in multiple lists so layout stays consistent app-wide.
 struct TransactionRowView: View {
     let transaction: Transaction

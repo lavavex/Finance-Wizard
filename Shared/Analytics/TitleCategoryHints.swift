@@ -2,7 +2,7 @@
 //  TitleCategoryHints.swift
 //  Finance Wizard
 //
-//  Keyword fallbacks when PFC / Apple CSV only say “Other” or Miscellaneous.
+//  Keyword fallbacks when PFC only says “Other” or Miscellaneous.
 //  Patterns are category words (gas, wireless, installment) — not merchant names.
 //
 

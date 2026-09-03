@@ -21,7 +21,7 @@ User-facing Settings: [User Settings](../user/settings.md).
 
 Credentials are **device-local** (not in the App Group). UserDefaults prefixes `plaid.` / `card.` / `settings.` ride along in encrypted backups.
 
-Link completion uses `financewizard://hosted-link-complete` (Hosted Link). A leftover `https://localhost/plaid-oauth` override is cleared if still stored.
+Link completion uses `financewizard://hosted-link-complete` (Hosted Link). An invalid stored `https://localhost/plaid-oauth` redirect override is cleared.
 
 ## Debug menu
 

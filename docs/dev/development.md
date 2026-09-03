@@ -77,6 +77,16 @@ open FinanceWizard.xcodeproj
 
 In Xcode: scheme **FinanceWizard** (the app, not only the widget) → Run (⌘R).
 
+Classifier changes must keep `Shared/Analytics/ClassifierRegression.swift` green:
+
+```bash
+xcodebuild -project FinanceWizard.xcodeproj -scheme FinanceWizard \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:FinanceWizardTests test
+```
+
+Or **Settings → Developer → Debug → Run classifier cases**.
+
 ## Version & build numbers (local ↔ Xcode Cloud)
 
 | Setting | Meaning |
@@ -130,7 +140,7 @@ Commits then re-lock the project format before they land.
 
 App Store Connect → your app → **Xcode Cloud** → workflow → **Environment** → pick an Xcode version that understands format 110 (same generation as your local Xcode 27). Then you can leave format 110 as-is.
 
-**Also check the workflow project name:** it must open **`FinanceWizard.xcodeproj`** (not the old `FinanceWidget.xcodeproj`).
+**Also check the workflow project name:** it must open **`FinanceWizard.xcodeproj`**.
 
 ## Where to put code
 
@@ -138,7 +148,7 @@ App Store Connect → your app → **Xcode Cloud** → workflow → **Environmen
 |--------|-----------|
 | App entry, splash, root gate | `FinanceWizard/App/` |
 | Welcome / onboarding flag | `FinanceWizard/Features/Onboarding/` |
-| Feature UI (transactions, accounts, budget, settings, import) | `FinanceWizard/Features/<Area>/` |
+| Feature UI (transactions, accounts, budget, settings) | `FinanceWizard/Features/<Area>/` |
 | App-only services (logo fetch, local helpers) | `FinanceWizard/Services/` |
 | Plaid Link / sync / credentials | `FinanceWizard/Plaid/` |
 | SwiftData models + domain enums | `Shared/Models/` (both targets) |

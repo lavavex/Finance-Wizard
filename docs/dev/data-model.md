@@ -21,7 +21,7 @@ Defined in `Shared/Models/Transaction.swift`.
 
 ### Amount sign convention (expenses)
 
-| Source (API/file) | In app |
+| Source (Plaid) | In app |
 |-------------------|--------|
 | Expense amount `> 0` | Stored as `-amount` |
 | Display “Total Spend” | Sum of `abs(amount)` over the period |
@@ -37,7 +37,7 @@ Defined in `Shared/Models/Income.swift`. **Separate model** so spend analytics n
 | `source` | `String` | Employer / payer / merchant display name |
 | `amount` | `Double` | **Always positive** (money in) |
 | `date` | `Date` | `YYYY-MM-DD` |
-| `category` | `String` | Payroll, Direct Deposit, Interest, Refund, Other Income |
+| `category` | `String` | Payroll, Direct Deposit, Interest, Other Income. `IncomeAnalytics.totalEarned` sums those earnings categories only. |
 | `accountName` | `String?` | Account display name |
 | `accountMask` | `String?` | last4 |
 | `sourceInstitution` | `String?` | Institution / account label |
@@ -54,31 +54,17 @@ Defined in `Shared/Models/Income.swift`. **Separate model** so spend analytics n
 | Editable from app? | **No** (read-only) |
 | Source | Plaid `/transactions/sync` (negative amounts) |
 
-## JSON DTOs (not persisted as-is)
-
-In `FinanceWizard/App/ContentView.swift`:
-
-- `ImportedTransaction` / `ExportFile` — expenses (`transactions[]`)
-- `ImportedIncome` / `IncomeExportFile` — income (`income[]`, plus `total`, `categories`, …)
-
-JSON field names use snake_case (`transaction_id`, `account_name`, `payment_method`) to match the API.
-
 ## Upsert rules
 
 On **Plaid Sync** (`PlaidSyncEngine`):
 
 1. For each linked Item, page through `/transactions/sync`.  
 2. Expenses (`amount ≥ 0`) → upsert `Transaction` (stored negative); honor category locks.  
-3. Income (`amount < 0`) → upsert `Income` (stored positive).  
+3. Income (`amount < 0` and not a refund/loan/transfer) → upsert `Income` (stored positive). Merchant refunds become Refund `Transaction` adjustments.  
 4. Removed ids → delete local rows.  
 5. Persist cursor; `modelContext.save()`; reload widgets.
 
-On **JSON Import** (optional offline file):
-
-1. Decode `ExportFile` / optional income payload.  
-2. Upsert by `transactionId` the same way as before.
-
-Re-syncing does **not** duplicate rows when Plaid ids are stable.
+Re-syncing does **not** duplicate rows when Plaid ids are stable. Banks come in through Plaid. Settings backup restore is an encrypted snapshot of this phone (current format version only).
 
 ## SwiftData: `BankAccount`
 

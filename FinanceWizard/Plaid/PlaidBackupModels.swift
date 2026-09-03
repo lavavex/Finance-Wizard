@@ -6,8 +6,7 @@
 //  plus the credentials/item envelopes. Split out of PlaidConnectionBackup.swift so the
 //  restore logic there is readable on its own.
 //
-//  Decoding is tolerant by design: keys a newer build no longer writes are simply absent,
-//  and keys an older build wrote that no longer exist are ignored.
+//  Restore accepts only the current format version. Missing required keys fail decode.
 //
 
 import Foundation
@@ -18,21 +17,20 @@ extension PlaidConnectionBackup {
         var createdAt: Date
         var credentials: CredentialsSnapshot
         var items: [ItemSnapshot]
-        /// Full-app fields (optional so v1 connection-only backups still decode).
-        var transactions: [TransactionSnapshot]?
-        var income: [IncomeSnapshot]?
-        var bankAccounts: [BankAccountSnapshot]?
-        var creditCardPayments: [PaymentSnapshot]?
-        var budgetPlans: [BudgetPlanSnapshot]?
-        var payoffPlans: [PayoffPlanSnapshot]?
-        var cardLabels: [String: String]?
-        var vendorRules: [VendorRule]?
-        var screenshotPrivacy: Bool?
+        var transactions: [TransactionSnapshot]
+        var income: [IncomeSnapshot]
+        var bankAccounts: [BankAccountSnapshot]
+        var creditCardPayments: [PaymentSnapshot]
+        var budgetPlans: [BudgetPlanSnapshot]
+        var payoffPlans: [PayoffPlanSnapshot]
+        var cardLabels: [String: String]
+        var vendorRules: [VendorRule]
+        var screenshotPrivacy: Bool
         /// All UserDefaults keys with app prefixes (`plaid.`, `card.`, `settings.`).
         /// New prefs under those prefixes are included automatically.
-        var preferenceDefaults: [String: Data]?
+        var preferenceDefaults: [String: Data]
         /// Institution logo files (filename → bytes) from the App Group cache.
-        var logoFiles: [String: Data]?
+        var logoFiles: [String: Data]
     }
 
     struct CredentialsSnapshot: Codable, Equatable, Sendable {

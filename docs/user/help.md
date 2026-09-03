@@ -55,27 +55,10 @@ Sync in the app first, then add the widget. If it stays empty, delete it and add
 
 ## Recurring
 
-### Total paid dropped, and card payments show as "Loan"
-
-Fixed. Plaid tags the card side of some bill payments with a loan-disbursement category, and
-the app trusted that over the payment title — so payments were re-filed as Loan rows and
-removed from Total paid. Payment titles now win. Sync once and the affected rows repair
-themselves.
-
-### My loan was saved as “Pay Over Time”
-
-Fixed. Opening the payoff editor from a loan charge could start it on the wrong product, which
-books the monthly amount as a flat plan fee instead of interest at your APR. To correct a plan
-saved that way: Recurring → the plan → change **Type** to **My Loan** and enter the APR from
-the loan email. You no longer have to delete and rebuild it. The totals are close either way,
-but the principal/interest split — and the remaining balance — are wrong on the flat-fee model.
-
 ### My Chase Loan: what to enter
 
 From the loan email: **amount**, **fixed APR**, **billing cycles**, and **monthly payment**.
-Accounts → the card → the loan charge → **My Loan**. Enter the cycles as *Remaining months* —
-the app now trusts that term rather than re-deriving it, which previously came out a month
-long because Chase bills interest daily rather than at APR ÷ 12.
+Accounts → the card → the loan charge → **My Loan**. Enter the cycles as *Remaining months*.
 
 Pay the **Interest saving balance**, not the statement balance: the statement balance pays
 the whole loan off at once. Interest saving balance is every other balance in full plus this
@@ -85,43 +68,41 @@ cycle's loan payment.
 
 They are different things:
 
-- **My Loan / Pay Over Time / Apple installments** — attach the charge or installment row. Monthly amount is in the **card minimum**, due with the **statement**. Do not use **Pay off by date** for these. The app now recognises the issuers’ real wording: **My Chase Loan**, **My Chase Plan**, and AmEx **Plan It**.
-- **Pay off by date** — Accounts → card → **Pay off by date**. For a promo or extra balance you want gone by a date. The form can suggest a monthly extra to finish by then. On a promo with a **non-zero** APR the suggestion and the pace warning now include interest, so a plan that looks like it finishes on time actually does. Editing a saved plan no longer nudges its schedule forward — a new plan still starts on the card’s due date, but re-saving keeps the date the plan already has.
+- **My Loan / Pay Over Time / Apple installments** — attach the charge or installment row. Monthly amount is in the **card minimum**, due with the **statement**. Do not use **Pay off by date** for these. The app recognises **My Chase Loan**, **My Chase Plan**, and AmEx **Plan It**.
+- **Pay off by date** — Accounts → card → **Pay off by date**. For a promo or extra balance you want gone by a date. The form can suggest a monthly extra to finish by then. On a promo with a **non-zero** APR the suggestion and the pace warning include interest. A new plan starts on the card’s due date; re-saving keeps the date the plan already has.
 
-Loan/installment **remaining** drops when a new statement posts (after Sync). Pay-off-by-date plans still have **Record this month’s payment** if you want to tick extra principal by hand.
+Loan/installment **remaining** drops when a new statement posts (after Sync). Pay-off-by-date plans have **Record this month’s payment** if you want to tick extra principal by hand.
+
+If a My Loan plan is on the wrong type, open it on Recurring, set **Type** to **My Loan**, and enter the APR from the loan email. A flat **Pay Over Time** fee model will not split principal and interest the same way.
 
 ### Total paid looks twice as high as I actually sent
 
-The bank lists the payment on checking **and** on the card. Accounts → Total paid keeps one. Pull down to **Sync** if an older double-count is still showing.
+The bank lists the payment on checking **and** on the card. Accounts → Total paid keeps one. Pull down to **Sync**.
 
 ### A travel credit or store refund showed up as income
 
 Those are card credits, not paychecks. Sync files them as **Refund** (not Total Income). A loan disbursement into checking is **Loan**, not earnings. Payroll and other deposits to checking stay income.
 
-### A phone, insurance, or utility bill vanished from Total Spend
+### A phone, insurance, or utility bill is missing from Total Spend
 
-Fixed. Any charge whose description contained **autopay** (VERIZON \*AUTOPAY, T‑MOBILE AUTOPAY, GEICO AUTOPAY) used to be filed as a credit‑card bill payment and dropped out of Total Spend and Budget. Those words now only count as a card payment on money **coming in** to a credit card, or when the description also names a card issuer. Pull down to **Sync** to re‑file older rows.
+Words like **autopay** in a merchant description (VERIZON \*AUTOPAY, T‑MOBILE AUTOPAY, GEICO AUTOPAY) count as a card payment only on money **coming in** to a credit card, or when the description also names a card issuer. A utility autopay is still spend. Pull down to **Sync**.
 
-### Statement grouping looked wrong on a card that closes on the 29th–31st
+### Statement grouping on a card that closes on the 29th–31st
 
-Fixed. Those cards produced windows stamped in the following month with a date range that did not match the rows under it. Statement periods now clamp to the length of each month, so February closes on the 28th (29th in a leap year) and the windows line up.
+Statement periods clamp to the length of each month, so February closes on the 28th (29th in a leap year).
 
 ### Phone or electric bill doesn’t show on Recurring
 
 Auto-detect looks for the **same amount** on a schedule, so a bill that changes each month may be missing. Open one of those charges → **Recurring** → **Monthly** (or **Yearly**) → **Save**. The Recurring tab groups that merchant even when the amount varies. **Not recurring** on a single charge hides only that row; **Not Recurring** on the Recurring tab hides the whole vendor.
 
+## Total Income looks too high
+
+**Total Income** is paychecks, direct deposits, and interest — not merchant refunds, card credits, or loan proceeds. Refunds and reimbursements stay in the expense list as **Refund** (excluded from spend). A one-off bonus still counts as income.
+
 ## Apple Card
 
-Apple Card support and its CSV import were removed — Plaid cannot sync Apple Card, so the data
-could never stay current. Charges you imported previously are still in the app and still count
-in Total Spend; they simply will not update. Ask if you want them cleared.
-
-## Rewards
-
-Rewards tracking was removed. Finance Wizard focuses on spending, income, budgets and card
-debt; earn rates, points and statement credits are no longer tracked. Nothing else changed —
-your transactions, categories, budgets and payoff plans are untouched.
+Apple Card cannot be linked. Plaid does not sync it.
 
 ## Welcome screen
 
-Welcome appears only on first launch. TestFlight **updates** keep your data and skip Welcome. To see Welcome again (testers): **Settings → Developer → Debug → Replay onboarding**.
+Welcome appears only on first launch. Later launches go straight to the tabs. To see Welcome again (testers): **Settings → Developer → Debug → Replay onboarding**.

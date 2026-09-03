@@ -3,13 +3,11 @@
 //  Finance Wizard
 //
 //  Main app UI after onboarding: tab bar (Transactions, Accounts, Budget, Recurring, Settings),
-//  the full Transactions tab (filters, import, Plaid sync), and income row/detail views.
+//  the full Transactions tab (filters, Plaid sync), and income row/detail views.
 //
 
 import SwiftUI
-import UniformTypeIdentifiers
 import SwiftData
-import WidgetKit
 
 // MARK: - Root tabs
 
@@ -123,16 +121,14 @@ struct ContentView: View {
 
 // MARK: - All transactions tab
 
-/// Primary “Finances” screen: period filters, totals, income + expense lists, import & Plaid sync.
+/// Primary “Finances” screen: period filters, totals, income + expense lists, and Plaid sync.
 struct AllTransactionsView: View {
     @Query private var transactions: [Transaction]
     @Query private var incomeRows: [Income]
     @Query private var bankAccounts: [BankAccount]
     @Environment(\.modelContext) private var modelContext
 
-    @State private var isImporting = false
-    @State private var importError: String?
-    @State private var importStatusMessage: String?
+    @State private var linkError: String?
     @State private var isSyncing = false
 
     @State private var syncStatusTitle: String = ""
@@ -203,14 +199,6 @@ struct AllTransactionsView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let importStatusMessage {
-                    Section("Import") {
-                        Text(importStatusMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
                 if showSyncStatus || isSyncing {
                     Section("Sync Status") {
                         HStack(alignment: .top, spacing: 12) {
@@ -439,36 +427,23 @@ struct AllTransactionsView: View {
                     } label: {
                         Image(systemName: "arrow.up.arrow.down")
                     }
-
-                    Button {
-                        isImporting = true
-                    } label: {
-                        Text("Import")
-                    }
                 }
             }
-            .fileImporter(
-                isPresented: $isImporting,
-                allowedContentTypes: [.json],
-                allowsMultipleSelection: false
-            ) { result in
-                handleImport(result)
-            }
             .alert(
-                "Import failed",
+                "Couldn't link bank",
                 isPresented: Binding(
-                    get: { importError != nil },
-                    set: { if !$0 { importError = nil } }
+                    get: { linkError != nil },
+                    set: { if !$0 { linkError = nil } }
                 )
             ) {
-                Button("OK", role: .cancel) { importError = nil }
+                Button("OK", role: .cancel) { linkError = nil }
             } message: {
-                Text(importError ?? "")
+                Text(linkError ?? "")
             }
             .sheet(isPresented: $showLinkSheet) {
                 PlaidLinkSheet { result in
                     if case .failure(let error) = result {
-                        importError = error.localizedDescription
+                        linkError = error.localizedDescription
                     }
                 }
             }
@@ -492,38 +467,7 @@ struct AllTransactionsView: View {
         return "No income in \(periodLabel.lowercased())."
     }
 
-    // MARK: - Import / sync
-
-    /// Handles the document picker’s Result: security-scope access, then the JSON path.
-    private func handleImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .failure(let error):
-            importError = error.localizedDescription
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            // Security-scoped URLs need start/stop access for files outside the sandbox.
-            let gotAccess = url.startAccessingSecurityScopedResource()
-            defer {
-                if gotAccess { url.stopAccessingSecurityScopedResource() }
-            }
-            do {
-                let data = try Data(contentsOf: url)
-                // FIX: upsertIncome existed but nothing called it, so an income-only export
-                // (no "transactions" key) failed ExportFile decoding and surfaced a raw
-                // Swift decoding error. Fall back to the income shape before giving up.
-                do {
-                    let count = try upsertTransactions(from: data)
-                    importStatusMessage = "Imported \(count) transaction(s) from JSON."
-                } catch {
-                    let count = try upsertIncome(from: data)
-                    importStatusMessage = "Imported \(count) income row(s) from JSON."
-                }
-                importError = nil
-            } catch {
-                importError = error.localizedDescription
-            }
-        }
-    }
+    // MARK: - Sync
 
     private enum SyncStatusKind {
         case idle
@@ -611,7 +555,6 @@ struct AllTransactionsView: View {
                     detail: error.localizedDescription
                 )
                 isSyncing = false
-                importError = error.localizedDescription
             }
         }
     }
@@ -629,140 +572,4 @@ struct AllTransactionsView: View {
         }
     }
 
-    // Offline JSON import (legacy finance-sync export shape still works).
-    @discardableResult
-    private func upsertTransactions(from data: Data) throws -> Int {
-        let export = try JSONDecoder().decode(ExportFile.self, from: data)
-
-        for item in export.transactions {
-            guard let date = Self.parseExportDate(item.date) else { continue }
-            // #Predicate must capture a local let, not `item.transaction_id`.
-            let targetId = item.transaction_id
-
-            var descriptor = FetchDescriptor<Transaction>(
-                predicate: #Predicate<Transaction> { row in
-                    row.transactionId == targetId
-                }
-            )
-            descriptor.fetchLimit = 1
-
-            // Missing lock flags in older exports → treat as unlocked.
-            let categoryLocked = item.category_locked ?? false
-
-            // Export amounts are positive spend; the model stores signed spend (negative).
-            if let existing = try modelContext.fetch(descriptor).first {
-                existing.title = item.vendor
-                existing.amount = -item.amount
-                existing.date = date
-                // Respect user locks so Sync / re-import won’t overwrite the category.
-                if !existing.isCategoryLocked {
-                    existing.category = item.category
-                }
-                existing.paymentMethod = item.payment_method
-                // FIX: this kept the category the lock protected but then cleared the lock
-                // itself (and blanked overrideSource, which upsertExpense keys on for
-                // "my-loan"), so the next sync reclassified the row. Only ever raise a lock.
-                if categoryLocked { existing.categoryLocked = true }
-                if let source = item.override_source, !source.isEmpty,
-                   (existing.overrideSource ?? "").isEmpty {
-                    existing.overrideSource = source
-                }
-            } else {
-                modelContext.insert(
-                    Transaction(
-                        transactionId: item.transaction_id,
-                        title: item.vendor,
-                        amount: -item.amount,
-                        date: date,
-                        category: item.category,
-                        paymentMethod: item.payment_method,
-                        categoryLocked: categoryLocked,
-                        overrideSource: item.override_source
-                    )
-                )
-            }
-        }
-
-        try modelContext.save()
-        WidgetCenter.shared.reloadAllTimelines()
-        return export.transactions.count
-    }
-
-    // Upsert income rows from IncomeRow JSON. Amounts stay positive (earned).
-    // Read-only on the app side — no classify/edit/mark-exported API for income.
-    @discardableResult
-    private func upsertIncome(from data: Data) throws -> Int {
-        let export = try JSONDecoder().decode(IncomeExportFile.self, from: data)
-        let rows = export.rows
-
-        for item in rows {
-            // Skip non-income discriminators if a mixed payload ever appears.
-            if let kind = item.kind, kind != "income" { continue }
-            guard !item.transaction_id.isEmpty,
-                  let date = Self.parseExportDate(item.date) else { continue }
-
-            let targetId = item.transaction_id
-            var descriptor = FetchDescriptor<Income>(
-                predicate: #Predicate<Income> { row in
-                    row.transactionId == targetId
-                }
-            )
-            descriptor.fetchLimit = 1
-
-            // API amounts are always > 0; abs() guards against a bad row looking like spend.
-            let amount = abs(item.amount)
-            let source = item.source.isEmpty ? (item.raw_name ?? "Income") : item.source
-            let category = item.category.isEmpty ? "Other Income" : item.category
-            let kind = item.kind ?? "income"
-            let pending = item.pending ?? false
-
-            if let existing = try modelContext.fetch(descriptor).first {
-                existing.source = source
-                existing.amount = amount
-                existing.date = date
-                existing.category = category
-                existing.accountName = item.account_name
-                existing.accountMask = item.account_mask
-                existing.sourceInstitution = item.source_institution
-                existing.rawName = item.raw_name
-                existing.pfc = item.pfc
-                existing.pending = pending
-                existing.kind = kind
-                existing.updatedAt = item.updated_at
-            } else {
-                modelContext.insert(
-                    Income(
-                        transactionId: targetId,
-                        source: source,
-                        amount: amount,
-                        date: date,
-                        category: category,
-                        accountName: item.account_name,
-                        accountMask: item.account_mask,
-                        sourceInstitution: item.source_institution,
-                        rawName: item.raw_name,
-                        pfc: item.pfc,
-                        pending: pending,
-                        kind: kind,
-                        updatedAt: item.updated_at
-                    )
-                )
-            }
-        }
-
-        try modelContext.save()
-        WidgetCenter.shared.reloadAllTimelines()
-        return rows.count
-    }
-
-    /// Parse export date strings like "2026-07-15" as a local calendar day.
-    /// Must match PlaidSyncEngine.dayFormatter — see the note there on why not UTC.
-    private static func parseExportDate(_ string: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: string)
-    }
 }
