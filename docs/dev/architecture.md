@@ -7,12 +7,13 @@ title: Architecture
 
 ## Targets
 
-Two separate products share one Xcode project and the same App Group store:
+The app and widget share one Xcode project and the same App Group store. Tests host the app:
 
 | Target | Product | Bundle ID | Responsibility |
 |--------|---------|-----------|----------------|
 | **FinanceWizard** | Finance Wizard (iOS app) | `net.roberth.FinanceWizard` | UI, Plaid Link, sync, settings |
 | **WidgetExtension** | Widget extension (`.appex`) | `net.roberth.FinanceWizard.Widget` | Total Spend, Category Spend, Balances widgets |
+| **FinanceWizardTests** | Unit tests (`.xctest`) | `net.roberth.FinanceWizard.tests` | Classifier descriptor table |
 
 The app embeds the widget extension (Embed Foundation Extensions build phase). They ship together but are signed and built as separate targets.
 
@@ -24,7 +25,7 @@ Prefer **native iOS**: SwiftUI system controls, SF Symbols, system materials. If
 
 ## Source folders
 
-Xcode uses **folder-synced** groups for `FinanceWizard/`, `Shared/`, and `Widget/` — new files under those trees join the target automatically.
+Xcode uses **folder-synced** groups for `FinanceWizard/`, `Shared/`, `Widget/`, and `FinanceWizardTests/` — new files under those trees join the target automatically.
 
 ```text
 FinanceWizard/                 Main app (SwiftUI + Plaid client)
@@ -35,8 +36,7 @@ FinanceWizard/                 Main app (SwiftUI + Plaid client)
     Accounts/                  Accounts hub, card detail, payoff plans, accounts board model
     Budget/                    Monthly budget UI
     Settings/                  Settings, backup, debug export, Debug menu
-    Import/                    JSON import decode shapes
-    AI/                        On-device Foundation Models (skeleton; not in Settings)
+    AI/                        On-device Foundation Models (Ask overlay + Settings status)
   Services/                    App-only helpers (classify API stub, logo fetch)
   Plaid/                       Credentials, Link, /transactions/sync, backup wipe
                                (classification lives in Shared/Analytics — see below)
@@ -48,10 +48,13 @@ Shared/                        Compiled into APP + WIDGET (must stay in sync)
   Models/                      SwiftData @Model + domain enums
   Store/                       SharedStore / ModelContainer
   Analytics/                   Spend, review queue, subscriptions, search,
-                               PlaidCategoryMapper (classification)
+                               PlaidCategoryMapper (classification),
+                               ClassifierRegression (descriptor table)
   Cards/                       Card nicknames
   Branding/                    Institution logo cache
   UI/                          Category style/charts, bank icons, privacy
+
+FinanceWizardTests/            Hosted unit tests (`@testable import FinanceWizard`)
 
 Widget/                        WidgetKit extension
   WidgetBundle.swift           Entry + registered widgets
@@ -83,7 +86,7 @@ Measured against a real 3,232-transaction / 242-payment store:
 | `ReviewQueueAnalytics.count` | Counts without building or sorting `ReviewQueueItem`s. Keep it in step with `items(...)`: both use `recentSpend` + `needsReview`. |
 | `cleanLegacyMisclassifiedRows` | Full-scans Transaction and Income. Gated on `legacyCleanupVersion` so it runs once per classifier change, not once per sync. Bump that constant when classification rules change. |
 | `AccountsBoard.build` | Groups transactions by payment method in one pass instead of filtering all rows per card. |
-| `findCreditAccount` | Takes the preloaded account array. It used to fetch the whole `BankAccount` table, twice per payment row. |
+| `findCreditAccount` | Takes the preloaded account array (do not fetch `BankAccount` per payment row). |
 
 ### Why `Shared/`?
 
@@ -148,7 +151,7 @@ See [Data model](data-model.md).
 
 ## No home server
 
-Bank linking and transaction pull run **on the phone** against Plaid. There is no finance-sync PC portal in this architecture.
+Bank linking and transaction pull run **on the phone** against Plaid.
 
 ## Security notes
 

@@ -12,8 +12,6 @@
 import Foundation
 
 /// One learned mapping from a merchant (and optional card) to a spend category.
-/// `multiplier` was dropped with the rewards feature; older stored rules still decode
-/// because the extra JSON key is simply ignored.
 struct VendorRule: Codable, Equatable, Sendable {
     /// Normalized vendor name (lowercased, trimmed) used as the lookup key.
     var vendorKey: String

@@ -11,7 +11,7 @@
 //  • Prefs: card nicknames, vendor learn-rules, card benefits profiles, screenshot privacy
 //  • Auto bags: UserDefaults under plaid./card./settings. + App Group logo files
 //
-//  Crypto (backup format v1 — portable, password-based):
+//  Crypto (current backup format — portable, password-based):
 //  • Random 256-bit data key (DEK) encrypts the payload with AES-256-GCM
 //  • Password → PBKDF2-HMAC-SHA512 (high cost) → HKDF-SHA512 → wrap key (KEK)
 //  • KEK wraps the DEK with AES-256-GCM (password never encrypts bulk data directly)
@@ -26,7 +26,7 @@
 //
 //  Use replaceConnections when the backup’s tokens/keys should win.
 //  Use wipeThenRestore to delete local SwiftData + prefs + logos + tokens first,
-//  so data added after an older backup (or after new models shipped) is gone.
+//  so data added after this backup was made is gone.
 //
 
 import Foundation
@@ -46,8 +46,8 @@ enum PlaidConnectionBackup {
     static let utiIdentifier = "net.roberth.FinanceWizard.backup"
     /// Marker inside the encrypted envelope JSON.
     static let formatID = "financewizard.app-backup"
-    /// Single public format version (payload + envelope). This is backup v1.
-    static let formatVersion = 1
+    /// Single public format version (payload + envelope). Older files are rejected.
+    static let formatVersion = 2
     /// PBKDF2-HMAC-SHA512 rounds (above OWASP’s SHA-512 baseline).
     static let pbkdf2Iterations: UInt32 = 1_000_000
     static let saltByteCount = 32
@@ -140,7 +140,6 @@ enum PlaidConnectionBackup {
         var payoffPlanCount: Int
         var cardLabelCount: Int
         var vendorRuleCount: Int
-        var isConnectionsOnly: Bool
 
         var itemsToAddCount: Int { itemsToAdd.count }
         var itemsPreservedCount: Int { itemsPreserved.count }
@@ -299,26 +298,20 @@ enum PlaidConnectionBackup {
             }
         }()
 
-        let isConnectionsOnly =
-            (payload.transactions?.isEmpty ?? true)
-            && (payload.income?.isEmpty ?? true)
-            && (payload.bankAccounts?.isEmpty ?? true)
-
         return RestorePlan(
             policy: policy,
             credentialsAction: credentialsAction,
             itemsToAdd: toAdd,
             itemsPreserved: preserved,
             itemsTokenReplaced: replaced,
-            transactionCount: payload.transactions?.count ?? 0,
-            incomeCount: payload.income?.count ?? 0,
-            bankAccountCount: payload.bankAccounts?.count ?? 0,
-            paymentCount: payload.creditCardPayments?.count ?? 0,
-            budgetPlanCount: payload.budgetPlans?.count ?? 0,
-            payoffPlanCount: payload.payoffPlans?.count ?? 0,
-            cardLabelCount: payload.cardLabels?.count ?? 0,
-            vendorRuleCount: payload.vendorRules?.count ?? 0,
-            isConnectionsOnly: isConnectionsOnly
+            transactionCount: payload.transactions.count,
+            incomeCount: payload.income.count,
+            bankAccountCount: payload.bankAccounts.count,
+            paymentCount: payload.creditCardPayments.count,
+            budgetPlanCount: payload.budgetPlans.count,
+            payoffPlanCount: payload.payoffPlans.count,
+            cardLabelCount: payload.cardLabels.count,
+            vendorRuleCount: payload.vendorRules.count
         )
     }
 
@@ -342,51 +335,29 @@ enum PlaidConnectionBackup {
         let credResult = applyCredentials(payload.credentials, policy: policy)
         let itemResult = applyItems(payload.items, policy: policy)
 
-        var txCount = 0
-        var incomeCount = 0
-        var accountCount = 0
-        var paymentCount = 0
-        var planCount = 0
-        var payoffCount = 0
+        let txCount = upsertTransactions(payload.transactions, modelContext: modelContext)
+        let incomeCount = upsertIncome(payload.income, modelContext: modelContext)
+        let accountCount = upsertBankAccounts(payload.bankAccounts, modelContext: modelContext)
+        let paymentCount = upsertPayments(payload.creditCardPayments, modelContext: modelContext)
+        let planCount = upsertBudgetPlans(payload.budgetPlans, modelContext: modelContext)
+        let payoffCount = upsertPayoffPlans(payload.payoffPlans, modelContext: modelContext)
 
-        if let rows = payload.transactions {
-            txCount = upsertTransactions(rows, modelContext: modelContext)
+        if !payload.cardLabels.isEmpty {
+            mergeCardLabels(payload.cardLabels)
         }
-        if let rows = payload.income {
-            incomeCount = upsertIncome(rows, modelContext: modelContext)
+        if !payload.vendorRules.isEmpty {
+            mergeVendorRules(payload.vendorRules)
         }
-        if let rows = payload.bankAccounts {
-            accountCount = upsertBankAccounts(rows, modelContext: modelContext)
-        }
-        if let rows = payload.creditCardPayments {
-            paymentCount = upsertPayments(rows, modelContext: modelContext)
-        }
-        if let rows = payload.budgetPlans {
-            planCount = upsertBudgetPlans(rows, modelContext: modelContext)
-        }
-        if let rows = payload.payoffPlans {
-            payoffCount = upsertPayoffPlans(rows, modelContext: modelContext)
-        }
-
-        if let labels = payload.cardLabels, !labels.isEmpty {
-            mergeCardLabels(labels)
-        }
-        if let rules = payload.vendorRules, !rules.isEmpty {
-            mergeVendorRules(rules)
-        }
-        if let privacy = payload.screenshotPrivacy {
-            // Only set if true in backup or local never customized — always restore the value for full restore feel.
-            UserDefaults.standard.set(privacy, forKey: ScreenshotPrivacy.storageKey)
-        }
+        UserDefaults.standard.set(payload.screenshotPrivacy, forKey: ScreenshotPrivacy.storageKey)
 
         if policy.wipesLocalData {
-            if let prefs = payload.preferenceDefaults, !prefs.isEmpty {
-                AppPreferenceBackup.restore(prefs)
+            if !payload.preferenceDefaults.isEmpty {
+                AppPreferenceBackup.restore(payload.preferenceDefaults)
                 // Restore rewrites the whole defaults domain — drop the nickname cache.
                 CardLabelStore.resetMemoryCache()
             }
-            if let logos = payload.logoFiles, !logos.isEmpty {
-                InstitutionLogoCache.importLogoFiles(logos)
+            if !payload.logoFiles.isEmpty {
+                InstitutionLogoCache.importLogoFiles(payload.logoFiles)
             }
         }
 
@@ -675,11 +646,8 @@ private extension PlaidConnectionBackup {
         var count = 0
         for row in rows {
             if let live = byId[row.accountId] {
-                // FIX: every field was copied unconditionally, so restoring an old backup to
-                // recover one nickname rewrote balances, limits, minimums, due dates and APRs
-                // with stale values and moved lastSyncedAt backwards — while the restore sheet
-                // promises "Adds missing banks and data only." Live data that has been synced
-                // more recently than the backup wins; identity fields still refresh.
+                // Safe merge: identity fields always refresh; balances/terms only if the
+                // backup is at least as new as the live lastSyncedAt.
                 let backupIsNewer = row.lastSyncedAt >= live.lastSyncedAt
                 live.itemId = row.itemId
                 live.name = row.name
@@ -1063,7 +1031,7 @@ private enum AppPreferenceBackup {
     }
 }
 
-// MARK: - Envelope crypto (format v1)
+// MARK: - Envelope crypto
 
 extension PlaidConnectionBackup {
     /// On-disk JSON wrapper around hybrid-encrypted payload bytes.
@@ -1193,11 +1161,16 @@ extension PlaidConnectionBackup {
             throw BackupError.invalidFile
         }
 
+        let payload: Payload
         do {
-            return try decoder.decode(Payload.self, from: plaintext)
+            payload = try decoder.decode(Payload.self, from: plaintext)
         } catch {
             throw BackupError.invalidFile
         }
+        guard payload.version == formatVersion else {
+            throw BackupError.unsupportedVersion(payload.version)
+        }
+        return payload
     }
 
     // MARK: Key derivation
@@ -1218,7 +1191,7 @@ extension PlaidConnectionBackup {
         return HKDF<SHA512>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: stretched),
             salt: salt,
-            info: Data("financewizard.backup.v1.kek".utf8),
+            info: Data("financewizard.backup.v\(formatVersion).kek".utf8),
             outputByteCount: keyByteCount
         )
     }
@@ -1330,7 +1303,10 @@ extension PlaidConnectionBackup {
             case .invalidFile:
                 return "Not a valid Finance Wizard backup file."
             case .unsupportedVersion(let v):
-                return "Unsupported backup version (\(v)). Update the app and try again."
+                if v < formatVersion {
+                    return "This backup is from an older app version and cannot be restored."
+                }
+                return "This backup is from a newer app version (\(v)). Update the app and try again."
             case .unsupportedKDF(let kdf):
                 return "Unsupported encryption method (\(kdf))."
             case .cryptoFailed(let detail):

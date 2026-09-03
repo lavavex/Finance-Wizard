@@ -2,9 +2,8 @@
 //  Income.swift
 //  Finance Wizard
 //
-//  Income rows from finance-sync GET /api/income.
+//  Income rows from Plaid money-in.
 //  Separate stream from expenses — never included in Total Spend or category charts.
-//  Field names match the IncomeRow contract in grokinstruct.txt.
 //
 
 import Foundation
@@ -21,7 +20,7 @@ final class Income {
     /// Always positive — money received (never mixed into spend).
     var amount: Double
     var date: Date
-    /// Canonical: Payroll, Direct Deposit, Interest, Refund, Other Income
+    /// Canonical: Payroll, Direct Deposit, Interest, Other Income.
     var category: String
     /// e.g. "CHASE COLLEGE" (API `account_name`)
     var accountName: String?
@@ -106,6 +105,18 @@ enum IncomeAnalytics {
         "Other Income"
     ]
 
+    /// Categories that are money-in but not earnings (merchant returns). Excluded from Total Income.
+    static let nonEarningsCategories: Set<String> = [
+        "Refund"
+    ]
+
+    /// True for paychecks, deposits, interest, and uncategorised money-in. False for Refund.
+    static func isEarnings(_ category: String) -> Bool {
+        let c = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !c.isEmpty else { return true }
+        return !nonEarningsCategories.contains { $0.caseInsensitiveCompare(c) == .orderedSame }
+    }
+
     /// Rows inside the selected week / month, or all rows for `.all`.
     static func inPeriod(
         _ rows: [Income],
@@ -121,9 +132,12 @@ enum IncomeAnalytics {
         return rows.filter { $0.date >= interval.start && $0.date < interval.end }
     }
 
-    /// Sum of income amounts (API amounts are always positive).
+    /// Sum of earnings in the list (always positive). Skips Refund — those are not paychecks.
     static func totalEarned(in rows: [Income]) -> Double {
-        rows.reduce(0) { $0 + max(0, $1.amount) }
+        rows.reduce(0) { sum, row in
+            guard isEarnings(row.category) else { return sum }
+            return sum + max(0, row.amount)
+        }
     }
 
     static func sorted(_ rows: [Income], by sort: TransactionSort) -> [Income] {

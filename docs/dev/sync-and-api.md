@@ -5,7 +5,7 @@ title: Sync & API
 
 # Sync & Plaid API
 
-Finance Wizard talks **directly to Plaid** using **your** developer `client_id` and `secret`. There is no home finance-sync server.
+Finance Wizard talks **directly to Plaid** using **your** developer `client_id` and `secret`. There is no Finance Wizard server in the path.
 
 ## Setup (once)
 
@@ -48,7 +48,7 @@ Same as Sync now, but **clears cursors** first so Plaid re-sends the full transa
 
 ### Link bank account (Hosted Link)
 
-In-app WKWebView Link is **deprecated**. Finance Wizard uses [Hosted Link](https://plaid.com/docs/link/hosted-link/) in an `ASWebAuthenticationSession`:
+Finance Wizard uses [Hosted Link](https://plaid.com/docs/link/hosted-link/) in an `ASWebAuthenticationSession`:
 
 ```text
 1. POST /link/token/create with hosted_link:
@@ -99,7 +99,7 @@ The app sends this URL as `webhook` on every `/link/token/create` (Link + Relink
 |------|------|---------|
 | TRANSACTIONS | `SYNC_UPDATES_AVAILABLE` | New/changed txs — tap Sync |
 | TRANSACTIONS | `RECURRING_TRANSACTIONS_UPDATE` | Recurring streams changed |
-| TRANSACTIONS | `INITIAL_UPDATE` / `HISTORICAL_UPDATE` / `DEFAULT_UPDATE` / `TRANSACTIONS_REMOVED` | Legacy / extra signals |
+| TRANSACTIONS | `INITIAL_UPDATE` / `HISTORICAL_UPDATE` / `DEFAULT_UPDATE` / `TRANSACTIONS_REMOVED` | Extra transaction signals |
 | ITEM | `ERROR` (e.g. `ITEM_LOGIN_REQUIRED`) | Needs Relink |
 | ITEM | `PENDING_EXPIRATION` / `USER_PERMISSION_REVOKED` | Needs Relink |
 
@@ -112,7 +112,7 @@ Host depends on Settings environment:
 | Sandbox | `https://sandbox.plaid.com` |
 | Production | `https://production.plaid.com` |
 
-Plaid no longer has a **Development** environment. A leftover `development` value in Settings or a backup is treated as Sandbox.
+Plaid environments in the app are **Sandbox** and **Production**. A stored `development` value maps to Sandbox.
 
 ## How rows map into the app
 
@@ -131,8 +131,8 @@ Plaid amount convention:
 - **Credit terms** (min payment, due date, last payment/statement, APRs, overdue) from `POST /liabilities/get` when the Item has Liabilities.  
 - **Bank logo / brand color** from `POST /item/get` → `POST /institutions/get_by_id` (`include_optional_metadata`).  
 - Pending rows are skipped by default.  
-- Each Sync also cleans older expense/income rows whose titles look like transfers or card payments.  
-- Banks linked **before** Liabilities was added may need a **re-link** so credit details can load.
+- Each Sync also drops expense/income rows whose titles look like transfers or card payments.  
+- Relink if credit details (min payment, due date, APRs) are missing — Link requests Liabilities.
 
 ### Local locks & learn rules
 
@@ -141,26 +141,9 @@ Editing a transaction **Save**s on device only:
 - Sets `categoryLocked` so later syncs do not overwrite.  
 - Optional **learn** stores a vendor rule (`VendorRulesStore`) applied on future Plaid upserts.
 
-## File import
+## Backup
 
-Toolbar **Import** menu:
-
-| Option | Format |
-|--------|--------|
-| **JSON export** | Legacy finance-sync shape (`transactions[]`) |
-| **Apple Card CSV** | Wallet / [card.apple.com](https://card.apple.com) CSV export |
-
-### Apple Card CSV
-
-Expected columns (header names are flexible): **Transaction Date**, **Description** / **Merchant**, **Amount (USD)**, optional **Category**, **Type** (`Purchase` / `Payment` / `Credit`).
-
-| Type | Result |
-|------|--------|
-| Purchase | Expense on payment method **Apple Card** |
-| Payment | **Credit Card Payment** (list + Total paid; not spend) |
-| Credit / refund | **Income** category Refund |
-
-Re-import updates the same rows via stable `applecard:…` ids.
+Settings **Backup & restore** writes an encrypted `.fwbackup` of this phone (keys, banks, SwiftData, prefs, logos). Restore accepts only the current backup format version; older files are rejected.
 
 ## Security notes
 

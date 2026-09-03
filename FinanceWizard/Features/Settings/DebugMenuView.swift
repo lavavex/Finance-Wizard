@@ -115,6 +115,21 @@ struct DebugMenuView: View {
             }
 
             Section {
+                Button("Run classifier cases") {
+                    let bad = ClassifierRegression.failures()
+                    if bad.isEmpty {
+                        statusMessage = "Classifier: \(ClassifierRegression.cases.count) cases passed"
+                    } else {
+                        statusMessage = "Classifier: \(bad.count) failed\n" + bad.joined(separator: "\n")
+                    }
+                }
+            } header: {
+                Text("Classifier")
+            } footer: {
+                Text("Real-descriptor table in ClassifierRegression.swift. Must stay green after classify() edits.")
+            }
+
+            Section {
                 LabeledContent("Transactions", value: "\(transactions.count)")
                 LabeledContent("Income", value: "\(incomeRows.count)")
                 LabeledContent("Accounts", value: "\(accounts.count)")

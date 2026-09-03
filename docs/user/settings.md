@@ -32,7 +32,7 @@ Plaid keys and banks are required to pull transactions. See [Getting started](ge
 
 **Back up everything** creates a password-encrypted `.fwbackup` file (keys, banks, transactions, budget, prefs). Keep the password somewhere safe.
 
-**Restore** default is **Safe merge** (adds missing data; doesn’t overwrite live bank tokens). **Wipe device, then restore** deletes local data first, then restores the backup.
+**Restore** default is **Safe merge** (adds missing data; doesn’t overwrite live bank tokens). **Wipe device, then restore** deletes local data first, then restores the backup. Restore only accepts a backup from this app version.
 
 ## On-device AI
 

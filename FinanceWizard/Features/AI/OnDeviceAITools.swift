@@ -75,7 +75,7 @@ struct MoneySnapshotTool: Tool {
             let cardPayments = spendInMonth.filter { TransactionAnalytics.isCreditCardPaymentCategory($0.category) }
             let spendTotal = consumption.reduce(0.0) { $0 + abs($1.amount) }
             let cardPaymentTotal = cardPayments.reduce(0.0) { $0 + abs($1.amount) }
-            let incomeTotal = incomeInMonth.reduce(0.0) { $0 + $1.amount }
+            let incomeTotal = IncomeAnalytics.totalEarned(in: incomeInMonth)
             let net = incomeTotal - spendTotal
 
             var byCategory: [String: Double] = [:]
