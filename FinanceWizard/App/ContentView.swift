@@ -87,25 +87,9 @@ struct ContentView: View {
             loadedTabs.insert(.settings)
             selectedTab = .settings
         }
-        // The system places this above the tab bar and insets content for it, so Ask never
-        // covers a row, on the bottom bar or the side bar.
+        // The system places this above the bottom tab bar, or in a small bubble beside a side tab bar.
         .tabViewBottomAccessory {
-            Button {
-                showAsk = true
-            } label: {
-                Label {
-                    Text("Ask")
-                } icon: {
-                    Image(systemName: "apple.intelligence")
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.orange, .pink, .purple, .cyan],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-            }
+            AskAccessoryButton { showAsk = true }
         }
         .sheet(isPresented: $showAsk) {
             OnDeviceAIChatView()
@@ -586,4 +570,27 @@ struct AllTransactionsView: View {
         }
     }
 
+}
+
+private struct AskAccessoryButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "apple.intelligence")
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.orange, .pink, .purple, .cyan],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Text("Ask")
+            }
+            // Beside a side tab bar, the system's bubble is only as wide as this and has no padding
+            // of its own, so a label sized to its text overflows.
+            .frame(minWidth: 120)
+        }
+    }
 }
