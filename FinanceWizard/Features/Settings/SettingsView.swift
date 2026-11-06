@@ -340,7 +340,7 @@ struct SettingsView: View {
                     itemPendingDelete = nil
                 }
             } message: {
-                Text("Unlinks this bank from Finance Wizard. You can also remove it from your Plaid account.")
+                Text("Unlinks this bank from Budget Magi. You can also remove it from your Plaid account.")
             }
             .confirmationDialog(
                 "Export debug data?",
@@ -961,7 +961,7 @@ enum AppBuildInfo {
     static var displayName: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
             ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
-            ?? "Finance Wizard"
+            ?? "Budget Magi"
     }
 
     static var bundleIdentifier: String {

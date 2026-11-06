@@ -79,7 +79,7 @@ enum DebugDataExporter {
 
         // 2) README
         let readme = """
-        Finance Wizard — debug data export
+        Budget Magi — debug data export
         ==================================
         Created: \(stamp)
         App: \(AppBuildInfo.displayName) \(AppBuildInfo.versionBuildLabel)

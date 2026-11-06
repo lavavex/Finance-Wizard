@@ -94,4 +94,4 @@ A **monthly cap**, **expected income**, and **per-category limits** compared to 
 - Apple Card (Plaid does not sync it)
 - Push alerts when you go over budget (the Budget tab still shows remaining / over)
 - Automatic sync to another iPhone (use backup, or Sync from Plaid on that phone)
-- A Finance Wizard server that holds your Plaid secret (keys stay on the phone)
+- A Budget Magi server that holds your Plaid secret (keys stay on the phone)

@@ -1,16 +1,16 @@
 <div align="center">
-  <img alt="Finance Wizard" src="FinanceWizard/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="128" height="128">
+  <img alt="Budget Magi" src="FinanceWizard/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="128" height="128">
 
-  <h1>Finance Wizard</h1>
+  <h1>Budget Magi</h1>
 
   <img alt="iOS 26+" src="https://img.shields.io/badge/iOS-26+-black">
 </div>
 
 <p align="center">
-  <b>Finance Wizard</b> is a personal expense tracker for iPhone.
+  <b>Budget Magi</b> is a personal expense tracker for iPhone.
   Connect your banks with <a href="https://dashboard.plaid.com">your own Plaid developer keys</a>,
   keep every charge on this device, and see spend, budgets, and recurring bills in a native SwiftUI app.
-  Nothing is uploaded to a Finance Wizard server.
+  Nothing is uploaded to a Budget Magi server.
 </p>
 
 ## TestFlight

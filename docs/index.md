@@ -3,9 +3,9 @@ layout: default
 title: Home
 ---
 
-# Finance Wizard documentation
+# Budget Magi documentation
 
-**Finance Wizard** is a personal iOS expense tracker. You connect banks with **your own Plaid keys**. Data stays on the iPhone. Home Screen widgets read the same store.
+**Budget Magi** is a personal iOS expense tracker. You connect banks with **your own Plaid keys**. Data stays on the iPhone. Home Screen widgets read the same store.
 
 ## User docs
 

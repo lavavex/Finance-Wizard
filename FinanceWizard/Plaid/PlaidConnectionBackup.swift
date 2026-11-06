@@ -1547,7 +1547,7 @@ extension PlaidConnectionBackup {
             case .wrongPassword:
                 return "Wrong password, or the file is corrupted."
             case .invalidFile:
-                return "Not a valid Finance Wizard backup file."
+                return "Not a valid Budget Magi backup file."
             case .unsupportedVersion(let v):
                 if v < formatVersion {
                     return "This backup is from an older app version and cannot be restored."

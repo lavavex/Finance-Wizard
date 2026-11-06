@@ -5,9 +5,9 @@ title: Getting started
 
 # Getting started
 
-This is for **people using Finance Wizard on an iPhone**, not for building the app in Xcode. Install comes from **TestFlight** (public beta soon). To compile from source, see [Development](../dev/development.md).
+This is for **people using Budget Magi on an iPhone**, not for building the app in Xcode. Install comes from **TestFlight** (public beta soon). To compile from source, see [Development](../dev/development.md).
 
-Finance Wizard keeps your bank data **on this device**. You connect banks with **your own Plaid developer keys**. Bank passwords are entered only in Plaid’s sign-in screen, never stored by the app.
+Budget Magi keeps your bank data **on this device**. You connect banks with **your own Plaid developer keys**. Bank passwords are entered only in Plaid’s sign-in screen, never stored by the app.
 
 ## What you need
 
@@ -21,8 +21,8 @@ Finance Wizard keeps your bank data **on this device**. You connect banks with *
 
 1. On your iPhone, install **[TestFlight](https://apps.apple.com/app/testflight/id899247664)** from the App Store if you don’t have it.
 2. Open the **TestFlight link** you were sent (public link will be posted here when it is live).
-3. In TestFlight, tap **Finance Wizard** → **Install** (or **Update**).
-4. Open **Finance Wizard** from the Home Screen.
+3. In TestFlight, tap **Budget Magi** → **Install** (or **Update**).
+4. Open **Budget Magi** from the Home Screen.
 
 Beta updates install through TestFlight. Feedback (screenshots, notes) can be sent from TestFlight if you hit a bug.
 
@@ -44,7 +44,7 @@ Without keys, the app can’t talk to Plaid or open Link.
 4. In the app: **Settings**.
 5. Under **Plaid account**, paste **client_id** and **secret**, pick **Environment**, tap **Save credentials**.
 
-Keys stay on this iPhone (the secret is in the Keychain). They are not uploaded to a Finance Wizard server.
+Keys stay on this iPhone (the secret is in the Keychain). They are not uploaded to a Budget Magi server.
 
 ## 4. Link a bank and sync
 
@@ -75,7 +75,7 @@ More detail: [Using the app](using-the-app.md).
 After at least one Sync:
 
 1. Home Screen → long-press → **+**
-2. Search **Finance Wizard**
+2. Search **Budget Magi**
 3. Add **Total Spend**, **Spend by Category**, and/or **Balances**
 4. Long-press a widget → **Edit Widget** for week vs month (where available)
 

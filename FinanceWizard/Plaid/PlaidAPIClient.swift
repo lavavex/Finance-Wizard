@@ -62,7 +62,7 @@ enum PlaidAPIClient {
     ///   (and optionally pick more accounts). Do not pass products in that case.
     /// - Returns: Session with link_token and hosted URL for the browser.
     static func createHostedLinkSession(
-        clientName: String = "Finance Wizard",
+        clientName: String = "Budget Magi",
         userID: String = "finance-wizard-user",
         accessToken: String? = nil
     ) async throws -> HostedLinkSession {

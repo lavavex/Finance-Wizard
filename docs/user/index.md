@@ -5,7 +5,7 @@ title: User docs
 
 # User docs
 
-Guides for using Finance Wizard on an iPhone (TestFlight). Not for compiling the app.
+Guides for using Budget Magi on an iPhone (TestFlight). Not for compiling the app.
 
 | Page | What it covers |
 |------|----------------|
