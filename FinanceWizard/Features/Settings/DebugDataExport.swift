@@ -34,11 +34,25 @@ enum DebugDataExportError: LocalizedError {
 
 /// Builds a temporary folder with JSON snapshot + optional SwiftData store files.
 enum DebugDataExporter {
+    private static let filePrefix = "FinanceWizard-debug-"
+
+    /// Deletes export folders and zips from the temp folder. They hold a full copy of the data.
+    static func discardTemporaryFiles() {
+        let directory = FileManager.default.temporaryDirectory
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        for entry in entries where entry.lastPathComponent.hasPrefix(filePrefix) {
+            try? FileManager.default.removeItem(at: entry)
+        }
+    }
+
     /// Create export package; caller presents share sheet then should keep URL alive until dismiss.
     @MainActor
     static func exportPackage(modelContext: ModelContext) throws -> URL {
         let stamp = Self.timestamp()
-        let folderName = "FinanceWizard-debug-\(stamp)"
+        let folderName = "\(filePrefix)\(stamp)"
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(folderName, isDirectory: true)
 
@@ -75,8 +89,8 @@ enum DebugDataExporter {
         --------
         • debug-snapshot.json / FinanceWizard-debug-*.json
             Full readable dump of SwiftData rows + non-secret preferences.
-            Safe to share for debugging. Does NOT include Plaid client_secret
-            or access tokens.
+            Contains your real financial data. Does NOT include Plaid
+            client_secret or access tokens.
 
         • store/ (if present)
             Raw SwiftData / SQLite files from the App Group container.

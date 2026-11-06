@@ -604,50 +604,46 @@ enum SharedStore {
             groupContainer: .identifier(appGroupID)
         )
 
+        return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    /// App launch only: if the store can’t open, moves it aside and starts empty so the app
+    /// still launches. The widget stays on `makeContainer`, so it can never touch the file.
+    static func makeContainerMovingUnreadableStoreAside() throws -> (container: ModelContainer, movedAside: Bool) {
         do {
-            return try ModelContainer(for: schema, configurations: [configuration])
+            return (try makeContainer(), false)
         } catch {
-            // Schema changed (e.g. new fields) and lightweight migration failed.
-            // Delete the App Group store and create a fresh empty one so the app launches.
-            // User can Sync again to re-download transactions + income.
-            print("SwiftData open failed, resetting store: \(error)")
-            deletePersistentStoreFiles()
-            return try ModelContainer(for: schema, configurations: [configuration])
+            print("SwiftData open failed, moving store aside: \(error)")
+            guard let root = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: appGroupID
+            ) else { throw error }
+            let support = root
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("Application Support", isDirectory: true)
+            // Nothing to move means the store isn’t the problem.
+            guard try moveStoreAside(in: support) else { throw error }
+            return (try makeContainer(), true)
         }
     }
 
-    /// Remove FinanceTransactions.store (+ WAL/SHM) from the App Group container.
-    private static func deletePersistentStoreFiles() {
-        guard let root = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupID
-        ) else { return }
+    /// Moves the store and its WAL/SHM into `Recovered store/`, replacing any earlier copy.
+    /// - Returns: False when there were no store files to move.
+    @discardableResult
+    static func moveStoreAside(in directory: URL) throws -> Bool {
+        let manager = FileManager.default
+        let files = try manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix(storeName) }
+        guard !files.isEmpty else { return false }
 
-        let support = root
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Application Support", isDirectory: true)
-
-        let base = support.appendingPathComponent(storeName)
-        let candidates = [
-            base.appendingPathExtension("store"),
-            URL(fileURLWithPath: base.path + ".store"),
-            support.appendingPathComponent("\(storeName).store"),
-            support.appendingPathComponent("\(storeName).store-shm"),
-            support.appendingPathComponent("\(storeName).store-wal"),
-            support.appendingPathComponent("\(storeName).store-journal")
-        ]
-
-        if let files = try? FileManager.default.contentsOfDirectory(
-            at: support,
-            includingPropertiesForKeys: nil
-        ) {
-            for file in files where file.lastPathComponent.hasPrefix(storeName) {
-                try? FileManager.default.removeItem(at: file)
-            }
+        let recovered = directory.appendingPathComponent("Recovered store", isDirectory: true)
+        if manager.fileExists(atPath: recovered.path) {
+            try manager.removeItem(at: recovered)
         }
-
-        for url in candidates {
-            try? FileManager.default.removeItem(at: url)
+        try manager.createDirectory(at: recovered, withIntermediateDirectories: true)
+        for file in files {
+            try manager.moveItem(at: file, to: recovered.appendingPathComponent(file.lastPathComponent))
         }
+        return true
     }
 
     static func allPaymentMethods() -> [String] {

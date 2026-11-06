@@ -153,7 +153,7 @@ Settings **Backup & restore** writes an encrypted `.fwbackup` of this phone (key
 
 Rows are matched to a bank by Plaid account id, then account label (`Name ···1234`), then institution name. A row that matches no bank, such as an imported card, can’t be re-downloaded, so safe merge adds it if it’s missing.
 
-The app deletes its temporary `.fwbackup` copies after a restore or share, and at launch.
+The app deletes its temporary `.fwbackup` copies and debug exports after a restore or share, and at launch.
 
 ## Security notes
 

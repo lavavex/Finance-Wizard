@@ -368,6 +368,7 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showDebugShare, onDismiss: {
                 debugExportURL = nil
+                DebugDataExporter.discardTemporaryFiles()
             }) {
                 if let debugExportURL {
                     ShareSheet(items: [debugExportURL]) {

@@ -27,6 +27,7 @@ struct ContentView: View {
     /// Only build heavy tabs after the user opens them (first switch is still work; launch is not).
     @State private var loadedTabs: Set<AppTab> = [.transactions, Self.launchTab]
     @State private var showAsk = false
+    @State private var showStoreRecovered = AppStoreRecovery.needsNotice
 
     /// Transactions, unless a Debug build was launched with `-screen <tab>`.
     private static var launchTab: AppTab {
@@ -111,6 +112,11 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showAsk) {
             OnDeviceAIChatView()
+        }
+        .alert("Your data couldn’t be opened", isPresented: $showStoreRecovered) {
+            Button("OK", role: .cancel) { AppStoreRecovery.needsNotice = false }
+        } message: {
+            Text("A copy was kept on this iPhone and the app started empty. Sync downloads your bank history again. To get budgets, payoff plans, and edits back, restore a backup in Settings.")
         }
     }
 
@@ -519,6 +525,7 @@ struct AllTransactionsView: View {
     /// - Parameter resetCursors: if true, re-download full history for each Item.
     /// - Parameter forceRefresh: call `/transactions/refresh` first (on-demand bank pull).
     private func syncFromPlaid(resetCursors: Bool, forceRefresh: Bool = false) async {
+        guard !isSyncing else { return }
         await MainActor.run {
             isSyncing = true
             let title: String = {

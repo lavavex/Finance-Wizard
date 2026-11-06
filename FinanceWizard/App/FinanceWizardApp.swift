@@ -15,6 +15,7 @@ struct FinanceWizardApp: App {
 
     init() {
         PlaidConnectionBackup.purgeTemporaryFiles()
+        DebugDataExporter.discardTemporaryFiles()
         do {
             #if DEBUG
             if DemoMode.isEnabled {
@@ -23,7 +24,13 @@ struct FinanceWizardApp: App {
             }
             #endif
             // Shared App Group store — same on-disk database the widget reads.
-            container = try SharedStore.makeContainer()
+            let opened = try SharedStore.makeContainerMovingUnreadableStoreAside()
+            container = opened.container
+            if opened.movedAside {
+                // The new store is empty, so the next Sync has to download full history.
+                PlaidItemStore.resetAllCursors()
+                AppStoreRecovery.needsNotice = true
+            }
         } catch {
             // Unrecoverable: App Group missing, wrong id, or store corrupted.
             fatalError("Failed to open ModelContainer: \(error)")
@@ -62,6 +69,11 @@ struct FinanceWizardApp: App {
             )
         }
     }
+}
+
+/// Set at launch when the database couldn’t open and was moved aside.
+enum AppStoreRecovery {
+    static var needsNotice = false
 }
 
 /// Hands a file opened from Files / cloud storage to Settings (lazy tab may not exist yet).
