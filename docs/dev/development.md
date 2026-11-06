@@ -115,51 +115,17 @@ The script uses these launch arguments, which also work from an Xcode scheme:
 | **MARKETING_VERSION** | User-facing version (e.g. `1.0`) → About **Version** |
 | **CURRENT_PROJECT_VERSION** | Integer build → About **Build** / TestFlight |
 
-**Xcode Cloud** runs `ci_scripts/ci_pre_xcodebuild.sh`, which sets:
+**Xcode Cloud** stamps each archive with its own build counter, the same number you see in App Store Connect / TestFlight. The repo has no CI scripts.
 
-```text
-CURRENT_PROJECT_VERSION = $CI_BUILD_NUMBER
-```
-
-so every Cloud archive’s build matches the Cloud build counter (same number you see in App Store Connect / TestFlight).
-
-**Local** uses whatever is in `project.pbxproj`. After a Cloud build lands, align your Mac:
-
-```bash
-./scripts/set-build-number.sh <CI_BUILD_NUMBER>
-```
-
-Then Clean + Run so **Settings → About** matches the Cloud install. Do not hand-edit a lower number than the last Cloud build (App Store Connect rejects non‑increasing builds).
+**Local** builds use the value in `project.pbxproj`, which stays at `1`. Settings → About shows build 1 on a local install, and that number never reaches App Store Connect.
 
 ## Xcode project format (Xcode Cloud)
 
-Newer local Xcodes (26/27) may rewrite `project.pbxproj` to **objectVersion 110+**. Older Xcode Cloud images then fail with:
+Newer local Xcodes may rewrite `project.pbxproj` to a newer **objectVersion**. An older Xcode Cloud image then fails with:
 
-> cannot be opened because it is in a future Xcode project file format (110)
+> cannot be opened because it is in a future Xcode project file format
 
-There is **no permanent lock inside the `.xcodeproj`** that stops Xcode from rewriting the file when you save. Use one (or both) of these:
-
-### A. Auto-downgrade on Xcode Cloud (in this repo)
-
-| Script | When |
-|--------|------|
-| `ci_scripts/ci_post_clone.sh` | After clone |
-| `ci_scripts/ci_pre_xcodebuild.sh` | Before `xcodebuild` |
-| `scripts/lock-xcode-project-format.sh` | Forces `objectVersion = 77` |
-
-Cloud runs the `ci_scripts/*` hooks automatically when present.
-
-### B. Optional local pre-commit hook
-
-```bash
-git config core.hooksPath .githooks
-```
-
-Commits then re-lock the project format before they land.
-
-### C. Or upgrade Xcode Cloud to match your Mac
-
-App Store Connect → your app → **Xcode Cloud** → workflow → **Environment** → pick an Xcode version that understands format 110 (same generation as your local Xcode 27). Then you can leave format 110 as-is.
+If you see this, go to App Store Connect → your app → **Xcode Cloud** → workflow → **Environment** and pick an Xcode version at least as new as your Mac's.
 
 **Also check the workflow project name:** it must open **`FinanceWizard.xcodeproj`**.
 

@@ -49,7 +49,5 @@ Link completion uses `financewizard://hosted-link-complete` (Hosted Link). An in
 
 | Where | What happens |
 |-------|----------------|
-| **Xcode Cloud** | `ci_pre_xcodebuild.sh` sets `CURRENT_PROJECT_VERSION` to **`CI_BUILD_NUMBER`** |
-| **Local** | `./scripts/set-build-number.sh <CI_BUILD_NUMBER>` |
-
-Do not ship a lower build than the last Cloud / TestFlight build.
+| **Xcode Cloud** | Stamps its own build counter on each archive |
+| **Local** | Stays at the `project.pbxproj` value (`1`) |
