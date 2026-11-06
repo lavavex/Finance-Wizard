@@ -1477,7 +1477,7 @@ extension PlaidConnectionBackup {
             at: directory,
             includingPropertiesForKeys: nil
         )) ?? []
-        files.forEach(discardTemporaryFile)
+        for file in files { discardTemporaryFile(file) }
     }
 
     private static func isAppTemporaryFile(_ url: URL) -> Bool {

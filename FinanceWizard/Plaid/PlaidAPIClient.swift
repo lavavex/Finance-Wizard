@@ -271,7 +271,7 @@ enum PlaidAPIClient {
             ?? PlaidAPIError.http(
                 status: 0,
                 code: nil,
-                message: "Link closed without linking a bank (or the session timed out). Try Link again."
+                message: "This bank link timed out before it finished. Try Link again."
             )
     }
 

@@ -28,6 +28,9 @@ private struct AskSetupRequest: Identifiable {
 }
 
 struct OnDeviceAIChatView: View {
+    /// Asked as soon as the chat opens, for follow-ups from elsewhere in the app.
+    var initialQuestion: String?
+
     @Environment(\.modelContext) private var financeContext
 
     @State private var draft = ""
@@ -41,6 +44,7 @@ struct OnDeviceAIChatView: View {
     @State private var askContext = ModelContext(AskStore.container)
     @State private var selectedModel = AskModel.selected
     @State private var setupRequest: AskSetupRequest?
+    @State private var confirmClear = false
 
     private let promptHints = [
         "What's my biggest category?",
@@ -54,6 +58,13 @@ struct OnDeviceAIChatView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .principal) { modelMenu }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Clear chat", systemImage: "trash") { confirmClear = true }
+                            .disabled(messages.isEmpty || isSending)
+                            .confirmationDialog("Clear this chat?", isPresented: $confirmClear) {
+                                Button("Clear Chat", role: .destructive) { clearChat() }
+                            }
+                    }
                 }
         }
         .sheet(item: $setupRequest) { request in
@@ -73,6 +84,7 @@ struct OnDeviceAIChatView: View {
         .task {
             loadThread()
             prepareSession()
+            if let initialQuestion { send(initialQuestion) }
             await cyclePrompts()
         }
     }
@@ -363,6 +375,15 @@ struct OnDeviceAIChatView: View {
         askContext.insert(turn)
         thread.updatedAt = .now
         try? askContext.save()
+    }
+
+    private func clearChat() {
+        AskStore.wipe()
+        messages = []
+        followUps = []
+        conversation = nil
+        loadThread()
+        prepareSession()
     }
 
     private func cyclePrompts() async {

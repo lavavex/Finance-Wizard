@@ -195,11 +195,11 @@ enum AskLedger {
     ]
 
     /// Letters and digits only, so "Corner-Market" and "corner market" match.
-    private static func searchKey(_ text: String) -> String {
+    static func searchKey(_ text: String) -> String {
         text.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 
-    private static func matchesMerchant(_ row: Transaction, key: String) -> Bool {
+    static func matchesMerchant(_ row: Transaction, key: String) -> Bool {
         searchKey(row.title).contains(key) || searchKey(row.merchantName ?? "").contains(key)
     }
 
@@ -254,8 +254,8 @@ enum AskLedger {
         return BudgetStatus(
             headline: headline,
             spent: rounded(snapshot.totalSpent),
-            limit: snapshot.monthlyLimit.map(rounded),
-            remaining: snapshot.totalRemaining.map(rounded),
+            limit: snapshot.monthlyLimit.map { rounded($0) },
+            remaining: snapshot.totalRemaining.map { rounded($0) },
             overLimit: limited.filter { $0.spent > $0.limit + 0.005 },
             closestToLimit: limited
                 .filter { $0.spent <= $0.limit + 0.005 }
@@ -291,7 +291,7 @@ enum AskLedger {
             return CardPayment(
                 name: account.displayName,
                 balance: rounded(account.currentBalance),
-                minimumDue: account.minimumPaymentAmount.map(rounded),
+                minimumDue: account.minimumPaymentAmount.map { rounded($0) },
                 dueDate: due,
                 isOverdue: overdue
             )

@@ -106,6 +106,62 @@ enum OnDeviceAI {
         }
     }
 
+    /// Rewords computed facts. Returns nil if the model added an amount of its own, since the
+    /// facts stand on their own without it.
+    static func summarize(_ insight: MoneyInsight) async throws -> String? {
+        let session = try makeSession()
+        let facts = insight.facts.joined(separator: "\n")
+        let prompt = """
+            In one or two short sentences, tell the user what matters most in these facts.
+            Use only these facts and their exact amounts. Don't give advice.
+            \(facts)
+            """
+        let text = try await session.respond(to: prompt).content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, AskAnswerCheck.unverifiedAmounts(in: text, facts: [facts]).isEmpty else { return nil }
+        return text
+    }
+
+    @Generable
+    struct SearchRequest {
+        @Guide(description: "Store or business the user named")
+        var merchant: String?
+        @Guide(description: "Spending category the user named")
+        var category: String?
+        @Guide(description: "Only charges of at least this many dollars")
+        var minAmount: Double?
+        @Guide(description: "Only charges of at most this many dollars")
+        var maxAmount: Double?
+        @Guide(description: "First month as YYYY-MM, if the user named a time")
+        var fromMonth: String?
+        @Guide(description: "Last month of a range as YYYY-MM")
+        var toMonth: String?
+    }
+
+    /// Reads a plain-English search into filters. The results come from the rows, not the model.
+    static func searchFilter(for query: String, today: Date = .now) async throws -> TransactionSearchFilter {
+        guard case .available = availabilityStatus() else {
+            throw OnDeviceAIError.modelUnavailable("Apple Intelligence isn't available for AI search.")
+        }
+        let month = today.formatted(.iso8601.year().month())
+        let previous = (Calendar.current.date(byAdding: .month, value: -1, to: today) ?? today)
+            .formatted(.iso8601.year().month())
+        let session = LanguageModelSession(instructions: """
+            Turn a search of the user's bank transactions into filters. Fill in only what they asked for.
+            This month is \(month). Last month is \(previous).
+            """)
+        let request = try await session.respond(to: query, generating: SearchRequest.self).content
+        return TransactionSearchFilter(
+            merchant: request.merchant ?? "",
+            category: request.category ?? "",
+            minAmount: request.minAmount,
+            maxAmount: request.maxAmount,
+            fromMonth: request.fromMonth ?? "",
+            toMonth: request.toMonth ?? ""
+        )
+        .supported(by: query)
+    }
+
     /// Spend category from merchant title; `allowedCategories` keeps the model on-rails.
     static func suggestCategory(
         title: String,

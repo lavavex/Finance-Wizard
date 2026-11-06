@@ -142,6 +142,16 @@ struct TransactionDetailView: View {
                 .padding(.vertical, 4)
             }
 
+            if !TransactionAnalytics.isExcludedFromSpend(transaction) {
+                Section {
+                    NavigationLink {
+                        ExplainChargeView(transaction: transaction)
+                    } label: {
+                        Label("Why this charge?", systemImage: "apple.intelligence")
+                    }
+                }
+            }
+
             Section("Details") {
                 LabeledContent("Date") {
                     Text(transaction.date, style: .date)

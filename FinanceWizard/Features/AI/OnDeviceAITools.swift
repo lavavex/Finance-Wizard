@@ -47,7 +47,9 @@ struct MoneySnapshotTool: Tool {
     let name = "getMoneySnapshot"
     let description = "Totals for a calendar month: income, spend, net (income minus spend), and top spend categories. Use for overall money questions such as whether spending exceeds income or why the user feels broke. monthOffset 0 is this month, -1 is last month."
 
-    let modelContext: ModelContext
+    let container: ModelContainer
+
+    init(modelContext: ModelContext) { container = modelContext.container }
 
     @Generable
     struct Arguments {
@@ -56,7 +58,8 @@ struct MoneySnapshotTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> MoneySnapshotResult {
-        try await MainActor.run {
+        await MainActor.run {
+            let modelContext = container.mainContext
             let offset = arguments.monthOffset
             let interval = LedgerToolSupport.monthInterval(offset: offset)
             let label = LedgerToolSupport.monthLabel(offset: offset)
@@ -137,7 +140,9 @@ struct AccountBalancesTool: Tool {
     let name = "getAccountBalances"
     let description = "Current balances for linked bank and credit accounts. Use when the question is about cash on hand, what is owed, or account balances."
 
-    let modelContext: ModelContext
+    let container: ModelContainer
+
+    init(modelContext: ModelContext) { container = modelContext.container }
 
     @Generable
     struct Arguments {
@@ -146,7 +151,8 @@ struct AccountBalancesTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> AccountBalanceList {
-        try await MainActor.run {
+        await MainActor.run {
+            let modelContext = container.mainContext
             let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
             let rows = accounts.map { account in
                 AccountBalanceRow(
@@ -191,7 +197,9 @@ struct RecurringChargesTool: Tool {
     let name = "getRecurringCharges"
     let description = "Detected subscriptions, repeating bills, and card payoff plans (My Loan, Pay Over Time, promo APR) with estimated monthly cost. Use for questions about Netflix, bills, loans, or upcoming recurring charges."
 
-    let modelContext: ModelContext
+    let container: ModelContainer
+
+    init(modelContext: ModelContext) { container = modelContext.container }
 
     @Generable
     struct Arguments {
@@ -200,7 +208,8 @@ struct RecurringChargesTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> RecurringChargeList {
-        try await MainActor.run {
+        await MainActor.run {
+            let modelContext = container.mainContext
             // Uncapped: detection looks back 400 days, and a yearly charge can be that old.
             let rows = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
             let snaps = SubscriptionAnalytics.snapshots(from: rows)
@@ -259,7 +268,9 @@ struct SpendingQueryTool: Tool {
     let name = "getSpending"
     let description = "Exact spending total. Leave out merchant and category for all spending. Set toMonth only when the user asks about several months."
 
-    let modelContext: ModelContext
+    let container: ModelContainer
+
+    init(modelContext: ModelContext) { container = modelContext.container }
 
     @Generable
     struct Arguments {
@@ -274,7 +285,8 @@ struct SpendingQueryTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> SpendingResult {
-        try await MainActor.run {
+        await MainActor.run {
+            let modelContext = container.mainContext
             let range = AskLedger.monthRange(from: arguments.fromMonth, to: arguments.toMonth ?? "")
             let result = AskLedger.spending(
                 merchant: arguments.merchant ?? "",
@@ -318,7 +330,9 @@ struct BudgetStatusTool: Tool {
     let name = "getBudgetStatus"
     let description = "This month's spending against the budget: amount left, and categories over or near their limits."
 
-    let modelContext: ModelContext
+    let container: ModelContainer
+
+    init(modelContext: ModelContext) { container = modelContext.container }
 
     @Generable
     struct Arguments {
@@ -327,7 +341,8 @@ struct BudgetStatusTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> BudgetStatusResult {
-        try await MainActor.run {
+        await MainActor.run {
+            let modelContext = container.mainContext
             let status = AskLedger.budgetStatus(in: modelContext)
             let row = { (item: AskLedger.BudgetStatus.Category) in
                 BudgetCategoryRow(name: item.name, spentUSD: item.spent, limitUSD: item.limit)
@@ -360,7 +375,9 @@ struct UpcomingPaymentsTool: Tool {
     let name = "getUpcomingPayments"
     let description = "Credit card due dates and minimum payments. Use for what's due, when, and how much."
 
-    let modelContext: ModelContext
+    let container: ModelContainer
+
+    init(modelContext: ModelContext) { container = modelContext.container }
 
     @Generable
     struct Arguments {
@@ -369,7 +386,8 @@ struct UpcomingPaymentsTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> UpcomingPaymentsResult {
-        try await MainActor.run {
+        await MainActor.run {
+            let modelContext = container.mainContext
             let upcoming = AskLedger.upcomingPayments(in: modelContext)
             return UpcomingPaymentsResult(
                 headline: upcoming.headline,
@@ -407,7 +425,9 @@ struct SearchTransactionsTool: Tool {
     let name = "searchTransactions"
     let description = "List individual charges by merchant, title, or category. Use to show specific charges, not for totals."
 
-    let modelContext: ModelContext
+    let container: ModelContainer
+
+    init(modelContext: ModelContext) { container = modelContext.container }
 
     @Generable
     struct Arguments {
@@ -418,7 +438,8 @@ struct SearchTransactionsTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> TransactionSearchList {
-        try await MainActor.run {
+        await MainActor.run {
+            let modelContext = container.mainContext
             let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
             let limit = min(8, max(1, arguments.limit))
             let descriptor = FetchDescriptor<Transaction>(

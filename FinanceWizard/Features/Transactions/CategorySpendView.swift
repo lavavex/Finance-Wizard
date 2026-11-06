@@ -70,6 +70,20 @@ struct CategorySpendView: View {
                 }
             }
 
+            if period == .month, !snapshot.categories.isEmpty {
+                Section {
+                    NavigationLink {
+                        MoneyInsightView(
+                            title: "Why this total?",
+                            insight: MoneyInsights.spending(transactions, month: referenceDate),
+                            followUpQuestion: "Why did my spending change in \(periodLabel)?"
+                        )
+                    } label: {
+                        Label("Why this total?", systemImage: "apple.intelligence")
+                    }
+                }
+            }
+
             Section("Chart type") {
                 Picker("Format", selection: $chartFormat) {
                     ForEach(ChartFormat.allCases) { format in
@@ -101,20 +115,7 @@ struct CategorySpendView: View {
             if !snapshot.categories.isEmpty {
                 Section("Breakdown") {
                     ForEach(snapshot.categories) { item in
-                        HStack(spacing: 12) {
-                            Image(systemName: CategoryStyle.symbolName(for: item.category))
-                                .foregroundStyle(CategoryStyle.color(for: item.category))
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.category)
-                                Text("\(item.transactionCount) transactions")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            MoneyText(item.spent)
-                                .fontWeight(.semibold)
-                        }
+                        categoryRow(item)
                     }
                 }
             }
@@ -134,6 +135,40 @@ struct CategorySpendView: View {
     }
 
     // Taller chart for horizontal bars (many categories need vertical space)
+    @ViewBuilder
+    private func categoryRow(_ item: CategorySpendSummary) -> some View {
+        if period == .month {
+            NavigationLink {
+                MoneyInsightView(
+                    title: item.category,
+                    insight: MoneyInsights.spending(transactions, month: referenceDate, category: item.category),
+                    followUpQuestion: "Why did my \(item.category) spending change in \(periodLabel)?"
+                )
+            } label: {
+                categoryLabel(item)
+            }
+        } else {
+            categoryLabel(item)
+        }
+    }
+
+    private func categoryLabel(_ item: CategorySpendSummary) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: CategoryStyle.symbolName(for: item.category))
+                .foregroundStyle(CategoryStyle.color(for: item.category))
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.category)
+                Text("\(item.transactionCount) transactions")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            MoneyText(item.spent)
+                .fontWeight(.semibold)
+        }
+    }
+
     private var chartHeight: CGFloat {
         switch chartFormat {
         case .horizontalBar:

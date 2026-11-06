@@ -193,9 +193,27 @@ struct AllTransactionsView: View {
         totalIncome - totalSpend
     }
 
+    /// A sentence rather than a keyword, which the plain search can't read.
+    private var aiSearchQuery: String? {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.split(separator: " ").count >= 3,
+              case .available = OnDeviceAI.availabilityStatus() else { return nil }
+        return query
+    }
+
     var body: some View {
         NavigationStack {
             List {
+                if let aiSearchQuery {
+                    Section {
+                        NavigationLink {
+                            AITransactionSearchView(query: aiSearchQuery)
+                        } label: {
+                            Label("Search with AI", systemImage: "apple.intelligence")
+                        }
+                    }
+                }
+
                 if showSyncStatus || isSyncing {
                     Section("Sync Status") {
                         HStack(alignment: .top, spacing: 12) {
@@ -291,6 +309,11 @@ struct AllTransactionsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    }
+                    NavigationLink {
+                        MonthlyRecapView()
+                    } label: {
+                        Label("Monthly recap", systemImage: "calendar.badge.clock")
                     }
                 } header: {
                     Text("Tools")
