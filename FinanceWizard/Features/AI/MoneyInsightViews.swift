@@ -68,6 +68,24 @@ struct MoneyInsightView: View {
     }
 }
 
+/// Computes when opened. A list builds its link destinations up front, so doing this in the list
+/// would work out every category's explanation just to show the rows.
+struct SpendingInsightScreen: View {
+    let month: Date
+    let category: String?
+    @Query private var transactions: [Transaction]
+
+    var body: some View {
+        let label = month.formatted(.dateTime.month(.wide).year())
+        MoneyInsightView(
+            title: category ?? "Why this total?",
+            insight: MoneyInsights.spending(transactions, month: month, category: category),
+            followUpQuestion: category.map { "Why did my \($0) spending change in \(label)?" }
+                ?? "Why did my spending change in \(label)?"
+        )
+    }
+}
+
 /// Reads history here, so opening a transaction doesn't load every row.
 struct ExplainChargeView: View {
     let transaction: Transaction

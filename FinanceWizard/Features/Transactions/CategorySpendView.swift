@@ -73,11 +73,7 @@ struct CategorySpendView: View {
             if period == .month, !snapshot.categories.isEmpty {
                 Section {
                     NavigationLink {
-                        MoneyInsightView(
-                            title: "Why this total?",
-                            insight: MoneyInsights.spending(transactions, month: referenceDate),
-                            followUpQuestion: "Why did my spending change in \(periodLabel)?"
-                        )
+                        SpendingInsightScreen(month: referenceDate, category: nil)
                     } label: {
                         Label("Why this total?", systemImage: "apple.intelligence")
                     }
@@ -139,11 +135,7 @@ struct CategorySpendView: View {
     private func categoryRow(_ item: CategorySpendSummary) -> some View {
         if period == .month {
             NavigationLink {
-                MoneyInsightView(
-                    title: item.category,
-                    insight: MoneyInsights.spending(transactions, month: referenceDate, category: item.category),
-                    followUpQuestion: "Why did my \(item.category) spending change in \(periodLabel)?"
-                )
+                SpendingInsightScreen(month: referenceDate, category: item.category)
             } label: {
                 categoryLabel(item)
             }

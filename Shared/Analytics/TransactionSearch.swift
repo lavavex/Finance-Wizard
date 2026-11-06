@@ -16,6 +16,14 @@ enum TransactionSearch {
         query: String,
         accounts: [BankAccount] = []
     ) -> Bool {
+        matches(tx, query: query) { cardInfo(paymentMethod: $0, accounts: accounts) }
+    }
+
+    private static func matches(
+        _ tx: Transaction,
+        query: String,
+        card: (String) -> CardInfo
+    ) -> Bool {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return true }
         let lower = q.lowercased()
@@ -41,27 +49,29 @@ enum TransactionSearch {
         let digitsOnly = lower.filter(\.isNumber)
         if digitsOnly.count == 4 {
             if tx.paymentMethod.contains(digitsOnly) { return true }
-            if let account = BankAccount.matching(paymentMethod: tx.paymentMethod, in: accounts),
-               let mask = account.mask, mask.contains(digitsOnly) || mask == digitsOnly {
-                return true
-            }
-            let label = CardLabelStore.label(
-                paymentMethod: tx.paymentMethod,
-                accountId: BankAccount.matching(paymentMethod: tx.paymentMethod, in: accounts)?.accountId,
-                fallback: tx.paymentMethod
-            )
-            if label.contains(digitsOnly) { return true }
+            if let mask = card(tx.paymentMethod).mask, mask.contains(digitsOnly) { return true }
+            if card(tx.paymentMethod).label.contains(digitsOnly) { return true }
         }
 
-        let account = BankAccount.matching(paymentMethod: tx.paymentMethod, in: accounts)
-        let label = CardLabelStore.label(
-            paymentMethod: tx.paymentMethod,
-            accountId: account?.accountId,
-            fallback: tx.paymentMethod
-        )
-        if label.lowercased().contains(lower) { return true }
+        return card(tx.paymentMethod).label.lowercased().contains(lower)
+    }
 
-        return false
+    private struct CardInfo {
+        var label: String
+        var mask: String?
+    }
+
+    /// Looking up a card's label reads settings, so a search does it once per card, not per row.
+    private static func cardInfo(paymentMethod: String, accounts: [BankAccount]) -> CardInfo {
+        let account = BankAccount.matching(paymentMethod: paymentMethod, in: accounts)
+        return CardInfo(
+            label: CardLabelStore.label(
+                paymentMethod: paymentMethod,
+                accountId: account?.accountId,
+                fallback: paymentMethod
+            ),
+            mask: account?.mask
+        )
     }
 
     /// Returns only transactions that match `query` (or all if query is blank).
@@ -72,7 +82,15 @@ enum TransactionSearch {
     ) -> [Transaction] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return transactions }
-        return transactions.filter { matches($0, query: q, accounts: accounts) }
+        var cards: [String: CardInfo] = [:]
+        return transactions.filter { row in
+            matches(row, query: q) { method in
+                if let known = cards[method] { return known }
+                let info = cardInfo(paymentMethod: method, accounts: accounts)
+                cards[method] = info
+                return info
+            }
+        }
     }
 }
 
