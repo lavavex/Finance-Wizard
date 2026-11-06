@@ -20,6 +20,8 @@ struct AskReply: Equatable {
     var followUps: [String]
     /// Shown under the answer when an amount couldn't be matched to the user's data.
     var warning: String?
+    /// Facts a cloud model saved while answering.
+    var remembered: [String] = []
 }
 
 @MainActor

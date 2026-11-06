@@ -28,7 +28,7 @@
   <ul>
     <li>Transactions, income, card payments, balances, and account names with their last four digits, downloaded from your linked banks through Plaid</li>
     <li>Budgets, payoff plans, category changes, and card nicknames you enter</li>
-    <li>Your Ask chat history</li>
+    <li>Your Ask chat history, and facts you've asked Claude or Grok to remember</li>
     <li>Your Plaid keys, bank access tokens, and any Anthropic or xAI API keys, in the iOS Keychain on this device</li>
   </ul>
   <p>Home screen widgets read the same on-device data. If you use iCloud or computer backups of your iPhone, those backups can include the app's data, except Keychain items, which are limited to this device.</p>
@@ -37,7 +37,7 @@
 
   <p><strong>Plaid (if you link a bank).</strong> Budget Magi connects to your bank through Plaid using Plaid keys from your own Plaid account. You sign in to your bank inside Plaid Link, and the app never sees your bank username or password. The app requests transactions and, where supported, credit card details such as due dates and interest rates. Plaid handles this data under its <a href="https://plaid.com/legal/#end-user-privacy-policy">End User Privacy Policy</a>.</p>
 
-  <p><strong>Anthropic and xAI (only if you choose them).</strong> Ask can use Claude from Anthropic or Grok from xAI, using your own API key. Nothing is sent until you add a key and agree. When you ask one of these models a question, the app sends that company your question, recent questions and answers in the chat, and the data needed to answer: merchant names, amounts, dates, categories, banks, account names with their last four digits, balances, and budget figures. Bank logins and Plaid keys are never sent. Each company handles this data under its own terms and your API account: <a href="https://www.anthropic.com/legal/privacy">Anthropic's privacy policy</a> and <a href="https://x.ai/legal/privacy-policy">xAI's privacy policy</a>.</p>
+  <p><strong>Anthropic and xAI (only if you choose them).</strong> Ask can use Claude from Anthropic or Grok from xAI, using your own API key. Nothing is sent until you add a key and agree. When you ask one of these models a question, the app sends that company your question, recent questions and answers in the chat, and the data needed to answer: merchant names, amounts, dates, categories, banks, account names with their last four digits, balances, budget figures, income, payoff plans, and facts you've asked them to remember. Bank logins and Plaid keys are never sent. Each company handles this data under its own terms and your API account: <a href="https://www.anthropic.com/legal/privacy">Anthropic's privacy policy</a> and <a href="https://x.ai/legal/privacy-policy">xAI's privacy policy</a>.</p>
 
   <p><strong>Apple Intelligence.</strong> The On-device model, the "Why?" summaries, AI search, and category suggestions use Apple's on-device model. That data stays on your device.</p>
 
@@ -52,7 +52,7 @@
   <ul>
     <li>Remove a bank in Settings to delete its access token from the device. You can also remove it from your Plaid account.</li>
     <li>Remove an Anthropic or xAI key in Settings → Cloud AI, which also withdraws your agreement to send data to that company.</li>
-    <li>Clear chat history with the Clear chat button in Ask.</li>
+    <li>Clear chat history with the Clear chat button in Ask, and delete remembered facts in Settings → What Ask Remembers.</li>
     <li>Use Settings → Erase All Data to delete all of the app's data on this device, including banks and keys. It asks you to type DELETE first.</li>
     <li>Deleting the app removes its data from this device. iOS can keep Keychain items after an app is deleted, so remove your banks and keys in the app first.</li>
     <li>To delete data already held by Plaid, Anthropic, or xAI, contact that company or use your account with them.</li>

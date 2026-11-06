@@ -112,6 +112,82 @@ final class MoneyInsightsTests: XCTestCase {
         XCTAssertTrue(recap.facts.contains("New this month: New Place, $25.00"), "\(recap.facts)")
     }
 
+    private func recurring(_ rows: [Transaction]) -> [SubscriptionCandidate] {
+        SubscriptionAnalytics.detect(in: rows, now: date(11, 6))
+    }
+
+    func testBillUsesItsNewestPriceAfterAPlanChange() {
+        let found = recurring([
+            row("ACME", 90, month: 7, category: "Home Internet"),
+            row("ACME", 90, month: 8, category: "Home Internet"),
+            row("ACME", 125, month: 9, category: "Home Internet"),
+            row("ACME", 125, month: 10, category: "Home Internet"),
+        ])
+        XCTAssertEqual(found.map(\.estimatedMonthly), [125])
+    }
+
+    func testRenamedBillStaysOneBill() {
+        let found = recurring([
+            row("ACME", 90, month: 8, category: "Home Internet"),
+            row("ACME", 90, month: 9, category: "Home Internet"),
+            row("ACME Internet", 125, month: 10, category: "Home Internet"),
+        ])
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first?.estimatedMonthly, 125)
+    }
+
+    func testSimilarNamesInOtherCategoriesStaySeparate() {
+        let found = recurring([
+            row("Example Shop", 12, month: 8, category: "Subscriptions"),
+            row("Example Shop", 12, month: 9, category: "Subscriptions"),
+            row("Example Shop", 12, month: 10, category: "Subscriptions"),
+            row("Example Shop Reader", 5, month: 8, category: "Entertainment"),
+            row("Example Shop Reader", 5, month: 9, category: "Entertainment"),
+            row("Example Shop Reader", 5, month: 10, category: "Entertainment"),
+        ])
+        XCTAssertEqual(Set(found.map(\.estimatedMonthly)), [12, 5])
+    }
+
+    func testTwoIdenticalPaymentsAMonthApartCountAsABill() {
+        let rent = recurring([
+            row("WEB PAYMENT", 900, month: 9, day: 3, category: "Miscellaneous"),
+            row("WEB PAYMENT", 900, month: 10, day: 3, category: "Miscellaneous"),
+        ])
+        XCTAssertEqual(rent.map(\.estimatedMonthly), [900])
+
+        let override = recurring([
+            row("Example Landlord", 900, month: 9, day: 3, category: "Housing"),
+            row("Example Landlord", 900, month: 10, day: 3, category: "Housing"),
+        ])
+        XCTAssertEqual(override.map(\.estimatedMonthly), [900])
+    }
+
+    func testTwoDifferentRepairsAreNotABill() {
+        XCTAssertTrue(recurring([
+            row("Example Plumber", 200, month: 9, day: 3, category: "Housing"),
+            row("Example Plumber", 340, month: 10, day: 3, category: "Housing"),
+        ]).isEmpty)
+    }
+
+    func testMoneyPlanShowsDebtBillsAndUnidentifiedPayments() {
+        let card = BankAccount(
+            accountId: "card", itemId: "item", name: "Example Card", mask: "1111", type: "credit",
+            subtype: "credit card", institutionName: "Example Bank", currentBalance: 500
+        )
+        let rows = [
+            row("Example Power", 80, month: 9, category: "Utilities"),
+            row("Example Power", 95, month: 10, category: "Utilities"),
+            row("PAYMENT", 177, month: 11, day: 4, category: "Miscellaneous"),
+            row("Corner Cafe", 60, month: 10),
+        ]
+        let plan = MoneyInsights.moneyPlan(rows, income: [], accounts: [card], plans: [], now: date(11, 6))
+
+        XCTAssertTrue(plan.headline.contains("$500.00"), plan.headline)
+        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Recurring bills: Example Power: $95.00") }, "\(plan.facts)")
+        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Unidentified bank payments: PAYMENT: $177.00") }, "\(plan.facts)")
+        XCTAssertTrue(plan.facts.contains("Other spending, monthly average: Dining: $20.00"), "\(plan.facts)")
+    }
+
     func testSearchFilterCombinesConditions() {
         let rows = [
             row("Example Market", 80, month: 8, category: "Groceries"),

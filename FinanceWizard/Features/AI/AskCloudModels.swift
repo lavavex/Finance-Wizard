@@ -65,6 +65,49 @@ enum AskProvider: String, CaseIterable, Identifiable {
     }
 }
 
+/// Lasting facts the user told a cloud model, like a cancelled subscription or what a vague payment
+/// is. Kept on this device and sent to cloud models with each question. Sample data never saves any.
+enum AskNotes {
+    private static let key = "ask.notes"
+    static let maximumCount = 30
+    static let maximumLength = 200
+
+    static var all: [String] {
+        UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+
+    /// Returns the saved text, or nil if there was nothing new to save.
+    @discardableResult
+    static func add(_ note: String) -> String? {
+        let text = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maximumLength))
+        guard !text.isEmpty, !DemoMode.isActive else { return nil }
+        var notes = all
+        guard !notes.contains(where: { $0.caseInsensitiveCompare(text) == .orderedSame }) else { return nil }
+        notes.append(text)
+        UserDefaults.standard.set(Array(notes.suffix(maximumCount)), forKey: key)
+        return text
+    }
+
+    /// Removes every note containing the text. Returns how many.
+    @discardableResult
+    static func remove(matching text: String) -> Int {
+        let needle = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty, !DemoMode.isActive else { return 0 }
+        let notes = all
+        let kept = notes.filter { !$0.localizedCaseInsensitiveContains(needle) }
+        UserDefaults.standard.set(kept, forKey: key)
+        return notes.count - kept.count
+    }
+
+    static func remove(_ note: String) {
+        UserDefaults.standard.set(all.filter { $0 != note }, forKey: key)
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
 enum AskModel: String, CaseIterable, Identifiable {
     case onDevice = "on-device"
     case claudeOpus = "claude-opus-5-5"

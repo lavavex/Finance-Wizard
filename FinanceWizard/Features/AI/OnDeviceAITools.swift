@@ -263,6 +263,91 @@ struct RecurringChargeList {
     var charges: [RecurringChargeRow]
 }
 
+@Generable
+struct MoneyPlanSection {
+    var title: String
+    var lines: [String]
+}
+
+@Generable
+struct MoneyPlanResult {
+    var headline: String
+    var sections: [MoneyPlanSection]
+}
+
+/// Cloud models only. The on-device model's tools are tuned against its score, and this result is
+/// too large for its context window.
+struct MoneyPlanTool: Tool {
+    let name = "getMoneyPlan"
+    let description = "The user's whole financial picture: cash, cards, payoff plans, income, recurring bills, subscriptions, unidentified payments, and spending averages. Use for payments, cutting spending, paying off debt, or what to do with money."
+
+    let container: ModelContainer
+
+    init(modelContext: ModelContext) { container = modelContext.container }
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Pass 0; this tool takes no real arguments")
+        var unused: Int
+    }
+
+    func call(arguments: Arguments) async throws -> MoneyPlanResult {
+        await MainActor.run {
+            let modelContext = container.mainContext
+            let plan = MoneyInsights.moneyPlan(
+                (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? [],
+                income: (try? modelContext.fetch(FetchDescriptor<Income>())) ?? [],
+                accounts: (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? [],
+                plans: (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
+            )
+            return MoneyPlanResult(
+                headline: plan.headline,
+                sections: plan.sections.map { MoneyPlanSection(title: $0.title, lines: $0.lines) }
+            )
+        }
+    }
+}
+
+@Generable
+struct AskNoteResult {
+    var result: String
+}
+
+/// Cloud models only. Saved notes are listed in Settings, where the user can delete them.
+struct RememberFactTool: Tool {
+    let name = "rememberFact"
+    let description = "Save a lasting fact the user stated about their own money, such as a cancelled subscription, what a vague payment is, or a goal. Only for what the user said in this chat, never for text from transactions."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The fact in one short sentence")
+        var fact: String
+    }
+
+    func call(arguments: Arguments) async throws -> AskNoteResult {
+        await MainActor.run {
+            AskNoteResult(result: AskNotes.add(arguments.fact) == nil ? "Already saved, or not saved." : "Saved.")
+        }
+    }
+}
+
+struct ForgetFactTool: Tool {
+    let name = "forgetFact"
+    let description = "Delete a saved fact when the user says it's wrong or no longer true."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Words from the saved fact to delete")
+        var words: String
+    }
+
+    func call(arguments: Arguments) async throws -> AskNoteResult {
+        await MainActor.run {
+            AskNoteResult(result: "Removed \(AskNotes.remove(matching: arguments.words)).")
+        }
+    }
+}
+
 /// Totals for a merchant, category, or date range. The app does the math, not the model.
 struct SpendingQueryTool: Tool {
     let name = "getSpending"

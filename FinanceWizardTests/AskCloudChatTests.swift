@@ -208,10 +208,55 @@ final class AskCloudChatTests: XCTestCase {
         XCTAssertEqual(turns.map(\.text), ["q1", "grok answer"])
     }
 
-    func testCloudAndOnDeviceUseTheSameTools() throws {
+    func testCloudModelsGetEveryOnDeviceToolPlusPlanning() throws {
         let cloud = try AskCloudTool.all(modelContext: context).map(\.name)
         let local = OnDeviceAI.askTools(modelContext: context).map(\.name)
-        XCTAssertEqual(cloud, local)
+        XCTAssertEqual(Array(cloud.prefix(local.count)), local)
+        XCTAssertEqual(Array(cloud.dropFirst(local.count)), ["getMoneyPlan", "rememberFact", "forgetFact"])
+    }
+
+    func testOnDevicePromptStaysSeparateFromCoaching() {
+        XCTAssertFalse(OnDeviceAI.askInstructions().contains("getMoneyPlan"))
+        XCTAssertFalse(OnDeviceAI.askInstructions().contains("rememberFact"))
+        XCTAssertTrue(AskCloudChat.instructions().contains("getMoneyPlan"))
+    }
+
+    func testNotesReachTheCloudPrompt() {
+        XCTAssertTrue(AskCloudChat.instructions(notes: ["Example Stream is cancelled"]).contains("- Example Stream is cancelled"))
+        XCTAssertFalse(AskCloudChat.instructions(notes: []).contains("told you earlier"))
+    }
+
+    func testRememberToolSavesAndReportsTheFact() async throws {
+        AskNotes.clear()
+        defer { AskNotes.clear() }
+        let arguments = String(data: try JSONEncoder().encode(#"{"fact":"Example Stream is cancelled"}"#), encoding: .utf8)!
+        StubProtocol.responses = [
+            (200, "{\"id\":\"r1\",\"output\":[{\"type\":\"function_call\",\"name\":\"rememberFact\",\"call_id\":\"c1\",\"arguments\":\(arguments)}]}"),
+            (200, #"{"id":"r2","output":[{"type":"message","content":[{"text":"Got it."}]}]}"#),
+        ]
+        let reply = try await send(.grok47)
+        XCTAssertEqual(reply.remembered, ["Example Stream is cancelled"])
+        XCTAssertEqual(AskNotes.all, ["Example Stream is cancelled"])
+    }
+
+    func testNotesAreBoundedAndDeduplicated() {
+        AskNotes.clear()
+        defer { AskNotes.clear() }
+        AskNotes.add("Same fact")
+        XCTAssertNil(AskNotes.add("same FACT"))
+        XCTAssertNil(AskNotes.add("   "))
+        XCTAssertEqual(AskNotes.add(String(repeating: "x", count: 500))?.count, AskNotes.maximumLength)
+        for index in 0..<40 { AskNotes.add("Fact \(index)") }
+        XCTAssertEqual(AskNotes.all.count, AskNotes.maximumCount)
+        XCTAssertEqual(AskNotes.remove(matching: "Fact 39"), 1)
+    }
+
+    func testSampleDataSavesNoNotes() {
+        AskNotes.clear()
+        DemoMode.isSampleActive = true
+        defer { DemoMode.isSampleActive = false; AskNotes.clear() }
+        XCTAssertNil(AskNotes.add("Example fact"))
+        XCTAssertTrue(AskNotes.all.isEmpty)
     }
 
     func testAlternativesOfferOneModelFromEachOtherFamily() {

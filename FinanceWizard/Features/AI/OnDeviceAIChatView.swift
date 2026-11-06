@@ -16,6 +16,7 @@ private struct AskBubble: Identifiable {
     var warning: String?
     var modelName: String?
     var seconds: Double?
+    var remembered: [String] = []
     /// Failures show in the chat but aren't sent back to a model.
     var failed = false
 }
@@ -150,6 +151,10 @@ struct OnDeviceAIChatView: View {
                             withAnimation { proxy.scrollTo(last, anchor: .bottom) }
                         }
                     }
+                    // A reopened chat starts at its latest message.
+                    .onAppear {
+                        if let last = messages.last?.id { proxy.scrollTo(last, anchor: .bottom) }
+                    }
                 }
             }
 
@@ -213,6 +218,11 @@ struct OnDeviceAIChatView: View {
                 if let caption = caption(for: message) {
                     Text(caption)
                         .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(message.remembered, id: \.self) { note in
+                    Label("Remembered: \(note)", systemImage: "brain")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 if let warning = message.warning {
@@ -304,6 +314,7 @@ struct OnDeviceAIChatView: View {
                 if let index = messages.firstIndex(where: { $0.id == assistantID }) {
                     messages[index].warning = reply.warning
                     messages[index].seconds = seconds
+                    messages[index].remembered = reply.remembered
                 }
                 persist(text: reply.text, isUser: false, modelName: model.name, seconds: seconds)
                 followUps = reply.followUps

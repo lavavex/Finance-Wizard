@@ -236,6 +236,131 @@ enum MoneyInsights {
     }
 }
 
+// MARK: - Money plan
+
+extension MoneyInsights {
+    /// Everything a cloud model needs to plan: cash, debts, income, bills, and where the rest goes.
+    static func moneyPlan(
+        _ all: [Transaction],
+        income: [Income],
+        accounts: [BankAccount],
+        plans: [PayoffPlan],
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> MoneyInsight {
+        let dollars = { (value: Double) in AskLedger.money(value) }
+        var sections: [MoneyInsight.Section] = []
+
+        let cash = accounts.filter { !$0.isCredit }
+        if !cash.isEmpty {
+            sections.append(.init(
+                title: "Cash accounts",
+                lines: cash.map { "\($0.displayName): \(dollars($0.availableBalance ?? $0.currentBalance))" }
+            ))
+        }
+        let cards = accounts.filter(\.isCredit).sorted { $0.currentBalance > $1.currentBalance }
+        if !cards.isEmpty {
+            sections.append(.init(title: "Credit cards", lines: cards.map { card in
+                var line = "\(card.displayName): owes \(dollars(card.currentBalance))"
+                if let minimum = card.minimumPaymentAmount { line += ", minimum \(dollars(minimum))" }
+                if let due = card.nextPaymentDueDate {
+                    line += ", due \(due.formatted(.dateTime.month(.abbreviated).day().locale(Locale(identifier: "en_US"))))"
+                }
+                if let apr = card.purchaseApr { line += ", \(apr.formatted(.number.precision(.fractionLength(0...2))))% APR" }
+                return line
+            }))
+        }
+        let activePlans = plans.filter(\.isActive)
+        if !activePlans.isEmpty {
+            sections.append(.init(title: "Payoff plans", lines: activePlans.map { plan in
+                var line = "\(plan.name) on \(plan.paymentMethod): \(dollars(plan.monthlyPayment)) a month, \(dollars(plan.remainingAmount)) left"
+                if let apr = plan.aprPercent { line += ", \(apr.formatted(.number.precision(.fractionLength(0...2))))% APR" }
+                return line
+            }))
+        }
+
+        // The last three full months, so a month in progress doesn't skew the averages.
+        let thisMonth = TransactionAnalytics.monthStart(for: now)
+        let earliest = calendar.date(byAdding: .month, value: -3, to: thisMonth) ?? thisMonth
+        let paid = income.filter {
+            $0.date >= earliest && $0.date < thisMonth && !IncomeAnalytics.nonEarningsCategories.contains($0.category)
+        }
+        if !paid.isEmpty {
+            let recent = income.filter { !IncomeAnalytics.nonEarningsCategories.contains($0.category) }
+                .sorted { $0.date > $1.date }
+                .prefix(4)
+                .map { "\($0.source): \(dollars($0.amount)) on \(shortDay($0.date))" }
+            sections.append(.init(
+                title: "Income",
+                lines: ["Average \(dollars(paid.reduce(0) { $0 + $1.amount } / 3)) a month"] + recent
+            ))
+        }
+
+        let spend = TransactionAnalytics.spendOnly(all)
+        let recurring = SubscriptionAnalytics.detect(in: all, now: now)
+        let categoryOf = Dictionary(spend.map { ($0.transactionId, $0.category) }, uniquingKeysWith: { first, _ in first })
+        let isSubscription = { (item: SubscriptionCandidate) -> Bool in
+            let category = item.sampleTransactionIds.last.flatMap { categoryOf[$0] } ?? ""
+            return ["entertainment", "subscriptions", "shopping"].contains(category.lowercased())
+        }
+        let describe = { (item: SubscriptionCandidate) in
+            "\(item.displayVendor): \(dollars(item.estimatedMonthly)) a month, last charged \(shortDay(item.lastDate))"
+        }
+        let bills = recurring.filter { !isSubscription($0) }.map(describe)
+        if !bills.isEmpty { sections.append(.init(title: "Recurring bills", lines: bills)) }
+        let subscriptions = recurring.filter(isSubscription).map(describe)
+        if !subscriptions.isEmpty { sections.append(.init(title: "Subscriptions", lines: subscriptions)) }
+
+        let known = Set(recurring.flatMap(\.sampleTransactionIds))
+        let vagueSince = calendar.date(byAdding: .day, value: -60, to: now) ?? now
+        let vague = spend
+            .filter { $0.date >= vagueSince && !known.contains($0.transactionId) && looksLikeVaguePayment($0.title) }
+            .sorted { $0.date > $1.date }
+            .prefix(8)
+            .map { "\($0.title): \(dollars(abs($0.amount))) on \(shortDay($0.date))" }
+        if !vague.isEmpty { sections.append(.init(title: "Unidentified bank payments", lines: Array(vague))) }
+
+        let window = spend.filter { $0.date >= earliest && $0.date < thisMonth && !known.contains($0.transactionId) }
+        let byCategory = Dictionary(grouping: window, by: \.category)
+            .mapValues { $0.reduce(0) { $0 + abs($1.amount) } / 3 }
+            .sorted { $0.value > $1.value }
+            .prefix(6)
+        if !byCategory.isEmpty {
+            sections.append(.init(
+                title: "Other spending, monthly average",
+                lines: byCategory.map { "\($0.key): \(dollars($0.value))" }
+            ))
+        }
+        let byMerchant = Dictionary(grouping: window, by: \.title)
+            .mapValues { $0.reduce(0) { $0 + abs($1.amount) } / 3 }
+            .sorted { $0.value > $1.value }
+            .prefix(8)
+        if !byMerchant.isEmpty {
+            sections.append(.init(
+                title: "Top merchants, monthly average",
+                lines: byMerchant.map { "\($0.key): \(dollars($0.value))" }
+            ))
+        }
+
+        let owed = cards.reduce(0) { $0 + $1.currentBalance }
+        return MoneyInsight(
+            headline: "Cards owe \(dollars(owed)) in total, with \(dollars(cash.reduce(0) { $0 + ($1.availableBalance ?? $1.currentBalance) })) in cash accounts.",
+            sections: sections
+        )
+    }
+
+    private static func shortDay(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day().locale(Locale(identifier: "en_US")))
+    }
+
+    /// Bank lines that hide who was paid, so a model should ask rather than assume.
+    static func looksLikeVaguePayment(_ title: String) -> Bool {
+        let lower = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["payment", "web pmts", "web pmt", "ach pmt", "ach payment", "bill pay", "billpay", "autopay", "online payment", "check"]
+            .contains(lower)
+    }
+}
+
 // MARK: - Search
 
 /// What a plain-English transaction search asked for, once read by the model.

@@ -297,6 +297,9 @@ struct SettingsView: View {
                             AskProviderSetupView(provider: provider)
                         }
                     }
+                    NavigationLink("What Ask Remembers") {
+                        AskNotesView()
+                    }
                 } header: {
                     Text("Cloud AI")
                 } footer: {

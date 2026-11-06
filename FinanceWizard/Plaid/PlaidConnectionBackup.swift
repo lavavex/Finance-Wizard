@@ -94,6 +94,7 @@ enum PlaidConnectionBackup {
     static func eraseEverything(modelContext: ModelContext) throws {
         try wipeLocalAppData(modelContext: modelContext)
         for provider in AskProvider.allCases { provider.removeKeyAndConsent() }
+        AskNotes.clear()
         AskModel.selected = .onDevice
     }
 

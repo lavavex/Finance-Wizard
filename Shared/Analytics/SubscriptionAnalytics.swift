@@ -164,7 +164,7 @@ enum SubscriptionAnalytics {
             // GYM/FITNESS detail there — so a monthly Planet Fitness charge never clustered and
             // the gym needles in looksLikeSubscriptionName were unreachable for their own
             // merchants. looksLikeRetailHabit already has this escape hatch.
-            .filter { !isHabitCategory($0.category) || looksLikeSubscriptionName($0.title) }
+            .filter { !isHabitCategory($0.category) || looksLikeSubscriptionName($0.title) || isHousing($0.category) }
             .filter { !looksLikeRetailHabit(title: $0.title) }
             .filter { !$0.isDeclaredNotSubscription }
 
@@ -187,9 +187,20 @@ enum SubscriptionAnalytics {
             byVendor[key, default: []].append(tx)
         }
 
+        byVendor = mergingRenamedBills(byVendor)
+
         for (key, rows) in byVendor {
             if claimedVendors.contains(key) { continue }
             let sorted = rows.sorted { $0.date < $1.date }
+            // A plan change moves a bill to a new price, so the old price isn't still a charge.
+            if let bill = meteredBillCandidate(key: key, rows: sorted, now: now) {
+                let ck = candidateKey(bill)
+                if !claimedKeys.contains(ck) {
+                    claimedKeys.insert(ck)
+                    results.append(bill)
+                }
+                continue
+            }
             var addedForVendor = false
             for cluster in exactAmountClusters(sorted) {
                 if let candidate = candidateFromCluster(
@@ -224,6 +235,47 @@ enum SubscriptionAnalytics {
         }
 
         return results.sorted { $0.estimatedMonthly > $1.estimatedMonthly }
+    }
+
+    /// A provider can change how it's named on a statement, like "ACME" becoming "ACME Internet".
+    /// Bills only, since "Amazon" and "Amazon Kindle" really are separate charges.
+    nonisolated private static func mergingRenamedBills(
+        _ groups: [String: [SubscriptionTxSnapshot]]
+    ) -> [String: [SubscriptionTxSnapshot]] {
+        var merged = groups
+        let bills = groups.filter { $0.value.contains { isMeteredBillCategory($0.category) } }
+        for key in bills.keys.sorted(by: { $0.count < $1.count }) {
+            guard let shorter = bills.keys.first(where: { key.hasPrefix($0 + " ") }),
+                  let rows = merged.removeValue(forKey: key) else { continue }
+            merged[shorter, default: []] += rows
+        }
+        return merged
+    }
+
+    /// Utilities and insurance change price, so the newest charge is what it costs now.
+    nonisolated private static func meteredBillCandidate(
+        key: String,
+        rows: [SubscriptionTxSnapshot],
+        now: Date
+    ) -> SubscriptionCandidate? {
+        guard rows.contains(where: { isMeteredBillCategory($0.category) }),
+              rows.first?.declaredSubscriptionCadence == nil,
+              let latest = rows.last else { return nil }
+        let cal = Calendar.current
+        let months = Set(rows.map { cal.dateComponents([.year, .month], from: $0.date) })
+        guard months.count >= 2 else { return nil }
+        // Twice a year or less isn't a monthly bill. The normal path can still call it yearly.
+        let span = cal.dateComponents([.month], from: rows[0].date, to: latest.date).month ?? 0
+        guard span < months.count * 2 else { return nil }
+        return makeCandidate(
+            key: key,
+            cluster: rows,
+            typical: abs(latest.amount),
+            cadence: .monthly,
+            strongName: false,
+            isUserDeclared: false,
+            now: now
+        )
     }
 
     /// Monthly/weekly: no charge in 3+ months → cancelled.
@@ -302,7 +354,13 @@ enum SubscriptionAnalytics {
         let declaredCadence = cluster.compactMap(\.declaredSubscriptionCadence).first
         let strongName = cluster.contains { looksLikeSubscriptionName($0.title) }
         let billLike = cluster.contains { looksLikeBillCategory($0.category) }
-        let minCount = (strongName || billLike || declaredCadence != nil) ? 2 : 3
+        // Rent or a bill paid from a bank often has a vague name, so two identical sizable payments
+        // a month apart are enough. A coincidence is unlikely to match to the cent.
+        let identicalBill = requireTightAmount && cluster.count == 2
+            && abs(abs(cluster[0].amount) - abs(cluster[1].amount)) < 0.005
+            && abs(cluster[0].amount) >= 25
+            && cluster.contains { isHousing($0.category) || isUncategorized($0.category) }
+        let minCount = (strongName || billLike || identicalBill || declaredCadence != nil) ? 2 : 3
         guard cluster.count >= minCount || (declaredCadence != nil && cluster.count >= 1) else {
             return nil
         }
@@ -404,6 +462,19 @@ enum SubscriptionAnalytics {
     }
 
     /// Spend categories that are usually a repeating bill, even when the amount changes.
+    nonisolated private static func isMeteredBillCategory(_ category: String) -> Bool {
+        let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return c == "utilities" || c == "home internet" || c == "car insurance" || c == "insurance"
+    }
+
+    nonisolated private static func isHousing(_ category: String) -> Bool {
+        category.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("housing") == .orderedSame
+    }
+
+    nonisolated private static func isUncategorized(_ category: String) -> Bool {
+        category.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("miscellaneous") == .orderedSame
+    }
+
     nonisolated private static func looksLikeBillCategory(_ category: String) -> Bool {
         let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return c == "utilities" || c == "home internet" || c == "car insurance"

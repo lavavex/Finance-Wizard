@@ -75,6 +75,8 @@ Open a card from Accounts to see **all** activity grouped by **statement** (clos
 
 The menu at the top of Ask picks the AI. **On-device** stays on your iPhone. **Claude** and **Grok** use your own API keys and send your question, recent chat, and the financial details needed to answer to Anthropic or xAI, after you agree the first time. **Try with** under an answer asks the same question on another AI, so you can compare them. Each answer shows which AI wrote it and how long it took.
 
+Claude and Grok can plan with you, using your whole picture: cash, cards, payoff plans, income, bills, and spending. Tell them something lasting, like "Kindle is cancelled", and they remember it. **Settings → What Ask Remembers** shows every saved fact and lets you delete them.
+
 **Why?** Open Total Spend for **Why this total?**, tap a category for why it changed, or open a charge for **Why this charge?** The app works out what changed itself, so these still work without Apple Intelligence, which only adds a short summary on top.
 
 **Monthly recap** (under Tools) shows a month's income, spending, category changes, price changes, new merchants, largest charges, and anything over budget.
