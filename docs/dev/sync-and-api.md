@@ -151,7 +151,7 @@ Settings **Backup & restore** writes an encrypted `.fwbackup` of this phone (key
 | **Replace connections** | Backup token and cursor win, and existing rows take the backup’s values (category and rail locks stay). Sync replays from the restored cursor. | Same | Newer `updatedAt` wins |
 | **Wipe device, then restore** | Local data is deleted first. If the restore fails, the previous data is put back from an in-memory copy. | Same | Backup’s copy |
 
-Rows are matched to a bank by Plaid account id, then institution + last four, then institution name.
+Rows are matched to a bank by Plaid account id, then account label (`Name ···1234`), then institution name. A row that matches no bank, such as an imported card, can’t be re-downloaded, so safe merge adds it if it’s missing.
 
 The app deletes its temporary `.fwbackup` copies after a restore or share, and at launch.
 

@@ -57,7 +57,7 @@ final class BackupRestoreTests: XCTestCase {
         payload.items = [item(linkedItem, institution: "Linked Bank")]
         payload.bankAccounts = [account(linkedAccount, item: linkedItem, institution: "Linked Bank", mask: "1111", syncedAt: day(0))]
         payload.transactions = [transaction("tx", account: linkedAccount, amount: -40, title: "Pending")]
-        payload.income = [income("pay", institution: "Linked Bank", mask: "1111", amount: 1)]
+        payload.income = [income("pay", mask: "1111", amount: 1)]
         payload.creditCardPayments = [cardPayment("cc", account: linkedAccount, institution: "Linked Bank", amount: 1)]
 
         let counts = try merge(payload, policy: .safeMerge, protecting: [linkedItem])
@@ -76,7 +76,7 @@ final class BackupRestoreTests: XCTestCase {
         payload.items = [item(linkedItem, institution: "Linked Bank")]
         payload.bankAccounts = [account(linkedAccount, item: linkedItem, institution: "Linked Bank", mask: "1111")]
         payload.transactions = [transaction("removed", account: linkedAccount)]
-        payload.income = [income("removed-income", institution: "Linked Bank", mask: "1111")]
+        payload.income = [income("removed-income", mask: "1111")]
         payload.creditCardPayments = [cardPayment("removed-payment", account: linkedAccount, institution: "Linked Bank")]
 
         try merge(payload, policy: .safeMerge, protecting: [linkedItem])
@@ -98,7 +98,7 @@ final class BackupRestoreTests: XCTestCase {
             transaction("linked-tx", account: linkedAccount),
             transaction("new-tx", account: newAccount)
         ]
-        payload.income = [income("new-income", institution: "New Bank", mask: "2222")]
+        payload.income = [income("new-income", mask: "2222")]
         payload.creditCardPayments = [cardPayment("new-payment", account: newAccount, institution: "New Bank")]
 
         let counts = try merge(payload, policy: .safeMerge, protecting: [linkedItem])
@@ -118,13 +118,42 @@ final class BackupRestoreTests: XCTestCase {
             account(newAccount, item: newItem, institution: "Same Bank", mask: "2222")
         ]
         payload.income = [
-            income("linked-income", institution: "Same Bank", mask: "1111"),
-            income("new-income", institution: "Same Bank", mask: "2222")
+            income("linked-income", mask: "1111"),
+            income("new-income", mask: "2222")
         ]
 
         try merge(payload, policy: .safeMerge, protecting: [linkedItem])
 
         XCTAssertEqual(try context.fetch(FetchDescriptor<Income>()).map(\.transactionId), ["new-income"])
+    }
+
+    func testSafeMergeMatchesOlderRowsWithoutAccountIDsByLabel() throws {
+        var payload = emptyPayload()
+        payload.items = [item(linkedItem, institution: "Linked Bank")]
+        payload.bankAccounts = [account(linkedAccount, item: linkedItem, institution: "Linked Bank", mask: "1111")]
+        payload.transactions = [
+            transaction("no-id", account: nil, paymentMethod: "Backup account ···1111"),
+            transaction("bank-label", account: nil, paymentMethod: "Linked Bank")
+        ]
+        var payment = cardPayment("no-id-payment", account: linkedAccount, institution: "Linked Bank")
+        payment.creditAccountId = nil
+        payload.creditCardPayments = [payment]
+
+        try merge(payload, policy: .safeMerge, protecting: [linkedItem])
+
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Transaction>()), 0)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<CreditCardPayment>()), 0)
+    }
+
+    func testSafeMergeKeepsImportedRowsThatMatchNoBank() throws {
+        var payload = emptyPayload()
+        payload.items = [item(linkedItem, institution: "Linked Bank")]
+        payload.bankAccounts = [account(linkedAccount, item: linkedItem, institution: "Linked Bank", mask: "1111")]
+        payload.transactions = [transaction("imported", account: nil, paymentMethod: "Apple Card")]
+
+        try merge(payload, policy: .safeMerge, protecting: [linkedItem])
+
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Transaction>()).map(\.transactionId), ["imported"])
     }
 
     func testPlansTakeBackupCopyOnlyWhenNewer() throws {
@@ -458,9 +487,10 @@ final class BackupRestoreTests: XCTestCase {
 
     private func transaction(
         _ id: String,
-        account: String,
+        account: String?,
         amount: Double = -1,
-        title: String = "Backup"
+        title: String = "Backup",
+        paymentMethod: String = "Card"
     ) -> Backup.TransactionSnapshot {
         Backup.TransactionSnapshot(
             transactionId: id,
@@ -468,25 +498,22 @@ final class BackupRestoreTests: XCTestCase {
             amount: amount,
             date: Date(timeIntervalSince1970: 1_790_000_000),
             category: "Shopping",
-            paymentMethod: "Card",
+            paymentMethod: paymentMethod,
             plaidAccountId: account
         )
     }
 
-    private func income(
-        _ id: String,
-        institution: String,
-        mask: String,
-        amount: Double = 1
-    ) -> Backup.IncomeSnapshot {
+    /// Same shape sync writes: `sourceInstitution` holds the account name, not the bank.
+    private func income(_ id: String, mask: String, amount: Double = 1) -> Backup.IncomeSnapshot {
         Backup.IncomeSnapshot(
             transactionId: id,
             source: "Backup",
             amount: amount,
             date: day(10),
             category: "Payroll",
+            accountName: "Backup account",
             accountMask: mask,
-            sourceInstitution: institution,
+            sourceInstitution: "Backup account",
             pending: false,
             kind: "income"
         )

@@ -651,43 +651,53 @@ private extension PlaidConnectionBackup {
         let overwritesExisting: Bool
         private let protectedItemIDs: Set<String>
         private let itemByAccountID: [String: String]
-        private let itemByInstitutionMask: [String: String]
+        private let itemByAccountLabel: [String: String]
         private let protectedInstitutions: Set<String>
 
         init(payload: Payload, policy: RestorePolicy, protectedItemIDs: Set<String>) {
             overwritesExisting = policy != .safeMerge
             self.protectedItemIDs = protectedItemIDs
             var byAccount: [String: String] = [:]
-            var byMask: [String: String] = [:]
+            var byLabel: [String: String] = [:]
             for account in payload.bankAccounts {
                 byAccount[account.accountId] = account.itemId
-                if let mask = account.mask, !mask.isEmpty {
-                    byMask[Self.key(institution: account.institutionName, mask: mask)] = account.itemId
+                for name in [account.name, account.officialName].compactMap({ $0 }) {
+                    byLabel[Self.label(name: name, mask: account.mask)] = account.itemId
                 }
             }
             itemByAccountID = byAccount
-            itemByInstitutionMask = byMask
+            itemByAccountLabel = byLabel
             // A name shared with a bank being added can’t say which login a row came from.
             let names = { (items: [ItemSnapshot]) in Set(items.map { $0.institutionName.lowercased() }) }
             protectedInstitutions = names(payload.items.filter { protectedItemIDs.contains($0.id) })
                 .subtracting(names(payload.items.filter { !protectedItemIDs.contains($0.id) }))
         }
 
-        /// True when the row belongs to a bank Sync already manages on this device.
-        func protects(accountId: String?, institution: String?, mask: String? = nil) -> Bool {
+        /// True when the row belongs to a bank Sync already manages on this device. A row
+        /// that matches no bank, such as an imported card, can’t be re-downloaded, so it stays.
+        /// - Parameter label: The row’s account label, as sync writes it (`Name ···1234`).
+        func protects(accountId: String?, label: String?, institution: String? = nil) -> Bool {
             if let accountId, let itemId = itemByAccountID[accountId] {
                 return protectedItemIDs.contains(itemId)
             }
-            if let institution, let mask,
-               let itemId = itemByInstitutionMask[Self.key(institution: institution, mask: mask)] {
+            if let label, let itemId = itemByAccountLabel[label.lowercased()] {
                 return protectedItemIDs.contains(itemId)
             }
-            guard let institution else { return false }
-            return protectedInstitutions.contains(institution.lowercased())
+            // With no matching account, sync falls back to the institution name as the label.
+            return [institution, label].contains { name in
+                name.map { protectedInstitutions.contains($0.lowercased()) } ?? false
+            }
         }
 
-        private static func key(institution: String, mask: String) -> String {
-            "\(institution.lowercased())|\(mask)"
+        /// Same format as `BankAccount.plaidDisplayName`, lowercased.
+        private static func label(name: String, mask: String?) -> String {
+            guard let mask, !mask.isEmpty else { return name.lowercased() }
+            return "\(name) ···\(mask)".lowercased()
+        }
+
+        static func label(ofIncome row: IncomeSnapshot) -> String? {
+            guard let name = row.accountName else { return nil }
+            return label(name: name, mask: row.accountMask)
         }
     }
 
@@ -704,7 +714,7 @@ private extension PlaidConnectionBackup {
                 guard merge.overwritesExisting else { continue }
                 mergeTransaction(live: live, from: row)
             } else {
-                if merge.protects(accountId: row.plaidAccountId, institution: nil) { continue }
+                if merge.protects(accountId: row.plaidAccountId, label: row.paymentMethod) { continue }
                 modelContext.insert(makeTransaction(from: row))
             }
             count += 1
@@ -796,7 +806,11 @@ private extension PlaidConnectionBackup {
                 live.kind = row.kind
                 live.updatedAt = row.updatedAt
             } else {
-                if merge.protects(accountId: nil, institution: row.sourceInstitution, mask: row.accountMask) {
+                if merge.protects(
+                    accountId: nil,
+                    label: RowMerge.label(ofIncome: row),
+                    institution: row.sourceInstitution
+                ) {
                     continue
                 }
                 modelContext.insert(
@@ -863,7 +877,7 @@ private extension PlaidConnectionBackup {
                 }
                 live.liabilitiesSyncedAt = row.liabilitiesSyncedAt
             } else {
-                if merge.protects(accountId: row.accountId, institution: row.institutionName) { continue }
+                if merge.protects(accountId: row.accountId, label: nil, institution: row.institutionName) { continue }
                 modelContext.insert(
                     BankAccount(
                         accountId: row.accountId,
@@ -918,7 +932,13 @@ private extension PlaidConnectionBackup {
                 live.creditAccountId = row.creditAccountId
                 live.institutionName = row.institutionName
             } else {
-                if merge.protects(accountId: row.creditAccountId, institution: row.institutionName) { continue }
+                if merge.protects(
+                    accountId: row.creditAccountId,
+                    label: row.cardName,
+                    institution: row.institutionName
+                ) {
+                    continue
+                }
                 modelContext.insert(
                     CreditCardPayment(
                         transactionId: row.transactionId,
