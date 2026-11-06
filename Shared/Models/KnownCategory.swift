@@ -19,6 +19,8 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
     case utilities = "Utilities"
     case homeInternet = "Home Internet"
     case carInsurance = "Car Insurance"
+    case insurance = "Insurance"
+    case homeImprovement = "Home Improvement"
 
     // Day-to-day
     case groceries = "Groceries"
@@ -36,6 +38,8 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
     case education = "Education"
     case pets = "Pets"
     case giftsDonations = "Gifts & Donations"
+    /// Money sent to or received from people through Zelle, Venmo, and similar apps.
+    case personToPerson = "Person to Person"
 
     // Catch-alls
     case fees = "Fees"
@@ -47,6 +51,9 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
     case refund = "Refund"
     /// Instalment billing of a purchase already counted (My Chase Plan, Amex Plan It).
     case installment = "Installment"
+
+    /// Debt moved between cards. The original purchases were already counted.
+    case balanceTransfer = "Balance Transfer"
 
     /// Bill pays — excluded from Total Spend / Budget spend.
     case creditCardPayment = "Credit Card Payment"
@@ -64,7 +71,9 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
         case .housing: return "Rent, mortgage, HOA"
         case .utilities: return "Electric, water, gas, trash"
         case .homeInternet: return "Internet, cable, phone"
-        case .carInsurance: return "Auto (and similar) insurance"
+        case .carInsurance: return "Auto insurance"
+        case .insurance: return "Home, life, health, and other insurance"
+        case .homeImprovement: return "Furniture, hardware, repairs"
         case .groceries: return "Supermarkets, grocery delivery"
         case .dining: return "Restaurants, coffee, takeout"
         case .gas: return "Gas stations, EV charging"
@@ -78,11 +87,13 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
         case .education: return "Tuition, courses, books, kids school"
         case .pets: return "Vet, pet food, pet supplies"
         case .giftsDonations: return "Gifts, charity, donations"
+        case .personToPerson: return "Zelle, Venmo, Cash App, and similar"
         case .fees: return "Bank fees, ATM, late fees"
         case .miscellaneous: return "Everything else"
         case .loan: return "My Loan / cash from a card’s credit line (not spend)"
         case .refund: return "Card credits and merchant refunds (not earnings)"
         case .installment: return "Monthly installment billings (not new spend)"
+        case .balanceTransfer: return "Debt moved between cards (not spend)"
         case .creditCardPayment: return "Card bill payments (not spend)"
         }
     }
@@ -95,10 +106,10 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
     /// Logical order for Budget “add limit” picker (essentials first).
     static var budgetPickerOrder: [KnownCategory] {
         [
-            .housing, .utilities, .homeInternet, .carInsurance,
+            .housing, .utilities, .homeInternet, .carInsurance, .insurance, .homeImprovement,
             .groceries, .dining, .gas, .transit, .shopping,
             .entertainment, .subscriptions, .travel,
-            .health, .personalCare, .education, .pets, .giftsDonations,
+            .health, .personalCare, .education, .pets, .giftsDonations, .personToPerson,
             .fees, .miscellaneous
         ]
     }
@@ -116,7 +127,11 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
         alias(["housing", "rent", "mortgage", "hoa"], .housing)
         alias(["utilities", "utility", "electric", "water", "trash", "sewer"], .utilities)
         alias(["home internet", "internet", "cable", "phone", "mobile phone", "telecom", "phone & internet"], .homeInternet)
-        alias(["car insurance", "auto insurance", "insurance"], .carInsurance)
+        alias(["car insurance", "auto insurance"], .carInsurance)
+        alias(["insurance"], .insurance)
+        alias(["home improvement", "hardware", "furniture"], .homeImprovement)
+        alias(["person to person", "p2p", "zelle", "venmo", "cash app"], .personToPerson)
+        alias(["balance transfer", "balance transfers"], .balanceTransfer)
         alias(["groceries", "grocery", "supermarket"], .groceries)
         alias(["dining", "restaurants", "restaurant", "food", "food and drink", "food & drink", "coffee", "fast food"], .dining)
         alias(["gas (car)", "gas", "fuel", "ev charging"], .gas)

@@ -205,6 +205,8 @@ enum TransactionAnalytics {
     nonisolated static let refundCategory = "Refund"
     /// Monthly installment billing — original purchase already counted.
     nonisolated static let installmentCategory = "Installment"
+    /// Debt moved between cards — the original purchases were already counted.
+    nonisolated static let balanceTransferCategory = "Balance Transfer"
 
     /// Categories excluded from Total Spend, charts, and card spend rollups.
     static func isExcludedFromSpend(_ transaction: Transaction) -> Bool {
@@ -221,6 +223,7 @@ enum TransactionAnalytics {
             || c == loanCategory.lowercased()
             || c == refundCategory.lowercased()
             || c == installmentCategory.lowercased()
+            || c == balanceTransferCategory.lowercased()
     }
 
     nonisolated static func isCreditCardPaymentCategory(_ category: String) -> Bool {

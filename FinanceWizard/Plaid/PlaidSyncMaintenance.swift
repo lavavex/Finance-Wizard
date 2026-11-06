@@ -14,6 +14,36 @@ import Foundation
 import SwiftData
 
 extension PlaidSyncEngine {
+    /// When an employer is also a merchant, Plaid tags some paychecks as salary and others as a
+    /// purchase from that merchant. A deposit from a source Plaid has identified as payroll is
+    /// payroll too, if it's paycheck-sized, so a small store refund keeps its label.
+    @MainActor
+    @discardableResult
+    static func relabelPayrollDeposits(modelContext: ModelContext) -> Int {
+        let rows = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
+        let bySource = Dictionary(grouping: rows) {
+            $0.source.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        var relabeled = 0
+        for group in bySource.values {
+            let paychecks = group.filter { isPayrollPFC($0.pfc) }.map(\.amount).sorted()
+            guard !paychecks.isEmpty else { continue }
+            let minimum = paychecks[paychecks.count / 2] * 0.25
+            for row in group where row.category == "Other Income"
+                && row.amount >= minimum
+                && !(row.pfc ?? "").uppercased().hasPrefix("INCOME") {
+                row.category = "Payroll"
+                relabeled += 1
+            }
+        }
+        return relabeled
+    }
+
+    private static func isPayrollPFC(_ pfc: String?) -> Bool {
+        let detailed = (pfc ?? "").uppercased()
+        return detailed.contains("SALARY") || detailed.contains("WAGES") || detailed.contains("PAYROLL")
+    }
+
     /// Remove `BankAccount`s on this Item that are no longer linked at Plaid.
     @MainActor
     static func pruneAccounts(

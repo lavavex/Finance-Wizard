@@ -187,6 +187,8 @@ enum PlaidSyncEngine {
             }
         }
 
+        relabelPayrollDeposits(modelContext: modelContext)
+
         let plans = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
         let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         PayoffPlanProgress.applyStatementProgress(plans: plans, accounts: accounts)
@@ -1243,7 +1245,8 @@ enum PlaidSyncEngine {
     /// v3: stop the purchase-rescue branch deleting payment rows for transfer-worded bill pays.
     /// v4: drop payment rows mirrored for Loan / Refund / Installment edits.
     /// v5: merchant refunds / reimbursements out of Income; recategorise Payroll / Direct Deposit.
-    static let legacyCleanupVersion = 5
+    /// v6: balance transfers out of spend; rewards and person-to-person out of earnings.
+    static let legacyCleanupVersion = 6
     static let legacyCleanupVersionKey = "plaid.legacyCleanup.v"
 
     /// Re-home mis-filed spend/income that look like transfers or card payments.
@@ -1260,6 +1263,11 @@ enum PlaidSyncEngine {
                     continue
                 }
                 let lower = row.title.lowercased()
+                if PlaidCategoryMapper.looksLikeBalanceTransfer(row.title), !row.isCategoryLocked {
+                    row.category = TransactionAnalytics.balanceTransferCategory
+                    fixed += 1
+                    continue
+                }
                 if PayoffPlanRecognition.looksLikeInstallmentBillingTitle(row.title),
                    !TransactionAnalytics.isExcludedFromSpendCategory(row.category)
                     || row.category.caseInsensitiveCompare(TransactionAnalytics.installmentCategory) != .orderedSame {

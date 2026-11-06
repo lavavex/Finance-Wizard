@@ -59,6 +59,11 @@ enum PlaidCategoryMapper {
         let type = (accountType ?? "").lowercased()
         let subtype = (accountSubtype ?? "").lowercased()
 
+        // Moving debt to this card is not a purchase, whatever PFC Plaid assigned.
+        if type == "credit", amount >= 0, looksLikeBalanceTransfer(title) {
+            return .spending
+        }
+
         // FIX: the loan-disbursement branch used to run first. Its PFC shortcut fires on
         // any `LOAN_DISBURSEMENTS*` tag, and Plaid applies that to the card side of an
         // ordinary bill payment — so 107 "Payment Thank You" rows were re-filed as positive
@@ -95,11 +100,34 @@ enum PlaidCategoryMapper {
         // land as TRANSFER_IN without a strong title).
         if isTransfer(primary: primary, detailed: detailed, titleLower: lower, accountSubtype: subtype),
            !(type == "credit" && amount < 0) {
+            // Money that left for another person is real, unlike a move between own accounts.
+            if looksLikePersonToPerson(title) {
+                return amount >= 0 ? .spending : .income
+            }
             return .transfer
         }
 
         // Real money out / in (Plaid: +outflow, −inflow)
         return amount >= 0 ? .spending : .income
+    }
+
+    /// Payment apps used to send money to people. A generic "transfer" row can't be told apart
+    /// from a move between the user's own accounts, so only these are kept.
+    static func looksLikePersonToPerson(_ title: String) -> Bool {
+        title.range(
+            of: #"\b(zelle|venmo|cash ?app|square cash|paypal|apple cash)\b"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
+    /// A card statement line moving debt from another card. The fee on it is a real cost.
+    /// Issuers write "BALANCE TRANSFER" or "BT <reference> - <other issuer>".
+    static func looksLikeBalanceTransfer(_ title: String) -> Bool {
+        let lower = title.lowercased()
+        if lower.contains("fee") || lower.contains("interest") { return false }
+        if lower.contains("balance transfer") || lower.contains("bal transfer") { return true }
+        guard lower.range(of: #"^bt \d{6,}"#, options: .regularExpression) != nil else { return false }
+        return lower.contains("card") || !CardIssuerCatalog.issuerIds(in: lower).isEmpty
     }
 
     /// Money-in that must not land in Total Income (merchant refund, reimbursement, cash advance).
@@ -342,6 +370,10 @@ enum PlaidCategoryMapper {
     private static func looksLikeMerchantRefundTitle(_ lower: String) -> Bool {
         if lower.contains("statement credit") || lower.contains("store credit") { return true }
         if lower.contains("cash reward") || lower.contains("your cash reward") { return true }
+        if lower.contains("cash redemption") || lower.contains("reward redemption")
+            || lower.contains("rewards redemption") {
+            return true
+        }
         if lower.contains("annual fee refund") || lower.contains("fee refund") { return true }
         if lower.hasPrefix("offer:") { return true }
         if lower.contains("refund") || lower.contains("return") || lower.contains("reversal") {
@@ -421,6 +453,9 @@ enum PlaidCategoryMapper {
         if PayoffPlanRecognition.looksLikeLoanDisbursement(title: title) {
             return KnownCategory.loan.rawValue
         }
+        if looksLikeBalanceTransfer(title) {
+            return KnownCategory.balanceTransfer.rawValue
+        }
         // FIX: card financing *fees* are a real cost, not the re-billing of an existing
         // purchase. Chase posts them as "PLAN FEE - <merchant>" once a month for the life of
         // a My Chase Plan (31 such rows here, ~$134/yr), and they were landing in Shopping,
@@ -438,7 +473,23 @@ enum PlaidCategoryMapper {
         let primary = (pfc?.primary ?? "").uppercased()
         let detailed = (pfc?.detailed ?? "").uppercased()
 
-        if detailed.contains("GAS_STATION") || detailed.contains("GAS_")
+        // PayPal also pays merchants, so a merchant PFC outranks the app name.
+        if primary.isEmpty || primary.hasPrefix("TRANSFER"), looksLikePersonToPerson(title) {
+            return KnownCategory.personToPerson.rawValue
+        }
+
+        // Handled first: these names contain "RENT" and "GAS_", which also appear in other
+        // categories. Electricity is not fuel, and water is not rent.
+        if detailed.hasPrefix("RENT_AND_UTILITIES") {
+            if detailed.contains("INTERNET") || detailed.contains("TELEPHONE") {
+                return KnownCategory.homeInternet.rawValue
+            }
+            return detailed.hasSuffix("_RENT")
+                ? KnownCategory.housing.rawValue
+                : KnownCategory.utilities.rawValue
+        }
+
+        if detailed == "TRANSPORTATION_GAS" || detailed.contains("GAS_STATION")
             || (detailed.contains("FUEL") && !detailed.contains("REFUEL")) {
             return KnownCategory.gas.rawValue
         }
@@ -460,7 +511,7 @@ enum PlaidCategoryMapper {
             || detailed.contains("TELECOM") || detailed.contains("PHONE") {
             return KnownCategory.homeInternet.rawValue
         }
-        if detailed.contains("RENT") || detailed.contains("MORTGAGE") {
+        if detailed == "RENT" || detailed.contains("MORTGAGE") {
             return KnownCategory.housing.rawValue
         }
         if detailed.contains("UTILITIES") || detailed.contains("ELECTRIC")
@@ -469,7 +520,7 @@ enum PlaidCategoryMapper {
             return KnownCategory.utilities.rawValue
         }
         if detailed.contains("INSURANCE") {
-            return KnownCategory.carInsurance.rawValue
+            return KnownCategory.insurance.rawValue
         }
         if detailed.contains("PHARMACY") || detailed.contains("DENTAL")
             || detailed.contains("VISION") || detailed.contains("HOSPITAL")
@@ -497,7 +548,8 @@ enum PlaidCategoryMapper {
             return KnownCategory.transit.rawValue
         }
         if detailed.contains("AIRLINE") || detailed.contains("LODGING")
-            || detailed.contains("HOTEL") || detailed.contains("CAR_RENTAL") {
+            || detailed.contains("HOTEL") || detailed.contains("CAR_RENTAL")
+            || detailed.contains("RENTAL_CARS") {
             return KnownCategory.travel.rawValue
         }
         if detailed.contains("ENTERTAINMENT") || detailed.contains("MUSIC")
@@ -526,6 +578,8 @@ enum PlaidCategoryMapper {
             return KnownCategory.travel.rawValue
         case "ENTERTAINMENT":
             return KnownCategory.entertainment.rawValue
+        case "HOME_IMPROVEMENT":
+            return KnownCategory.homeImprovement.rawValue
         case "PERSONAL_CARE":
             return KnownCategory.personalCare.rawValue
         case "MEDICAL", "HEALTHCARE":
@@ -579,6 +633,9 @@ enum PlaidCategoryMapper {
         if looksLikeTaxRefund(title: name, primary: primary, detailed: detailed) {
             return "Other Income"
         }
+        if !primary.hasPrefix("INCOME"), !detailed.hasPrefix("INCOME"), looksLikePersonToPerson(name) {
+            return KnownCategory.personToPerson.rawValue
+        }
         if detailed.contains("INTEREST") || lower.contains("interest") {
             return "Interest"
         }
@@ -604,6 +661,7 @@ enum PlaidCategoryMapper {
     static func looksLikeNonSpendTitle(_ title: String) -> Bool {
         let lower = title.lowercased()
         if looksLikeCardPaymentTitle(lower) { return true }
+        if looksLikePersonToPerson(title) { return false }
         if isTransfer(primary: "", detailed: "", titleLower: lower, accountSubtype: "") {
             return true
         }

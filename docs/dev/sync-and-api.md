@@ -113,6 +113,10 @@ Plaid amount convention:
 - **Category** from `personal_finance_category` (mapped to Dining, Gas, …) unless a local learn rule or lock applies.  
 - **Payment method** from account name + mask (e.g. `Checking ···0000`) or institution name.  
 - **Transfers** (savings ↔ checking, internal moves) are **skipped** — never enter spend or income.  
+- **Person to Person** rows (Zelle, Venmo, Cash App, Square Cash, PayPal, Apple Cash) are kept. Money sent counts as spend in the **Person to Person** category. Money received is listed under Income but isn't part of Total Income.  
+- **Balance transfers** on a card are filed as **Balance Transfer**, excluded from spend. Their fees stay in **Fees**.  
+- **Payroll:** after each Sync, a paycheck-sized deposit from a source Plaid has tagged as salary or wages elsewhere is labeled **Payroll**, because Plaid can tag an employer that's also a merchant as a purchase.  
+- Expense categories follow Plaid’s published names, and `ClassifierTaxonomyTests` checks every spend category in that list. A category fix reaches existing rows on **Full re-sync**, which keeps categories you locked.  
 - **Credit card bill payments** → `CreditCardPayment` (Accounts → Total paid) **and** a `Transaction` with category **Credit Card Payment** (list-visible, excluded from Total Spend).  
 - **Credit balances / limits** come from `POST /accounts/get` on each Sync.  
 - **Credit terms** (min payment, due date, last payment/statement, APRs, overdue) from `POST /liabilities/get` when the Item has Liabilities.  

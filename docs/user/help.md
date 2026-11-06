@@ -97,7 +97,15 @@ Auto-detect looks for the **same amount** on a schedule, so a bill that changes 
 
 ## Total Income looks too high
 
-**Total Income** is paychecks, direct deposits, and interest — not merchant refunds, card credits, or loan proceeds. Refunds and reimbursements stay in the expense list as **Refund** (excluded from spend). A one-off bonus still counts as income.
+**Total Income** is paychecks, direct deposits, and interest — not merchant refunds, card credits, rewards, loan proceeds, or money from people. Refunds and reimbursements stay in the expense list as **Refund** (excluded from spend). Money from Zelle, Venmo, and similar apps is listed as **Person to Person**. A one-off bonus still counts as income.
+
+## A category looks wrong
+
+Tap the transaction and pick the right category. Your choice sticks through future Syncs. Some bills, like rent paid by bank transfer, reach the app with a generic name, so this is the way to file them.
+
+Money you send through Zelle, Venmo, and similar apps counts as spending under **Person to Person**. Moves between your own accounts aren't counted. **Balance Transfer** isn't counted as spending because the original purchases already were, but the fee on it is.
+
+After an update improves categories, use **Sync → Full re-sync** to apply them to older transactions. Categories you picked yourself stay.
 
 ## Apple Card
 
