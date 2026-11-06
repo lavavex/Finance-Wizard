@@ -87,7 +87,7 @@ enum PlaidAPIClient {
             let update: UpdateOpts?
             /// Optional OAuth app-to-app return (https Universal Link preferred in Production).
             let redirect_uri: String?
-            /// HTTPS endpoint for Item/Transactions webhooks (Cloudflare Worker).
+            /// HTTPS endpoint for Item/Transactions webhooks. The Worker acknowledges and discards them.
             let webhook: String?
             let hosted_link: HostedLink
 

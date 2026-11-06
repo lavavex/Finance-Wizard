@@ -82,28 +82,15 @@ No Dashboard allowlist is required for `completion_redirect_uri` (custom scheme)
 
 ### Webhooks
 
-Live Worker (Cloudflare free tier + KV):
+The app sends this URL as `webhook` on `/link/token/create`:
 
 ```text
 https://plaid-webhooks.lavavex.workers.dev/plaid/webhook
 ```
 
-- Health: `GET https://plaid-webhooks.lavavex.workers.dev/health`
-- Pending events: `GET https://plaid-webhooks.lavavex.workers.dev/pending?item_id=…`
+The Worker (`workers/plaid-webhooks/`) answers `200` and discards each webhook. It logs and stores nothing, and `GET /health` is its only other route. The app doesn’t depend on webhooks: Hosted Link finishes by polling `/link/token/get`, `/item/get` reports login errors, and **Sync** pulls the data.
 
-The app sends this URL as `webhook` on every `/link/token/create` (Link + Relink). You can also set the same URL in the Plaid Dashboard for team-level defaults.
-
-**Important webhooks we handle (by code):**
-
-| Type | Code | Meaning |
-|------|------|---------|
-| TRANSACTIONS | `SYNC_UPDATES_AVAILABLE` | New/changed txs — tap Sync |
-| TRANSACTIONS | `RECURRING_TRANSACTIONS_UPDATE` | Recurring streams changed |
-| TRANSACTIONS | `INITIAL_UPDATE` / `HISTORICAL_UPDATE` / `DEFAULT_UPDATE` / `TRANSACTIONS_REMOVED` | Extra transaction signals |
-| ITEM | `ERROR` (e.g. `ITEM_LOGIN_REQUIRED`) | Needs Relink |
-| ITEM | `PENDING_EXPIRATION` / `USER_PERMISSION_REVOKED` | Needs Relink |
-
-The Worker **stores** last event per Item in KV. The iOS app does **not** auto-sync from webhooks yet (no push path into SwiftData without your access tokens on a server). Use **Sync** in the app; `/item/get` still surfaces login errors on sync.
+Hosted Link’s `redirect_uri` is a separate requirement: OAuth banks need the `budgetmagi.pages.dev` page in `pages/budgetmagi/`.
 
 Host depends on Settings environment:
 

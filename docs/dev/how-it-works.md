@@ -120,7 +120,7 @@ Sync (toolbar or pull-to-refresh)
     WidgetCenter.reloadAllTimelines()
 ```
 
-Webhook worker (`workers/plaid-webhooks/`) records Plaid events; the **app does not auto-sync** from them. User still taps Sync. Relink when `/item/get` says login expired.
+Webhook worker (`workers/plaid-webhooks/`) acknowledges Plaid events and discards them; the **app does not auto-sync**. User still taps Sync. Relink when `/item/get` says login expired.
 
 ## How each tab uses that data
 
