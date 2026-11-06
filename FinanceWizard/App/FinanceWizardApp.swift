@@ -14,6 +14,7 @@ struct FinanceWizardApp: App {
     private let container: ModelContainer
 
     init() {
+        PlaidConnectionBackup.purgeTemporaryFiles()
         do {
             #if DEBUG
             if DemoMode.isEnabled {

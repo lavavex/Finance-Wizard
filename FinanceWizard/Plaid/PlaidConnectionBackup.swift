@@ -21,12 +21,16 @@
 //  Restore safety (default = safeMerge):
 //  • NEVER overwrites an existing access_token already on this device
 //  • NEVER overwrites non-empty Plaid API secret / client_id already configured
-//  • Upserts app data by unique ids; preserves local category/rail locks
+//  • Only adds rows that are missing, and never for a bank already on this device:
+//    its cursor is past the backup, so Sync would not repair stale or removed rows
+//  • Budget and payoff plans take the backup’s copy only when it is newer
 //  • Never deletes local-only banks or rows that are absent from the backup
 //
-//  Use replaceConnections when the backup’s tokens/keys should win.
+//  Use replaceConnections when the backup’s tokens/keys should win. Cursors go back
+//  with the tokens, so existing rows take the backup’s values and Sync replays from there.
 //  Use wipeThenRestore to delete local SwiftData + prefs + logos + tokens first,
-//  so data added after this backup was made is gone.
+//  so data added after this backup was made is gone. A failed wipe restore puts the
+//  previous data back from an in-memory copy.
 //
 
 import Foundation
@@ -79,6 +83,13 @@ enum PlaidConnectionBackup {
     /// Public for wipe-then-restore and the Debug menu. Does not touch the Plaid Dashboard.
     @MainActor
     static func wipeLocalAppData(modelContext: ModelContext) throws {
+        try wipeBackedUpData(modelContext: modelContext)
+        AskStore.wipe()
+    }
+
+    /// Everything a backup can bring back. Ask chats are not backed up, so they stay out.
+    @MainActor
+    private static func wipeBackedUpData(modelContext: ModelContext) throws {
         try SharedStore.wipeAllModels(in: modelContext)
         try modelContext.save()
         PlaidItemStore.removeAll()
@@ -86,7 +97,6 @@ enum PlaidConnectionBackup {
         // Nicknames are cached in memory; the wipe replaced UserDefaults underneath it.
         CardLabelStore.resetMemoryCache()
         InstitutionLogoCache.wipeAllLogoFiles()
-        AskStore.wipe()
     }
 
     // MARK: Restore policy
@@ -113,7 +123,7 @@ enum PlaidConnectionBackup {
         var detail: String {
             switch self {
             case .safeMerge:
-                return "Adds missing banks and data only. Will not change access tokens or API keys already on this phone."
+                return "Adds banks that aren’t on this phone, with their data. Banks already here keep their tokens and transactions, and Sync keeps them current. API keys already here stay. Budget and payoff plans update only when the backup’s copy is newer."
             case .replaceConnections:
                 return "Overwrites Plaid API keys and access tokens with the backup’s copies. Use only if you want the backup to win."
             case .wipeThenRestore:
@@ -171,12 +181,13 @@ enum PlaidConnectionBackup {
         let secret = PlaidCredentialsStore.secret
         let items = PlaidItemStore.loadItems()
 
-        let txs = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
-        let incomes = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
-        let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
-        let payments = (try? modelContext.fetch(FetchDescriptor<CreditCardPayment>())) ?? []
-        let plans = (try? modelContext.fetch(FetchDescriptor<BudgetPlan>())) ?? []
-        let payoffs = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
+        // A failed read must fail the backup; treating it as empty would save a partial file.
+        let txs = try modelContext.fetch(FetchDescriptor<Transaction>())
+        let incomes = try modelContext.fetch(FetchDescriptor<Income>())
+        let accounts = try modelContext.fetch(FetchDescriptor<BankAccount>())
+        let payments = try modelContext.fetch(FetchDescriptor<CreditCardPayment>())
+        let plans = try modelContext.fetch(FetchDescriptor<BudgetPlan>())
+        let payoffs = try modelContext.fetch(FetchDescriptor<PayoffPlan>())
 
         let hasAnything = !clientID.isEmpty || !secret.isEmpty || !items.isEmpty
             || !txs.isEmpty || !incomes.isEmpty || !accounts.isEmpty || !payments.isEmpty
@@ -317,30 +328,104 @@ enum PlaidConnectionBackup {
 
     // MARK: Apply
 
+    /// - Parameter beforeCommit: Runs just before the final save. Tests use it to force a failure.
     @MainActor
     @discardableResult
     static func apply(
         payload: Payload,
         policy: RestorePolicy,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        beforeCommit: (() throws -> Void)? = nil
     ) throws -> RestoreSummary {
         guard payload.version == formatVersion else {
             throw BackupError.unsupportedVersion(payload.version)
         }
-
-        if policy.wipesLocalData {
-            try wipeLocalAppData(modelContext: modelContext)
+        guard policy.wipesLocalData else {
+            return try applyContents(
+                payload,
+                policy: policy,
+                modelContext: modelContext,
+                beforeCommit: beforeCommit
+            )
         }
 
-        let credResult = applyCredentials(payload.credentials, policy: policy)
-        let itemResult = applyItems(payload.items, policy: policy)
+        // Taken before the wipe, so a failed read stops the restore with nothing deleted.
+        let previous: Payload?
+        do {
+            previous = try capturePayload(modelContext: modelContext)
+        } catch BackupError.nothingToBackup {
+            previous = nil
+        }
 
-        let txCount = upsertTransactions(payload.transactions, modelContext: modelContext)
-        let incomeCount = upsertIncome(payload.income, modelContext: modelContext)
-        let accountCount = upsertBankAccounts(payload.bankAccounts, modelContext: modelContext)
-        let paymentCount = upsertPayments(payload.creditCardPayments, modelContext: modelContext)
-        let planCount = upsertBudgetPlans(payload.budgetPlans, modelContext: modelContext)
-        let payoffCount = upsertPayoffPlans(payload.payoffPlans, modelContext: modelContext)
+        let summary = try runWithRollback {
+            try wipeBackedUpData(modelContext: modelContext)
+            return try applyContents(
+                payload,
+                policy: policy,
+                modelContext: modelContext,
+                beforeCommit: beforeCommit
+            )
+        } undo: {
+            modelContext.rollback()
+            try wipeBackedUpData(modelContext: modelContext)
+            if let previous {
+                try applyContents(previous, policy: .wipeThenRestore, modelContext: modelContext)
+            }
+        }
+        AskStore.wipe()
+        return summary
+    }
+
+    /// Runs `work`; if it throws, runs `undo` and reports whether the undo succeeded.
+    static func runWithRollback<T>(
+        _ work: () throws -> T,
+        undo: () throws -> Void
+    ) throws -> T {
+        do {
+            return try work()
+        } catch let failure {
+            do {
+                try undo()
+            } catch {
+                throw BackupError.rollbackFailed(failure.localizedDescription)
+            }
+            throw BackupError.restoreRolledBack(failure.localizedDescription)
+        }
+    }
+
+    /// Commits SwiftData first, so a failed save cannot leave a backup cursor on this
+    /// device without the rows it covers.
+    @MainActor
+    @discardableResult
+    private static func applyContents(
+        _ payload: Payload,
+        policy: RestorePolicy,
+        modelContext: ModelContext,
+        beforeCommit: (() throws -> Void)? = nil
+    ) throws -> RestoreSummary {
+        let counts: AppDataCounts
+        do {
+            counts = try mergeAppData(
+                payload,
+                policy: policy,
+                protectedItemIDs: protectedItemIDs(in: payload, policy: policy),
+                modelContext: modelContext
+            )
+            try beforeCommit?()
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+        let txCount = counts.transactions
+        let incomeCount = counts.income
+        let accountCount = counts.bankAccounts
+        let paymentCount = counts.payments
+        let planCount = counts.budgetPlans
+        let payoffCount = counts.payoffPlans
+
+        let credResult = try applyCredentials(payload.credentials, policy: policy)
+        let itemResult = try applyItems(payload.items, policy: policy)
 
         if !payload.cardLabels.isEmpty {
             mergeCardLabels(payload.cardLabels)
@@ -348,7 +433,9 @@ enum PlaidConnectionBackup {
         if !payload.vendorRules.isEmpty {
             mergeVendorRules(payload.vendorRules)
         }
-        UserDefaults.standard.set(payload.screenshotPrivacy, forKey: ScreenshotPrivacy.storageKey)
+        if policy != .safeMerge {
+            UserDefaults.standard.set(payload.screenshotPrivacy, forKey: ScreenshotPrivacy.storageKey)
+        }
 
         if policy.wipesLocalData {
             if !payload.preferenceDefaults.isEmpty {
@@ -361,7 +448,6 @@ enum PlaidConnectionBackup {
             }
         }
 
-        try modelContext.save()
         WidgetCenter.shared.reloadAllTimelines()
 
         let credentialPoints = credResult.written ? 1 : 0
@@ -392,6 +478,42 @@ enum PlaidConnectionBackup {
             payoffPlansUpserted: payoffCount,
             environment: PlaidCredentialsStore.environment.displayName,
             institutionNamesAdded: itemResult.addedNames
+        )
+    }
+
+    struct AppDataCounts: Equatable {
+        var transactions: Int
+        var income: Int
+        var bankAccounts: Int
+        var payments: Int
+        var budgetPlans: Int
+        var payoffPlans: Int
+    }
+
+    /// Banks whose live token survives this restore. Their rows stay Sync’s to manage.
+    @MainActor
+    private static func protectedItemIDs(in payload: Payload, policy: RestorePolicy) -> Set<String> {
+        guard policy == .safeMerge else { return [] }
+        let live = Set(PlaidItemStore.loadItems().map(\.id))
+        return Set(payload.items.map(\.id)).intersection(live)
+    }
+
+    /// Writes backup rows into the context without saving. Safe merge only adds rows from
+    /// banks outside `protectedItemIDs`; other policies let the backup win on existing rows.
+    static func mergeAppData(
+        _ payload: Payload,
+        policy: RestorePolicy,
+        protectedItemIDs: Set<String>,
+        modelContext: ModelContext
+    ) throws -> AppDataCounts {
+        let merge = RowMerge(payload: payload, policy: policy, protectedItemIDs: protectedItemIDs)
+        return AppDataCounts(
+            transactions: try upsertTransactions(payload.transactions, merge: merge, modelContext: modelContext),
+            income: try upsertIncome(payload.income, merge: merge, modelContext: modelContext),
+            bankAccounts: try upsertBankAccounts(payload.bankAccounts, merge: merge, modelContext: modelContext),
+            payments: try upsertPayments(payload.creditCardPayments, merge: merge, modelContext: modelContext),
+            budgetPlans: try upsertBudgetPlans(payload.budgetPlans, modelContext: modelContext),
+            payoffPlans: try upsertPayoffPlans(payload.payoffPlans, modelContext: modelContext)
         )
     }
 
@@ -429,7 +551,7 @@ private extension PlaidConnectionBackup {
         var addedNames: [String]
     }
 
-    static func applyCredentials(_ creds: CredentialsSnapshot, policy: RestorePolicy) -> CredApplyResult {
+    static func applyCredentials(_ creds: CredentialsSnapshot, policy: RestorePolicy) throws -> CredApplyResult {
         switch policy {
         case .safeMerge:
             var wrote = false
@@ -438,7 +560,7 @@ private extension PlaidConnectionBackup {
                 wrote = true
             }
             if PlaidCredentialsStore.secret.isEmpty, !creds.secret.isEmpty {
-                PlaidCredentialsStore.secret = creds.secret
+                try PlaidCredentialsStore.saveSecret(creds.secret)
                 wrote = true
             }
             // Environment only when credentials were incomplete before restore.
@@ -457,7 +579,7 @@ private extension PlaidConnectionBackup {
                 PlaidCredentialsStore.clientID = creds.clientID
             }
             if !creds.secret.isEmpty {
-                PlaidCredentialsStore.secret = creds.secret
+                try PlaidCredentialsStore.saveSecret(creds.secret)
             }
             PlaidCredentialsStore.environment = PlaidEnvironment.fromStored(creds.environment)
             PlaidCredentialsStore.redirectURI = creds.redirectURIOverride
@@ -466,7 +588,7 @@ private extension PlaidConnectionBackup {
         }
     }
 
-    static func applyItems(_ snapshots: [ItemSnapshot], policy: RestorePolicy) -> ItemApplyResult {
+    static func applyItems(_ snapshots: [ItemSnapshot], policy: RestorePolicy) throws -> ItemApplyResult {
         let existing = Dictionary(uniqueKeysWithValues: PlaidItemStore.loadItems().map { ($0.id, $0) })
         var added = 0
         var preserved = 0
@@ -486,12 +608,12 @@ private extension PlaidConnectionBackup {
                     continue
                 case .replaceConnections, .wipeThenRestore:
                     let item = makeLinkedItem(from: snap, token: token)
-                    PlaidItemStore.upsert(item)
+                    try PlaidItemStore.upsert(item)
                     replaced += 1
                 }
             } else {
                 let item = makeLinkedItem(from: snap, token: token)
-                PlaidItemStore.upsert(item)
+                try PlaidItemStore.upsert(item)
                 added += 1
                 addedNames.append(name)
             }
@@ -523,14 +645,66 @@ private extension PlaidConnectionBackup {
 // MARK: - SwiftData upserts
 
 private extension PlaidConnectionBackup {
-    static func upsertTransactions(_ rows: [TransactionSnapshot], modelContext: ModelContext) -> Int {
-        let existing = ((try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? [])
+    /// Decides what happens to each bank-owned backup row for one restore.
+    struct RowMerge {
+        /// False for safe merge: rows already on this device are left alone.
+        let overwritesExisting: Bool
+        private let protectedItemIDs: Set<String>
+        private let itemByAccountID: [String: String]
+        private let itemByInstitutionMask: [String: String]
+        private let protectedInstitutions: Set<String>
+
+        init(payload: Payload, policy: RestorePolicy, protectedItemIDs: Set<String>) {
+            overwritesExisting = policy != .safeMerge
+            self.protectedItemIDs = protectedItemIDs
+            var byAccount: [String: String] = [:]
+            var byMask: [String: String] = [:]
+            for account in payload.bankAccounts {
+                byAccount[account.accountId] = account.itemId
+                if let mask = account.mask, !mask.isEmpty {
+                    byMask[Self.key(institution: account.institutionName, mask: mask)] = account.itemId
+                }
+            }
+            itemByAccountID = byAccount
+            itemByInstitutionMask = byMask
+            // A name shared with a bank being added can’t say which login a row came from.
+            let names = { (items: [ItemSnapshot]) in Set(items.map { $0.institutionName.lowercased() }) }
+            protectedInstitutions = names(payload.items.filter { protectedItemIDs.contains($0.id) })
+                .subtracting(names(payload.items.filter { !protectedItemIDs.contains($0.id) }))
+        }
+
+        /// True when the row belongs to a bank Sync already manages on this device.
+        func protects(accountId: String?, institution: String?, mask: String? = nil) -> Bool {
+            if let accountId, let itemId = itemByAccountID[accountId] {
+                return protectedItemIDs.contains(itemId)
+            }
+            if let institution, let mask,
+               let itemId = itemByInstitutionMask[Self.key(institution: institution, mask: mask)] {
+                return protectedItemIDs.contains(itemId)
+            }
+            guard let institution else { return false }
+            return protectedInstitutions.contains(institution.lowercased())
+        }
+
+        private static func key(institution: String, mask: String) -> String {
+            "\(institution.lowercased())|\(mask)"
+        }
+    }
+
+    static func upsertTransactions(
+        _ rows: [TransactionSnapshot],
+        merge: RowMerge,
+        modelContext: ModelContext
+    ) throws -> Int {
+        let existing = try modelContext.fetch(FetchDescriptor<Transaction>())
         let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.transactionId, $0) })
         var count = 0
         for row in rows {
             if let live = byId[row.transactionId] {
+                guard merge.overwritesExisting else { continue }
                 mergeTransaction(live: live, from: row)
             } else {
+                if merge.protects(accountId: row.plaidAccountId, institution: nil) { continue }
                 modelContext.insert(makeTransaction(from: row))
             }
             count += 1
@@ -598,12 +772,17 @@ private extension PlaidConnectionBackup {
         )
     }
 
-    static func upsertIncome(_ rows: [IncomeSnapshot], modelContext: ModelContext) -> Int {
-        let existing = ((try? modelContext.fetch(FetchDescriptor<Income>())) ?? [])
+    static func upsertIncome(
+        _ rows: [IncomeSnapshot],
+        merge: RowMerge,
+        modelContext: ModelContext
+    ) throws -> Int {
+        let existing = try modelContext.fetch(FetchDescriptor<Income>())
         let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.transactionId, $0) })
         var count = 0
         for row in rows {
             if let live = byId[row.transactionId] {
+                guard merge.overwritesExisting else { continue }
                 live.source = row.source
                 live.amount = row.amount
                 live.date = row.date
@@ -617,6 +796,9 @@ private extension PlaidConnectionBackup {
                 live.kind = row.kind
                 live.updatedAt = row.updatedAt
             } else {
+                if merge.protects(accountId: nil, institution: row.sourceInstitution, mask: row.accountMask) {
+                    continue
+                }
                 modelContext.insert(
                     Income(
                         transactionId: row.transactionId,
@@ -640,14 +822,19 @@ private extension PlaidConnectionBackup {
         return count
     }
 
-    static func upsertBankAccounts(_ rows: [BankAccountSnapshot], modelContext: ModelContext) -> Int {
-        let existing = ((try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? [])
+    static func upsertBankAccounts(
+        _ rows: [BankAccountSnapshot],
+        merge: RowMerge,
+        modelContext: ModelContext
+    ) throws -> Int {
+        let existing = try modelContext.fetch(FetchDescriptor<BankAccount>())
         let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.accountId, $0) })
         var count = 0
         for row in rows {
             if let live = byId[row.accountId] {
-                // Safe merge: identity fields always refresh; balances/terms only if the
-                // backup is at least as new as the live lastSyncedAt.
+                guard merge.overwritesExisting else { continue }
+                // Identity fields always refresh; balances/terms only if the backup is
+                // at least as new as the live lastSyncedAt.
                 let backupIsNewer = row.lastSyncedAt >= live.lastSyncedAt
                 live.itemId = row.itemId
                 live.name = row.name
@@ -676,6 +863,7 @@ private extension PlaidConnectionBackup {
                 }
                 live.liabilitiesSyncedAt = row.liabilitiesSyncedAt
             } else {
+                if merge.protects(accountId: row.accountId, institution: row.institutionName) { continue }
                 modelContext.insert(
                     BankAccount(
                         accountId: row.accountId,
@@ -711,12 +899,17 @@ private extension PlaidConnectionBackup {
         return count
     }
 
-    static func upsertPayments(_ rows: [PaymentSnapshot], modelContext: ModelContext) -> Int {
-        let existing = ((try? modelContext.fetch(FetchDescriptor<CreditCardPayment>())) ?? [])
+    static func upsertPayments(
+        _ rows: [PaymentSnapshot],
+        merge: RowMerge,
+        modelContext: ModelContext
+    ) throws -> Int {
+        let existing = try modelContext.fetch(FetchDescriptor<CreditCardPayment>())
         let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.transactionId, $0) })
         var count = 0
         for row in rows {
             if let live = byId[row.transactionId] {
+                guard merge.overwritesExisting else { continue }
                 live.amount = row.amount
                 live.date = row.date
                 live.cardName = row.cardName
@@ -725,6 +918,7 @@ private extension PlaidConnectionBackup {
                 live.creditAccountId = row.creditAccountId
                 live.institutionName = row.institutionName
             } else {
+                if merge.protects(accountId: row.creditAccountId, institution: row.institutionName) { continue }
                 modelContext.insert(
                     CreditCardPayment(
                         transactionId: row.transactionId,
@@ -743,8 +937,8 @@ private extension PlaidConnectionBackup {
         return count
     }
 
-    static func upsertBudgetPlans(_ rows: [BudgetPlanSnapshot], modelContext: ModelContext) -> Int {
-        let existing = ((try? modelContext.fetch(FetchDescriptor<BudgetPlan>())) ?? [])
+    static func upsertBudgetPlans(_ rows: [BudgetPlanSnapshot], modelContext: ModelContext) throws -> Int {
+        let existing = try modelContext.fetch(FetchDescriptor<BudgetPlan>())
         let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.planId, $0) })
         var count = 0
         for row in rows {
@@ -772,8 +966,8 @@ private extension PlaidConnectionBackup {
         return count
     }
 
-    static func upsertPayoffPlans(_ rows: [PayoffPlanSnapshot], modelContext: ModelContext) -> Int {
-        let existing = ((try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? [])
+    static func upsertPayoffPlans(_ rows: [PayoffPlanSnapshot], modelContext: ModelContext) throws -> Int {
+        let existing = try modelContext.fetch(FetchDescriptor<PayoffPlan>())
         let byId = Dictionary(uniqueKeysWithValues: existing.map { ($0.planId, $0) })
         var count = 0
         for row in rows {
@@ -1055,7 +1249,7 @@ extension PlaidConnectionBackup {
 
     // MARK: Encrypt
 
-    fileprivate static func encrypt(payload: Payload, password: String) throws -> Data {
+    static func encrypt(payload: Payload, password: String) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
@@ -1098,7 +1292,7 @@ extension PlaidConnectionBackup {
 
     // MARK: Decrypt
 
-    fileprivate static func decrypt(envelopeData: Data, password: String) throws -> Payload {
+    static func decrypt(envelopeData: Data, password: String) throws -> Payload {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let envelope: Envelope
@@ -1131,8 +1325,13 @@ extension PlaidConnectionBackup {
             throw BackupError.invalidFile
         }
 
-        let iterations = UInt32(max(1, envelope.iterations))
-        let kek = try deriveWrapKey(password: password, salt: salt, iterations: iterations)
+        // The file can come from anywhere. Only the format’s own cost is accepted, so a
+        // crafted value can’t overflow UInt32 or stall the app. Raising the cost needs a
+        // new formatVersion.
+        guard envelope.iterations == Int(pbkdf2Iterations) else {
+            throw BackupError.invalidFile
+        }
+        let kek = try deriveWrapKey(password: password, salt: salt, iterations: pbkdf2Iterations)
 
         let dekData: Data
         do {
@@ -1245,6 +1444,31 @@ extension PlaidConnectionBackup {
         return dest
     }
 
+    /// Deletes a backup copy this app made. Files the user picked elsewhere are never touched.
+    static func discardTemporaryFile(_ url: URL?) {
+        guard let url, isAppTemporaryFile(url) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Clears copies left by a crash or an unfinished restore. Call before any file is opened.
+    static func purgeTemporaryFiles() {
+        let directory = FileManager.default.temporaryDirectory
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        files.forEach(discardTemporaryFile)
+    }
+
+    private static func isAppTemporaryFile(_ url: URL) -> Bool {
+        let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
+        let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().path
+        let name = url.lastPathComponent
+        return (parent as NSString).standardizingPath == (directory as NSString).standardizingPath
+            && isBackupFileURL(url)
+            && (name.hasPrefix("incoming-") || name.hasPrefix("FinanceWizard-backup-"))
+    }
+
     // MARK: AES-GCM helpers
 
     fileprivate static func openGCM(
@@ -1289,6 +1513,8 @@ extension PlaidConnectionBackup {
         case unsupportedVersion(Int)
         case unsupportedKDF(String)
         case cryptoFailed(String)
+        case restoreRolledBack(String)
+        case rollbackFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -1311,6 +1537,10 @@ extension PlaidConnectionBackup {
                 return "Unsupported encryption method (\(kdf))."
             case .cryptoFailed(let detail):
                 return "Encryption error: \(detail)"
+            case .restoreRolledBack(let detail):
+                return "Restore failed, so your previous data was put back. (\(detail))"
+            case .rollbackFailed(let detail):
+                return "Restore failed and your previous data could not be put back. Try restoring from this backup file again. (\(detail))"
             }
         }
     }

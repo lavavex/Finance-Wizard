@@ -289,6 +289,9 @@ struct SettingsView: View {
             .onReceive(NotificationCenter.default.publisher(for: PlaidConnectionBackup.openFileNotification)) { _ in
                 consumeIncomingBackupIfNeeded()
             }
+            .onChange(of: pendingRestoreURL) { oldURL, _ in
+                PlaidConnectionBackup.discardTemporaryFile(oldURL)
+            }
             .sheet(item: $linkSheetRequest, onDismiss: reload) { request in
                 PlaidLinkSheet(mode: request.mode) { result in
                     switch result {
@@ -373,6 +376,7 @@ struct SettingsView: View {
                 }
             }
             .sheet(isPresented: $showPlaidBackupShare, onDismiss: {
+                PlaidConnectionBackup.discardTemporaryFile(plaidBackupShareURL)
                 plaidBackupShareURL = nil
             }) {
                 if let plaidBackupShareURL {
@@ -520,17 +524,16 @@ struct SettingsView: View {
             throw PlaidConnectionBackup.BackupError.invalidFile
         }
         isWorkingPlaidBackup = true
-        defer {
-            isWorkingPlaidBackup = false
-            pendingRestorePayload = nil
-            pendingRestoreURL = nil
-        }
+        defer { isWorkingPlaidBackup = false }
         await Task.yield()
         let summary = try PlaidConnectionBackup.apply(
             payload: payload,
             policy: restorePolicy,
             modelContext: modelContext
         )
+        // Kept on failure: the review sheet needs the payload to show the error.
+        pendingRestorePayload = nil
+        pendingRestoreURL = nil
         reload()
         clientID = PlaidCredentialsStore.clientID
         secret = PlaidCredentialsStore.secret
@@ -886,7 +889,11 @@ private struct PlaidRestorePlanSheet: View {
                     LabeledContent("Nicknames", value: "\(plan.cardLabelCount)")
                     LabeledContent("Vendor rules", value: "\(plan.vendorRuleCount)")
                 } header: {
-                    Text(policy.wipesLocalData ? "App data (replace)" : "App data (upsert)")
+                    Text("In this backup")
+                } footer: {
+                    if policy == .safeMerge {
+                        Text("Rows from banks already on this phone are skipped. Sync keeps those banks current.")
+                    }
                 }
 
                 if let errorMessage {

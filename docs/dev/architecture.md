@@ -13,7 +13,7 @@ The app and widget share one Xcode project and the same App Group store. Tests h
 |--------|---------|-----------|----------------|
 | **FinanceWizard** | Finance Wizard (iOS app) | `net.roberth.FinanceWizard` | UI, Plaid Link, sync, settings |
 | **WidgetExtension** | Widget extension (`.appex`) | `net.roberth.FinanceWizard.Widget` | Total Spend, Category Spend, Balances widgets |
-| **FinanceWizardTests** | Unit tests (`.xctest`) | `net.roberth.FinanceWizard.tests` | Classifier descriptor table |
+| **FinanceWizardTests** | Unit tests (`.xctest`) | `net.roberth.FinanceWizard.tests` | Classifier descriptor table, backup and restore |
 
 The app embeds the widget extension (Embed Foundation Extensions build phase). They ship together but are signed and built as separate targets.
 

@@ -119,10 +119,7 @@ enum PlaidSyncEngine {
 
         // Empty cursors → next /transactions/sync returns full history for each Item.
         if resetCursors {
-            for i in items.indices {
-                items[i].transactionsCursor = ""
-            }
-            PlaidItemStore.saveItems(items)
+            PlaidItemStore.resetAllCursors()
             items = PlaidItemStore.loadItems()
         }
 

@@ -143,7 +143,17 @@ Editing a transaction **Save**s on device only:
 
 ## Backup
 
-Settings **Backup & restore** writes an encrypted `.fwbackup` of this phone (keys, banks, SwiftData, prefs, logos). Restore accepts only the current backup format version; older files are rejected.
+Settings **Backup & restore** writes an encrypted `.fwbackup` of this phone (keys, banks, SwiftData, prefs, logos). Restore accepts only the current backup format version and its exact PBKDF2 cost; other files are rejected.
+
+| Policy | Banks already on the device | Other banks | Budget and payoff plans |
+|--------|-----------------------------|-------------|-------------------------|
+| **Safe merge** | Token, cursor, and rows are untouched. Backup rows are skipped, because the live cursor is past them and Sync would not repair them. | Token, cursor, and missing rows are added. | Newer `updatedAt` wins |
+| **Replace connections** | Backup token and cursor win, and existing rows take the backup’s values (category and rail locks stay). Sync replays from the restored cursor. | Same | Newer `updatedAt` wins |
+| **Wipe device, then restore** | Local data is deleted first. If the restore fails, the previous data is put back from an in-memory copy. | Same | Backup’s copy |
+
+Rows are matched to a bank by Plaid account id, then institution + last four, then institution name.
+
+The app deletes its temporary `.fwbackup` copies after a restore or share, and at launch.
 
 ## Security notes
 

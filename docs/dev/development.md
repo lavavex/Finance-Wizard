@@ -87,6 +87,19 @@ xcodebuild -project FinanceWizard.xcodeproj -scheme FinanceWizard \
 
 Or **Settings → Developer → Debug → Run classifier cases**.
 
+### Running tests
+
+Tests are hosted in the app, so they share its Keychain, UserDefaults, and App Group on that simulator. Use a simulator with no real data on it:
+
+```bash
+xcrun simctl create "FW Tests" "iPhone 17"
+xcodebuild -project FinanceWizard.xcodeproj -scheme FinanceWizard \
+  -destination 'platform=iOS Simulator,name=FW Tests' \
+  -only-testing:FinanceWizardTests test
+```
+
+`BackupRestoreTests` covers restore merging, backup encryption, temporary files, and Keychain writes. Its wipe tests delete the simulator’s app data, so they are skipped unless you set `TEST_RUNNER_FW_DESTRUCTIVE_TESTS=1` for `xcodebuild`, and they still refuse to run if a bank is linked.
+
 ## Screenshots with demo data
 
 `scripts/sim-shot.sh` needs Xcode 27.2 (release) and an iOS 27.1+ Simulator runtime (`xcodebuild -downloadPlatform iOS`). It builds the Debug app and captures each tab on iPhone 17 and iPhone Duo, creating those simulators if needed:

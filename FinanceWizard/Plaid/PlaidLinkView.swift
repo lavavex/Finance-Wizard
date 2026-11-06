@@ -264,7 +264,7 @@ struct PlaidLinkSheet: View {
                     transactionsCursor: existing.transactionsCursor,
                     linkedAt: existing.linkedAt
                 )
-                PlaidItemStore.upsert(item)
+                try PlaidItemStore.upsert(item)
                 onFinished(.success(item))
                 dismiss()
                 return
@@ -302,7 +302,7 @@ struct PlaidLinkSheet: View {
                 transactionsCursor: "",
                 linkedAt: Date()
             )
-            PlaidItemStore.upsert(item)
+            try PlaidItemStore.upsert(item)
             onFinished(.success(item))
             dismiss()
         } catch {

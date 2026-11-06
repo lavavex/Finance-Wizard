@@ -63,6 +63,14 @@ enum PlaidCredentialsStore {
         }
     }
 
+    /// Same as setting `secret`, but reports a Keychain failure.
+    static func saveSecret(_ value: String) throws {
+        try PlaidKeychain.set(
+            value.trimmingCharacters(in: .whitespacesAndNewlines),
+            account: secretAccount
+        )
+    }
+
     // MARK: - Environment
 
     /// Which Plaid host to call (sandbox or production).

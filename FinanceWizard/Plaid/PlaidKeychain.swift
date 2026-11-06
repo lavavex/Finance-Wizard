@@ -20,18 +20,23 @@ enum PlaidKeychain {
     ///   - account: Keychain “account” field — key name within `service`.
     /// - Throws: `KeychainError` if the system Keychain refuses the write.
     static func set(_ value: String, account: String) throws {
-        let data = Data(value.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        // Delete-then-add is the simplest replace path (avoids a separate update API).
-        SecItemDelete(query as CFDictionary)
-        var add = query
-        add[kSecValueData as String] = data
-        // Readable after first unlock; this device only (not iCloud Keychain).
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let attributes: [String: Any] = [
+            kSecValueData as String: Data(value.utf8),
+            // Readable after first unlock; this device only (not iCloud Keychain).
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        // Update in place, so a failed write leaves the existing secret intact.
+        let updated = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else {
+            throw KeychainError.unhandled(updated)
+        }
+        let add = query.merging(attributes) { _, new in new }
         let status = SecItemAdd(add as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw KeychainError.unhandled(status)
