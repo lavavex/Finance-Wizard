@@ -332,15 +332,66 @@ enum ClassifierRegression {
             expenseCategory: KnownCategory.entertainment.rawValue
         ),
 
-        // Card rewards are not earnings.
+        // Card rewards are income.
         ClassifierCase(
-            "cash-redemption-is-not-income",
+            "cash-redemption-is-income",
             title: "Cash Redemption",
             amount: -25,
             accountType: "depository",
             primary: "OTHER",
             detailed: "OTHER_OTHER",
+            flow: .income,
+            incomeCategory: "Rewards"
+        ),
+        ClassifierCase(
+            "card-cashback-is-income",
+            title: "Example Card Cashback Reward",
+            amount: -5,
+            accountType: "credit",
+            primary: "TRANSFER_IN",
+            detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+            flow: .income,
+            incomeCategory: "Rewards"
+        ),
+        ClassifierCase(
+            "benefit-credit-stays-a-refund",
+            title: "TRAVEL CREDIT $300/YEAR",
+            amount: -300,
+            accountType: "credit",
+            primary: "OTHER",
+            detailed: "OTHER_OTHER",
             flow: .adjustment
+        ),
+
+        // Deposits are new money. Bank-to-bank moves aren't.
+        ClassifierCase(
+            "check-deposit-is-income",
+            title: "Mobile Check Deposit",
+            amount: -200,
+            accountType: "depository",
+            primary: "TRANSFER_IN",
+            detailed: "TRANSFER_IN_DEPOSIT",
+            flow: .income,
+            incomeCategory: "Deposit"
+        ),
+        ClassifierCase(
+            "plaid-tagged-deposit-is-income",
+            title: "Deposit",
+            amount: -60,
+            accountType: "depository",
+            primary: "TRANSFER_IN",
+            detailed: "TRANSFER_IN_DEPOSIT",
+            flow: .income,
+            incomeCategory: "Deposit"
+        ),
+        ClassifierCase(
+            "ach-deposit-transfer-stays-a-transfer",
+            title: "Ach Deposit Internet Transfer From Account",
+            amount: -500,
+            accountType: "depository",
+            primary: "TRANSFER_IN",
+            detailed: "TRANSFER_IN_DEPOSIT",
+            flow: .transfer
         ),
 
         ClassifierCase(

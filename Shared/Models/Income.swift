@@ -20,7 +20,7 @@ final class Income {
     /// Always positive — money received (never mixed into spend).
     var amount: Double
     var date: Date
-    /// Canonical: Payroll, Direct Deposit, Interest, Other Income.
+    /// Canonical: Payroll, Direct Deposit, Interest, Rewards, Deposit, Other Income.
     var category: String
     /// e.g. "CHASE COLLEGE" (API `account_name`)
     var accountName: String?
@@ -103,6 +103,8 @@ enum IncomeAnalytics {
         "Interest",
         "Refund",
         "Person to Person",
+        "Rewards",
+        "Deposit",
         "Other Income"
     ]
 

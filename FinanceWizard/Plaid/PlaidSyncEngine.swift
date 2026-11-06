@@ -1251,8 +1251,35 @@ enum PlaidSyncEngine {
     /// v4: drop payment rows mirrored for Loan / Refund / Installment edits.
     /// v5: merchant refunds / reimbursements out of Income; recategorise Payroll / Direct Deposit.
     /// v6: balance transfers out of spend; rewards and person-to-person out of earnings.
-    static let legacyCleanupVersion = 6
+    /// v7: cash rewards into earnings. Newly counted deposits need a Full re-sync.
+    static let legacyCleanupVersion = 7
     static let legacyCleanupVersionKey = "plaid.legacyCleanup.v"
+
+    /// Reward rows from before v7 sit in the Refund bucket and lower Total Spend.
+    @MainActor
+    static func moveRewardToIncome(_ row: Transaction, modelContext: ModelContext) {
+        let targetId = row.transactionId
+        var descriptor = FetchDescriptor<Income>(predicate: #Predicate { $0.transactionId == targetId })
+        descriptor.fetchLimit = 1
+        if (try? modelContext.fetch(descriptor).first) == nil {
+            let parts = row.paymentMethod.components(separatedBy: " ···")
+            modelContext.insert(Income(
+                transactionId: targetId,
+                source: row.title,
+                amount: abs(row.amount),
+                date: row.date,
+                category: "Rewards",
+                accountName: parts.first,
+                accountMask: parts.count > 1 ? parts[1] : nil,
+                sourceInstitution: parts.first,
+                rawName: row.title,
+                pfc: nil,
+                pending: false,
+                kind: "income"
+            ))
+        }
+        modelContext.delete(row)
+    }
 
     /// Re-home mis-filed spend/income that look like transfers or card payments.
     /// Runs at the start of syncAll so older imports get corrected before new pages apply.
@@ -1264,6 +1291,13 @@ enum PlaidSyncEngine {
                 if abs(row.amount) < 0.005
                     || row.title.lowercased().contains("daily cash adjustment") {
                     modelContext.delete(row)
+                    fixed += 1
+                    continue
+                }
+                if !row.isCategoryLocked,
+                   row.category == KnownCategory.refund.rawValue,
+                   PlaidCategoryMapper.looksLikeCashRewards(row.title) {
+                    moveRewardToIncome(row, modelContext: modelContext)
                     fixed += 1
                     continue
                 }

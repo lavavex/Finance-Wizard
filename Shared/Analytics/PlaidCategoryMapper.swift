@@ -64,6 +64,11 @@ enum PlaidCategoryMapper {
             return .spending
         }
 
+        // Cash earned back counts as income, on a card or in a bank account.
+        if amount < 0, looksLikeCashRewards(title) {
+            return .income
+        }
+
         // FIX: the loan-disbursement branch used to run first. Its PFC shortcut fires on
         // any `LOAN_DISBURSEMENTS*` tag, and Plaid applies that to the card side of an
         // ordinary bill payment — so 107 "Payment Thank You" rows were re-filed as positive
@@ -104,11 +109,33 @@ enum PlaidCategoryMapper {
             if looksLikePersonToPerson(title) {
                 return amount >= 0 ? .spending : .income
             }
+            // A check or cash deposit is new money, unlike a move between accounts.
+            if amount < 0, type != "credit", looksLikeDeposit(title: title, detailed: detailed) {
+                return .income
+            }
             return .transfer
         }
 
         // Real money out / in (Plaid: +outflow, −inflow)
         return amount >= 0 ? .spending : .income
+    }
+
+    /// Card cash back and redeemed rewards.
+    static func looksLikeCashRewards(_ title: String) -> Bool {
+        let lower = title.lowercased()
+        return ["cash reward", "cash redemption", "reward redemption", "rewards redemption", "cashback", "cash back"]
+            .contains { lower.contains($0) }
+    }
+
+    /// A check, cash, or ATM deposit. Plaid files these under transfers, along with bank-to-bank
+    /// moves that can also read as deposits, such as "ACH Deposit Internet Transfer".
+    static func looksLikeDeposit(title: String, detailed: String) -> Bool {
+        let lower = title.lowercased()
+        if lower.contains("transfer") || lower.contains("xfer") || lower.contains("xfr ") { return false }
+        if lower.range(of: #"\b(check|cheque|cash|mobile|remote|atm|branch|counter|teller|rdc) (check )?deposit\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        return detailed.uppercased() == "TRANSFER_IN_DEPOSIT"
     }
 
     /// Payment apps used to send money to people. A generic "transfer" row can't be told apart
@@ -138,6 +165,7 @@ enum PlaidCategoryMapper {
         if looksLikeTaxRefund(title: title, primary: primary, detailed: detailed) {
             return false
         }
+        if looksLikeCashRewards(title) { return false }
         let lower = title.lowercased()
         if looksLikeMerchantRefundTitle(lower) { return true }
         if lower.contains("reimbursement") || lower.contains("reimburse") { return true }
@@ -633,6 +661,9 @@ enum PlaidCategoryMapper {
         if looksLikeTaxRefund(title: name, primary: primary, detailed: detailed) {
             return "Other Income"
         }
+        if looksLikeCashRewards(name) {
+            return "Rewards"
+        }
         if !primary.hasPrefix("INCOME"), !detailed.hasPrefix("INCOME"), looksLikePersonToPerson(name) {
             return KnownCategory.personToPerson.rawValue
         }
@@ -652,6 +683,9 @@ enum PlaidCategoryMapper {
         if lower.contains("direct deposit") || lower.contains("dir dep") || lower.contains("dir.dep")
             || lower.contains("dirdep") || detailed.contains("DIRECT_DEPOSIT") {
             return "Direct Deposit"
+        }
+        if looksLikeDeposit(title: name, detailed: detailed) {
+            return "Deposit"
         }
         return "Other Income"
     }

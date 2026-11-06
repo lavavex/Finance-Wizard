@@ -145,6 +145,29 @@ final class ClassifierTaxonomyTests: XCTestCase {
         }
     }
 
+    func testRewardRowMovesFromRefundsToIncome() throws {
+        let container = try SharedStore.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+        let row = Transaction(
+            transactionId: "reward",
+            title: "Cash Redemption",
+            amount: 40,
+            date: Date(),
+            category: KnownCategory.refund.rawValue,
+            paymentMethod: "Example Card ···1234"
+        )
+        context.insert(row)
+
+        PlaidSyncEngine.moveRewardToIncome(row, modelContext: context)
+        try context.save()
+
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Transaction>()).isEmpty)
+        let income = try XCTUnwrap(context.fetch(FetchDescriptor<Income>()).first)
+        XCTAssertEqual(income.amount, 40)
+        XCTAssertEqual(income.category, "Rewards")
+        XCTAssertEqual(income.accountMask, "1234")
+    }
+
     func testBalanceTransferAndPersonToPersonSpendTotals() {
         XCTAssertTrue(TransactionAnalytics.isExcludedFromSpendCategory(KnownCategory.balanceTransfer.rawValue))
         XCTAssertFalse(TransactionAnalytics.isExcludedFromSpendCategory(KnownCategory.personToPerson.rawValue))
