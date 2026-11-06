@@ -498,9 +498,11 @@ struct UnifiedCardLabel: View {
                         }
                     }
                     if let due = credit.nextPaymentDueDate {
-                        Text("·")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                        if credit.minimumPaymentAmount != nil {
+                            Text("·")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
                         if credit.isOverdue == true {
                             Text("Overdue")
                                 .font(.caption.weight(.semibold))
@@ -527,7 +529,7 @@ struct UnifiedCardLabel: View {
                     Text("·")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
-                    Text("\(row.transactionCount)")
+                    Text(row.transactionCount == 1 ? "1 charge" : "\(row.transactionCount) charges")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

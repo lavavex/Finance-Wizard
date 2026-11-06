@@ -36,7 +36,7 @@ FinanceWizard/                 Main app (SwiftUI + Plaid client)
     Accounts/                  Accounts hub, card detail, payoff plans, accounts board model
     Budget/                    Monthly budget UI
     Settings/                  Settings, backup, debug export, Debug menu
-    AI/                        On-device Foundation Models (Ask overlay + Settings status)
+    AI/                        On-device Foundation Models (Ask sheet + Settings status)
   Services/                    App-only helpers (classify API stub, logo fetch)
   Plaid/                       Credentials, Link, /transactions/sync, backup wipe
                                (classification lives in Shared/Analytics — see below)

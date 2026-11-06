@@ -87,28 +87,25 @@ struct ContentView: View {
             loadedTabs.insert(.settings)
             selectedTab = .settings
         }
-        // NOTE: an earlier attempt used .safeAreaInset(edge: .bottom) here to avoid the
-        // hard-coded offset. On the iOS 26 floating tab bar that placed the button on top
-        // of the Settings tab item, so it is back to an overlay. The offset clears the
-        // floating bar; the trade-off is that the button still floats over list content.
-        .overlay(alignment: .bottomTrailing) {
+        // The system places this above the tab bar and insets content for it, so Ask never
+        // covers a row, on the bottom bar or the side bar.
+        .tabViewBottomAccessory {
             Button {
                 showAsk = true
             } label: {
-                Image(systemName: "apple.intelligence")
-                    .font(.title)
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.orange, .pink, .purple, .cyan],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                Label {
+                    Text("Ask")
+                } icon: {
+                    Image(systemName: "apple.intelligence")
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.orange, .pink, .purple, .cyan],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
+                }
             }
-            .accessibilityLabel("Ask")
-            .buttonStyle(.glass)
-            .padding(.trailing, 20)
-            .padding(.bottom, 100)
         }
         .sheet(isPresented: $showAsk) {
             OnDeviceAIChatView()

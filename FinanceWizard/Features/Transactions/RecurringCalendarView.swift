@@ -18,7 +18,19 @@ struct RecurringCalendarView: UIViewRepresentable {
         grid.delegate = context.coordinator
         let selection = UICalendarSelectionSingleDate(delegate: context.coordinator)
         grid.selectionBehavior = selection
+        // Without this the calendar keeps its preferred width and clips in a narrow row,
+        // such as beside the side tab bar on iPhone Duo.
+        grid.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return grid
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UICalendarView, context: Context) -> CGSize? {
+        guard let width = proposal.width else { return nil }
+        return CGSize(width: width, height: uiView.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height)
     }
     
     func updateUIView(_ uiView: UICalendarView, context: Context) {
