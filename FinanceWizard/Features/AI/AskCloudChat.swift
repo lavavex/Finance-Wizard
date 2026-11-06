@@ -84,6 +84,11 @@ struct AskCloudTool {
 enum AskCloudChat {
     private static let maxSteps = 6
 
+    /// On-device wording is tuned against its score, and this hint made it pick worse tools there.
+    private static var instructions: String {
+        OnDeviceAI.askInstructions() + "\ngetSpending also returns the largest charges."
+    }
+
     private struct ToolLog {
         var names = Set<String>()
         var outputs: [String] = []
@@ -172,7 +177,7 @@ enum AskCloudChat {
         var body: [String: Any] = [
             "model": model.rawValue,
             "max_tokens": 16000,
-            "system": OnDeviceAI.askInstructions(),
+            "system": instructions,
             "thinking": ["type": "adaptive"],
             "output_config": ["effort": "low"],
             "tools": tools.map {
@@ -239,7 +244,7 @@ enum AskCloudChat {
         session: URLSession
     ) async throws -> String {
         let name = model.name
-        var input: [[String: Any]] = [["role": "system", "content": OnDeviceAI.askInstructions()]]
+        var input: [[String: Any]] = [["role": "system", "content": instructions]]
         input += turns.map { ["role": $0.isUser ? "user" : "assistant", "content": $0.text] }
         input.append(["role": "user", "content": question])
 
