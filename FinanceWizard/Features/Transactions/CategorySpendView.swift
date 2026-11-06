@@ -59,6 +59,15 @@ struct CategorySpendView: View {
                 Text("\(snapshot.transactionCount) transactions · \(snapshot.categories.count) categories")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if snapshot.refunds > 0.005 {
+                    HStack(spacing: 4) {
+                        Text("After refunds of")
+                        MoneyText(snapshot.refunds)
+                        Text("· categories show spending before refunds")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
 
             Section("Chart type") {

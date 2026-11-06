@@ -63,6 +63,9 @@ struct CategorySpendSnapshot {
     let period: SnapshotPeriod
     let isEmptyOrError: Bool
     let message: String?
+    /// Refunds already taken off `totalSpend`. Slices stay before refunds, because a refund
+    /// row doesn't say which category the purchase was in.
+    var refunds: Double = 0
 }
 
 /// One checking/savings (or other cash) account for the balances widget.
@@ -234,6 +237,18 @@ enum TransactionAnalytics {
             || c == "card payments"
     }
 
+    nonisolated static func isRefundCategory(_ category: String) -> Bool {
+        category.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare(refundCategory) == .orderedSame
+    }
+
+    /// Positive dollars returned by merchants and card credits.
+    static func refundTotal(in transactions: [Transaction]) -> Double {
+        transactions
+            .filter { isRefundCategory($0.category) }
+            .reduce(0) { $0 + abs($1.amount) }
+    }
+
     /// Rows that count toward spend / utilization of budget categories.
     static func spendOnly(_ transactions: [Transaction]) -> [Transaction] {
         transactions.filter { !isExcludedFromSpend($0) }
@@ -337,9 +352,10 @@ enum TransactionAnalytics {
         }
     }
 
-    /// Positive dollars spent (excludes credit-card bill payments).
+    /// Positive dollars spent, after refunds (excludes credit-card bill payments). Never negative.
     static func totalSpend(in transactions: [Transaction]) -> Double {
-        spendOnly(transactions).reduce(0) { $0 + abs($1.amount) }
+        let spent = spendOnly(transactions).reduce(0) { $0 + abs($1.amount) }
+        return max(0, spent - refundTotal(in: transactions))
     }
 
     /// Signed balance of spend rows only (bill payments excluded).
@@ -461,19 +477,20 @@ enum TransactionAnalytics {
         }
 
         let categories = categorySummaries(from: spendRows, categoryLimit: categoryLimit)
-        let sliceTotal = categories.reduce(0.0) { $0 + $1.spent }
 
         return CategorySpendSnapshot(
             categories: categories,
-            totalSpend: sliceTotal,
+            totalSpend: index.totalSpend,
             transactionCount: spendRows.count,
             period: period,
             isEmptyOrError: false,
-            message: nil
+            message: nil,
+            refunds: index.refundTotal
         )
     }
 
-    /// Per-card spend (already period-filtered). `excludedCards` omits from the breakdown only.
+    /// Per-card spend after that card's refunds (already period-filtered).
+    /// `excludedCards` omits from the breakdown only.
     static func cardSummaries(
         from transactions: [Transaction],
         excludedCards: Set<String> = [],
@@ -487,6 +504,13 @@ enum TransactionAnalytics {
             let card = cardName(for: transaction)
             spent[card, default: 0] += abs(transaction.amount)
             counts[card, default: 0] += 1
+        }
+        for refund in excludingCards(transactions, excludedCards: excludedCards)
+        where isRefundCategory(refund.category) {
+            let card = cardName(for: refund)
+            if let amount = spent[card] {
+                spent[card] = max(0, amount - abs(refund.amount))
+            }
         }
 
         var list = spent.map { name, amount in
@@ -539,7 +563,7 @@ enum TransactionAnalytics {
         }
 
         let cards = cardSummaries(
-            from: index.spendTransactions,
+            from: index.periodTransactions,
             excludedCards: excludedCards,
             cardLimit: cardLimit
         )

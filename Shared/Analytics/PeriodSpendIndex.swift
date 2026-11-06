@@ -17,11 +17,14 @@ struct PeriodSpendIndex {
     let periodTransactions: [Transaction]
     /// Period rows that count as spend (bill-pay categories excluded).
     let spendTransactions: [Transaction]
-    /// Sum of abs(amount) on spend rows (always positive dollars spent).
-    let totalSpend: Double
-    /// Signed sum on spend rows (keeps refunds negative if present).
+    /// Sum of abs(amount) on spend rows, before refunds.
+    let grossSpend: Double
+    /// Refund rows in the period, as positive dollars.
+    let refundTotal: Double
+    /// Dollars spent after refunds. Never negative.
+    var totalSpend: Double { max(0, grossSpend - refundTotal) }
 
-    /// Spend dollars + count per payment method (period spend only).
+    /// Spend dollars after refunds + spend row count per payment method.
     let spendByMethod: [String: MethodTotals]
     /// Period spend transactions grouped by payment method.
     let spendTxsByMethod: [String: [Transaction]]
@@ -52,7 +55,9 @@ struct PeriodSpendIndex {
         var spendByMethod: [String: MethodTotals] = [:]
         var spendTxsByMethod: [String: [Transaction]] = [:]
         var allKnown = Set<String>()
-        var totalSpend = 0.0
+        var grossSpend = 0.0
+        var refundTotal = 0.0
+        var refundsByMethod: [String: Double] = [:]
 
         for tx in transactions {
             allKnown.insert(TransactionAnalytics.cardName(for: tx))
@@ -61,11 +66,15 @@ struct PeriodSpendIndex {
         for tx in periodTxs {
             let method = TransactionAnalytics.cardName(for: tx)
             allKnown.insert(method)
+            if TransactionAnalytics.isRefundCategory(tx.category) {
+                refundTotal += abs(tx.amount)
+                refundsByMethod[method, default: 0] += abs(tx.amount)
+            }
             guard !TransactionAnalytics.isExcludedFromSpend(tx) else { continue }
 
             spendTxs.append(tx)
             let dollars = abs(tx.amount)
-            totalSpend += dollars
+            grossSpend += dollars
 
             var totals = spendByMethod[method] ?? MethodTotals(spend: 0, count: 0)
             totals.spend += dollars
@@ -74,12 +83,19 @@ struct PeriodSpendIndex {
             spendTxsByMethod[method, default: []].append(tx)
         }
 
+        for (method, refunds) in refundsByMethod {
+            if let spent = spendByMethod[method]?.spend {
+                spendByMethod[method]?.spend = max(0, spent - refunds)
+            }
+        }
+
         return PeriodSpendIndex(
             period: period,
             referenceDate: referenceDate,
             periodTransactions: periodTxs,
             spendTransactions: spendTxs,
-            totalSpend: totalSpend,
+            grossSpend: grossSpend,
+            refundTotal: refundTotal,
             spendByMethod: spendByMethod,
             spendTxsByMethod: spendTxsByMethod,
             allKnownMethods: allKnown

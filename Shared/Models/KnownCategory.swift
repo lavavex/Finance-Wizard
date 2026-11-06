@@ -91,7 +91,7 @@ enum KnownCategory: String, CaseIterable, Identifiable, Codable {
         case .fees: return "Bank fees, ATM, late fees"
         case .miscellaneous: return "Everything else"
         case .loan: return "My Loan / cash from a card’s credit line (not spend)"
-        case .refund: return "Card credits and merchant refunds (not earnings)"
+        case .refund: return "Card credits and merchant refunds (reduce Total Spend)"
         case .installment: return "Monthly installment billings (not new spend)"
         case .balanceTransfer: return "Debt moved between cards (not spend)"
         case .creditCardPayment: return "Card bill payments (not spend)"

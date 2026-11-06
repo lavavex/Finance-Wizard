@@ -470,7 +470,9 @@ struct TransactionDetailView: View {
                 saveStatusMessage = "Saved as Credit Card Payment (excluded from Total Spend)."
             } else if TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
                 // Loan / Refund / Installment are excluded too, but they are not payments.
-                saveStatusMessage = "Saved as \(trimmedCategory) (excluded from Total Spend)."
+                saveStatusMessage = TransactionAnalytics.isRefundCategory(trimmedCategory)
+                    ? "Saved as \(trimmedCategory) (reduces Total Spend)."
+                    : "Saved as \(trimmedCategory) (excluded from Total Spend)."
             } else if localExtra > 0 {
                 saveStatusMessage = "Saved. Updated \(localExtra + 1) transactions on this card."
             } else {

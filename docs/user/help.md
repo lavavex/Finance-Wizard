@@ -97,7 +97,7 @@ Auto-detect looks for the **same amount** on a schedule, so a bill that changes 
 
 ## Total Income looks too high
 
-**Total Income** is paychecks, direct deposits, and interest — not merchant refunds, card credits, rewards, loan proceeds, or money from people. Refunds and reimbursements stay in the expense list as **Refund** (excluded from spend). Money from Zelle, Venmo, and similar apps is listed as **Person to Person**. A one-off bonus still counts as income.
+**Total Income** is paychecks, direct deposits, and interest — not merchant refunds, card credits, rewards, loan proceeds, or money from people. Refunds and reimbursements stay in the expense list as **Refund**, which reduces Total Spend. Money from Zelle, Venmo, and similar apps is listed as **Person to Person**. A one-off bonus still counts as income.
 
 ## A category looks wrong
 

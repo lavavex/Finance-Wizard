@@ -38,7 +38,7 @@ Tap a row for **Transaction** detail. You can change the **category** and **paym
 
 **Credit Card Payment** (shown as “Bill pay”) is a payment to a card, not a purchase. It stays in the list but is **not** in Total Spend, charts, or widgets. It also shows under Accounts → Total paid. Checking ACH and the card’s “Thank You” are the **same** payment — Total paid counts it once even if the bank posts them a day or two apart.
 
-**Refund** / **Loan** / **Installment** also stay in the list but are **not** Total Spend or Total Income. Card statement credits (travel credit, merchant returns) and My Loan deposits to checking are not paychecks. Issuer **installment** billing (My Chase Plan, Amex Plan It) is the billing of a purchase already in the list — use **Pay over time…** if you want them on Recurring.
+**Loan** / **Installment** also stay in the list but are **not** Total Spend or Total Income. **Refund** rows aren’t income, and they reduce **Total Spend** in the month they post. Budget categories and charts show what you spent before refunds. Card statement credits (travel credit, merchant returns) and My Loan deposits to checking are not paychecks. Issuer **installment** billing (My Chase Plan, Amex Plan It) is the billing of a purchase already in the list — use **Pay over time…** if you want them on Recurring.
 
 ## Accounts
 
