@@ -477,11 +477,14 @@ struct CardDetailView: View {
             ?? rawPaymentMethod
         // Empty or unchanged → store nil (use bank name).
         let custom: String? = (value.isEmpty || value == plaidFallback) ? nil : value
-        CardLabelStore.setLabel(
-            custom,
-            accountId: account?.accountId,
-            paymentMethod: rawPaymentMethod
-        )
+        // Nicknames persist outside the store, and sample cards shouldn't leave any behind.
+        if !DemoMode.isActive {
+            CardLabelStore.setLabel(
+                custom,
+                accountId: account?.accountId,
+                paymentMethod: rawPaymentMethod
+            )
+        }
         titleName = custom ?? plaidFallback
         nicknameDraft = titleName
         didSaveNickname = true

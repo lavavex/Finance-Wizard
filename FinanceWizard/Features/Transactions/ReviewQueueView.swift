@@ -152,7 +152,7 @@ struct ReviewQueueView: View {
             row.categoryLocked = true
             row.overrideSource = "user"
         }
-        for (title, name) in suggestions {
+        for (title, name) in suggestions where !DemoMode.isActive {
             VendorRulesStore.upsert(vendor: title, paymentMethod: nil, category: name)
         }
         let count = suggestions.count

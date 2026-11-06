@@ -450,7 +450,7 @@ struct TransactionDetailView: View {
             // merely opening a Miscellaneous row and tapping Save wrote a permanent
             // vendor+card → Miscellaneous rule that then beat Plaid's PFC on every future
             // row, with no UI to remove it.
-            if learn, categoryChanged, !TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
+            if learn, !DemoMode.isActive, categoryChanged, !TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
                 VendorRulesStore.upsert(
                     vendor: transaction.title,
                     paymentMethod: cardScoped ? transaction.paymentMethod : nil,

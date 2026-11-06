@@ -11,6 +11,7 @@
 import SwiftUI
 
 struct OnboardingView: View {
+    @Environment(\.sampleData) private var sampleData
     @State private var isLifted = false
     @AppStorage(OnboardingStore.storageKey) private var hasCompleted = false
 
@@ -100,7 +101,11 @@ struct OnboardingView: View {
                 // color contrasts both schemes; .colorInvert() only “fixes” one.
                 .foregroundStyle(Color(.systemBackground))
                 .padding(.horizontal, 40)
-                .padding(.bottom, 8)
+
+                Button("Try with Sample Data") { sampleData.start() }
+                    .font(.subheadline.weight(.medium))
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
             } else {
                 Spacer()
             }

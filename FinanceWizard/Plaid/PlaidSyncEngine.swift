@@ -110,6 +110,7 @@ enum PlaidSyncEngine {
         forceRefresh: Bool = false,
         progress: ((String) -> Void)? = nil
     ) async throws -> PlaidSyncReport {
+        guard !DemoMode.isActive else { throw DemoMode.blockedError }
         try PlaidCredentialsStore.requireConfigured()
         guard !isSyncRunning else {
             throw PlaidAPIError.http(status: 0, code: nil, message: "A sync is already running.")

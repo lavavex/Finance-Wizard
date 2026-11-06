@@ -194,6 +194,8 @@ struct AllTransactionsView: View {
     }
 
     /// A sentence rather than a keyword, which the plain search can't read.
+    @Environment(\.sampleData) private var sampleData
+
     private var aiSearchQuery: String? {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard query.split(separator: " ").count >= 3,
@@ -204,6 +206,10 @@ struct AllTransactionsView: View {
     var body: some View {
         NavigationStack {
             List {
+                if sampleData.isActive {
+                    SampleDataBanner()
+                }
+
                 if let aiSearchQuery {
                     Section {
                         NavigationLink {
@@ -379,6 +385,7 @@ struct AllTransactionsView: View {
                 prompt: "Title, category, amount, last 4"
             )
             .refreshable {
+                guard !sampleData.isActive else { return }
                 await syncFromPlaid(resetCursors: false)
             }
             .task {
@@ -399,6 +406,7 @@ struct AllTransactionsView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
+                    if !sampleData.isActive {
                     if isSyncing {
                         ProgressView()
                     } else {
@@ -429,7 +437,9 @@ struct AllTransactionsView: View {
                         }
                         .disabled(isSyncing)
                     }
+                    }
                 }
+
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     PeriodFilterMenu(
                         period: $period,

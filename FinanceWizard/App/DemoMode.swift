@@ -2,21 +2,35 @@
 //  DemoMode.swift
 //  Finance Wizard
 //
-//  Debug-only launch options for repeatable Simulator screenshots (scripts/sim-shot.sh).
-//  `-demoData YES` opens an in-memory store seeded with made-up rows, so the App Group
-//  database is never read or written. `-screen <tab>` picks the tab shown at launch.
+//  An in-memory store seeded with made-up rows, so the App Group database is never read or
+//  written. Backs "Try with sample data". Debug builds can also open it at launch for repeatable
+//  Simulator screenshots (scripts/sim-shot.sh): `-demoData YES` turns it on, and `-screen <tab>`
+//  picks the tab shown at launch.
 //
 
-#if DEBUG
 import Foundation
 import SwiftData
 
 enum DemoMode {
+    #if DEBUG
     /// Launch arguments land in UserDefaults' volatile argument domain, so nothing persists.
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: "demoData") }
 
     /// Raw `-screen` value (see `AppTab`).
     static var launchScreen: String? { UserDefaults.standard.string(forKey: "screen") }
+    #else
+    static let isEnabled = false
+    #endif
+
+    /// Set while the user is in "Try with sample data". Never saved, so a relaunch returns to real data.
+    static var isSampleActive = false
+
+    static var isActive: Bool { isEnabled || isSampleActive }
+
+    /// For anything that would change bank links, keys, or backups, none of which sample data has.
+    static var blockedError: Error {
+        PlaidAPIError.http(status: 0, code: nil, message: "Exit sample data in Settings to do this.")
+    }
 
     static func makeSeededContainer() throws -> ModelContainer {
         let container = try SharedStore.makeContainer(inMemory: true)
@@ -176,4 +190,3 @@ enum DemoMode {
         return calendar.date(byAdding: .day, value: -daysAgo, to: noon) ?? noon
     }
 }
-#endif

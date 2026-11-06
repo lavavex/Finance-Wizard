@@ -61,10 +61,8 @@ extension PlaidSyncEngine {
     @MainActor
     @discardableResult
     static func pruneOrphanBankAccounts(modelContext: ModelContext) -> Int {
-        #if DEBUG
         // Demo accounts belong to no linked Item.
-        if DemoMode.isEnabled { return 0 }
-        #endif
+        if DemoMode.isActive { return 0 }
         let linkedIds = PlaidItemStore.linkedItemIDs
         let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         var removed = 0

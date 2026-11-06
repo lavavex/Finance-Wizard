@@ -12,9 +12,10 @@ import SwiftUI
 
 struct OnboardingGate: View {
     @AppStorage(OnboardingStore.storageKey) private var hasCompleted = false
+    @Environment(\.sampleData) private var sampleData
 
     var body: some View {
-        if hasCompleted {
+        if hasCompleted || sampleData.isActive {
             ContentView()
         } else {
             OnboardingView()

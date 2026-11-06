@@ -83,6 +83,7 @@ enum PlaidConnectionBackup {
     /// Public for wipe-then-restore and the Debug menu. Does not touch the Plaid Dashboard.
     @MainActor
     static func wipeLocalAppData(modelContext: ModelContext) throws {
+        guard !DemoMode.isActive else { throw DemoMode.blockedError }
         try wipeBackedUpData(modelContext: modelContext)
         AskStore.wipe()
     }
@@ -242,6 +243,7 @@ enum PlaidConnectionBackup {
 
     @MainActor
     static func exportEncryptedFile(password: String, modelContext: ModelContext) throws -> URL {
+        guard !DemoMode.isActive else { throw DemoMode.blockedError }
         try validatePassword(password)
         let payload = try capturePayload(modelContext: modelContext)
         let data = try encrypt(payload: payload, password: password)
@@ -260,6 +262,7 @@ enum PlaidConnectionBackup {
     // MARK: Decrypt only (for plan preview)
 
     static func decryptPayload(from url: URL, password: String) throws -> Payload {
+        guard !DemoMode.isActive else { throw DemoMode.blockedError }
         try validatePassword(password)
         let accessed = url.startAccessingSecurityScopedResource()
         defer {

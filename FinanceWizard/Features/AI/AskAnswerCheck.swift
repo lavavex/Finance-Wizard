@@ -11,7 +11,7 @@ import Foundation
 enum AskAnswerCheck {
     /// Dollar amounts in the answer that don't match any fact.
     static func unverifiedAmounts(in answer: String, facts: [String]) -> [Double] {
-        let known = facts.flatMap(numbers)
+        let known = facts.flatMap { numbers(in: $0) }
         return dollarAmounts(in: answer).filter { amount in
             !known.contains { matches(amount, fact: $0) }
         }

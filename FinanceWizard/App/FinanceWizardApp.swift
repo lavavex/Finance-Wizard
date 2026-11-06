@@ -12,6 +12,8 @@ import SwiftData
 @main
 struct FinanceWizardApp: App {
     private let container: ModelContainer
+    /// Replaces `container` while "Try with sample data" is on.
+    @State private var sampleContainer: ModelContainer?
 
     init() {
         PlaidConnectionBackup.purgeTemporaryFiles()
@@ -41,12 +43,32 @@ struct FinanceWizardApp: App {
     var body: some Scene {
         WindowGroup {
             RootWithSplash()
+                // A new identity, so no screen keeps rows from the other store.
+                .id(sampleContainer == nil)
+                .modelContainer(sampleContainer ?? container)
+                .environment(\.sampleData, SampleDataControl(
+                    isActive: sampleContainer != nil,
+                    start: startSampleData,
+                    exit: exitSampleData
+                ))
                 // Files / iCloud / “Open in Finance Wizard” for .fwbackup documents.
                 .onOpenURL { url in
                     handleIncomingBackupURL(url)
                 }
         }
-        .modelContainer(container)
+    }
+
+    private func startSampleData() {
+        guard let seeded = try? DemoMode.makeSeededContainer() else { return }
+        DemoMode.isSampleActive = true
+        AskStore.useSampleChat(true)
+        sampleContainer = seeded
+    }
+
+    private func exitSampleData() {
+        DemoMode.isSampleActive = false
+        AskStore.useSampleChat(false)
+        sampleContainer = nil
     }
 
     /// Materialize a security-scoped document and hand it to Settings restore flow.

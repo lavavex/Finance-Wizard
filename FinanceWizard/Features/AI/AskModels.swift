@@ -49,8 +49,9 @@ final class AskTurn {
 }
 
 enum AskStore {
-    static let container: ModelContainer = {
-        let schema = Schema([AskThread.self, AskTurn.self])
+    private static let schema = Schema([AskThread.self, AskTurn.self])
+
+    private static let savedChat: ModelContainer = {
         let configuration = ModelConfiguration("AskChat", schema: schema)
         do {
             return try ModelContainer(for: schema, configurations: [configuration])
@@ -58,6 +59,16 @@ enum AskStore {
             fatalError("Ask chat store failed: \(error)")
         }
     }()
+
+    private static var sampleChat: ModelContainer?
+
+    static var container: ModelContainer { sampleChat ?? savedChat }
+
+    /// Sample questions stay out of the saved chat, and clearing them can't touch it.
+    static func useSampleChat(_ on: Bool) {
+        let memory = ModelConfiguration("AskChatSample", schema: schema, isStoredInMemoryOnly: true)
+        sampleChat = on ? try? ModelContainer(for: schema, configurations: [memory]) : nil
+    }
 
     static func wipe() {
         let context = ModelContext(container)

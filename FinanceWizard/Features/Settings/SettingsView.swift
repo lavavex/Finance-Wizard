@@ -42,10 +42,16 @@ struct SettingsView: View {
     @State private var restorePolicy: PlaidConnectionBackup.RestorePolicy = .safeMerge
 
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
+    @Environment(\.sampleData) private var sampleData
+    @State private var showsDeveloperTools = false
 
     var body: some View {
         NavigationStack {
             Form {
+                if sampleData.isActive {
+                    SampleDataBanner()
+                }
+
                 // MARK: Screenshot privacy
                 Section {
                     Toggle(isOn: $screenshotPrivacy) {
@@ -55,6 +61,8 @@ struct SettingsView: View {
                     Text("Privacy")
                 }
 
+                // Sample data has no keys, banks, or backups of its own.
+                if !sampleData.isActive {
                 // MARK: Credentials
                 Section {
                     TextField("client_id", text: $clientID)
@@ -111,6 +119,7 @@ struct SettingsView: View {
                     if linkedItems.isEmpty {
                         Text("No banks linked yet.")
                             .foregroundStyle(.secondary)
+                        Button("Try with Sample Data") { sampleData.start() }
                     } else {
                         ForEach(linkedItems) { item in
                             HStack(spacing: 12) {
@@ -226,6 +235,8 @@ struct SettingsView: View {
                     Text("Backup & restore")
                 }
 
+                }
+
                 if let statusMessage {
                     Section {
                         Text(statusMessage)
@@ -248,6 +259,7 @@ struct SettingsView: View {
                         }
                     }
 
+                    if showsDeveloperTools, !sampleData.isActive {
                     Button {
                         showDebugExportConfirm = true
                     } label: {
@@ -261,6 +273,7 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(isExportingDebug)
+                    }
                 } header: {
                     Text("About")
                 }
@@ -283,17 +296,20 @@ struct SettingsView: View {
                     Text("Optional models for Ask, using your own API keys. Choosing one sends your financial data to that company.")
                 }
 
-                Section {
-                    NavigationLink {
-                        DebugMenuView()
-                    } label: {
-                        Label("Debug", systemImage: "ant")
+                if showsDeveloperTools, !sampleData.isActive {
+                    Section {
+                        NavigationLink {
+                            DebugMenuView()
+                        } label: {
+                            Label("Debug", systemImage: "ant")
+                        }
+                    } header: {
+                        Text("Developer")
                     }
-                } header: {
-                    Text("Developer")
                 }
             }
             .navigationTitle("Settings")
+            .task { showsDeveloperTools = await DeveloperTools.isAvailable() }
             .onAppear {
                 reload()
                 consumeIncomingBackupIfNeeded()

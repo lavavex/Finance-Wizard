@@ -79,6 +79,10 @@ After at least one Sync:
 3. Add **Total Spend**, **Spend by Category**, and/or **Balances**
 4. Long-press a widget → **Edit Widget** for week vs month (where available)
 
+## Just looking?
+
+Tap **Try with Sample Data** on the Welcome screen, or in **Settings → Linked banks**, to explore with made-up numbers and no Plaid keys. **Exit Sample Data** returns you to your real data, and so does closing the app.
+
 ## 7. Privacy and backup
 
 - **Settings → Hide for screenshots** — masks dollar amounts and card last-four if you share a picture of the app.
