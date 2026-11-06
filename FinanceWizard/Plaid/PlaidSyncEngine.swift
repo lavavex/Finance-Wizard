@@ -188,6 +188,11 @@ enum PlaidSyncEngine {
         }
 
         relabelPayrollDeposits(modelContext: modelContext)
+        // Every Item synced without a failure, so a re-linked bank's rows are all back.
+        if PlaidItemStore.needsIncomeDedupe, !report.itemLines.contains(where: { $0.hasSuffix(": failed") }) {
+            dedupeIncome(modelContext: modelContext)
+            PlaidItemStore.needsIncomeDedupe = false
+        }
 
         let plans = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
         let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []

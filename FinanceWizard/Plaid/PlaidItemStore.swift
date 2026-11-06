@@ -85,6 +85,20 @@ enum PlaidItemStore {
         }
     }
 
+    /// Ids of linked Items, without reading the Keychain. Use this to decide whether a bank is
+    /// linked: a token read can fail for a moment, and that doesn't unlink anything.
+    static var linkedItemIDs: Set<String> {
+        Set(loadMetas().map(\.id))
+    }
+
+    /// Set when a bank is linked again as a new Item, so its transactions return under new ids.
+    private static let incomeDedupeKey = "plaid.incomeDedupeNeeded"
+
+    static var needsIncomeDedupe: Bool {
+        get { UserDefaults.standard.bool(forKey: incomeDedupeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: incomeDedupeKey) }
+    }
+
     /// Insert or replace an item by id. The token is written first, so a Keychain failure
     /// throws without recording a bank that has no token.
     static func upsert(_ item: PlaidLinkedItem) throws {

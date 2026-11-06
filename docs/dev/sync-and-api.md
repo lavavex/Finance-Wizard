@@ -113,6 +113,7 @@ Plaid amount convention:
 - **Category** from `personal_finance_category` (mapped to Dining, Gas, …) unless a local learn rule or lock applies.  
 - **Payment method** from account name + mask (e.g. `Checking ···0000`) or institution name.  
 - **Transfers** (savings ↔ checking, internal moves) are **skipped** — never enter spend or income.  
+- **Clean-up** treats a bank as linked if its metadata exists, so a failed Keychain read can't remove accounts. Duplicate income is removed only on the first complete Sync after a bank is linked again as a new Item, because identical deposits can be real.  
 - **Person to Person** rows (Zelle, Venmo, Cash App, Square Cash, PayPal, Apple Cash) are kept. Money sent counts as spend in the **Person to Person** category. Money received is listed under Income but isn't part of Total Income.  
 - **Balance transfers** on a card are filed as **Balance Transfer**, excluded from spend. Their fees stay in **Fees**.  
 - **Payroll:** after each Sync, a paycheck-sized deposit from a source Plaid has tagged as salary or wages elsewhere is labeled **Payroll**, because Plaid can tag an employer that's also a merchant as a purchase.  

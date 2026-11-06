@@ -126,6 +126,27 @@ final class SyncAndStoreTests: XCTestCase {
         XCTAssertEqual(balances["new"], 40)
     }
 
+    // MARK: - Cleanup
+
+    func testRoutineCleanupKeepsTwoRealDepositsWithTheSameDetails() throws {
+        let day = Date(timeIntervalSince1970: 1_790_000_000)
+        for id in ["first", "second"] {
+            context.insert(Income(
+                transactionId: id,
+                source: "Venmo",
+                amount: 20,
+                date: day,
+                category: KnownCategory.personToPerson.rawValue,
+                accountMask: "1111"
+            ))
+        }
+        try context.save()
+
+        PlaidSyncEngine.cleanupStaleBankAccounts(modelContext: context)
+
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Income>()), 2)
+    }
+
     // MARK: - Unreadable store
 
     func testMoveStoreAsideKeepsFilesAndReplacesOlderCopy() throws {

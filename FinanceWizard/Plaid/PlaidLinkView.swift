@@ -286,6 +286,7 @@ struct PlaidLinkSheet: View {
                 PlaidItemStore.remove(itemID: old.id)
             }
             if !replacedItemIds.isEmpty {
+                PlaidItemStore.needsIncomeDedupe = true
                 NotificationCenter.default.post(
                     name: .plaidItemsReplaced,
                     object: nil,

@@ -61,7 +61,11 @@ extension PlaidSyncEngine {
     @MainActor
     @discardableResult
     static func pruneOrphanBankAccounts(modelContext: ModelContext) -> Int {
-        let linkedIds = Set(PlaidItemStore.loadItems().map(\.id))
+        #if DEBUG
+        // Demo accounts belong to no linked Item.
+        if DemoMode.isEnabled { return 0 }
+        #endif
+        let linkedIds = PlaidItemStore.linkedItemIDs
         let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         var removed = 0
         for account in all {
@@ -77,7 +81,7 @@ extension PlaidSyncEngine {
     @MainActor
     @discardableResult
     static func dedupeBankAccounts(modelContext: ModelContext) -> Int {
-        let linkedIds = Set(PlaidItemStore.loadItems().map(\.id))
+        let linkedIds = PlaidItemStore.linkedItemIDs
         let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         var groups: [String: [BankAccount]] = [:]
         for account in all {
@@ -122,8 +126,7 @@ extension PlaidSyncEngine {
         // Relink creates new Plaid transaction_ids for the same real-world spend;
         // remove content duplicates left after the old Item was dropped.
         let c = dedupeTransactions(modelContext: modelContext)
-        let d = dedupeIncome(modelContext: modelContext)
-        return a + b + c + d
+        return a + b + c
     }
 
     // MARK: - Transaction / income content dedupe
@@ -176,6 +179,8 @@ extension PlaidSyncEngine {
     }
 
     /// Same day + amount + source (+ account mask when present) → keep one income row.
+    /// Income rows don't record their Plaid account, so this can't tell a re-delivered row from
+    /// two real deposits. Only run it after a bank was linked again as a new Item.
     @MainActor
     @discardableResult
     static func dedupeIncome(modelContext: ModelContext) -> Int {
