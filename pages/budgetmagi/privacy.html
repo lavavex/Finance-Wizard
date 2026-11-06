@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Budget Magi Privacy Policy</title>
+  <style>
+    :root { color-scheme: dark light; --bg: #0a0a0a; --fg: #f5f5f5; --muted: #a1a1a6; --accent: #3b9eff; }
+    @media (prefers-color-scheme: light) { :root { --bg: #f2f2f7; --fg: #1c1c1e; --muted: #6c6c70; } }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--fg); padding: 32px 16px 64px; line-height: 1.55; }
+    main { max-width: 680px; margin: 0 auto; }
+    h1 { font-size: 1.9rem; margin: 0 0 4px; }
+    h2 { font-size: 1.15rem; margin: 32px 0 8px; }
+    p, li { color: var(--fg); }
+    .muted { color: var(--muted); }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy</h1>
+  <p class="muted">Budget Magi. Effective March 20, 2026</p>
+
+  <p>Budget Magi is a personal finance app. Your financial data is kept on your device. The developer has no server that receives your transactions, balances, questions, or API keys, and the app contains no analytics, advertising, or tracking.</p>
+
+  <h2>What the app stores on your device</h2>
+  <ul>
+    <li>Transactions, income, card payments, balances, and account names with their last four digits, downloaded from your linked banks through Plaid</li>
+    <li>Budgets, payoff plans, category changes, and card nicknames you enter</li>
+    <li>Your Ask chat history</li>
+    <li>Your Plaid keys, bank access tokens, and any Anthropic or xAI API keys, in the iOS Keychain on this device</li>
+  </ul>
+  <p>Home screen widgets read the same on-device data. If you use iCloud or computer backups of your iPhone, those backups can include the app's data, except Keychain items, which are limited to this device.</p>
+
+  <h2>When data leaves your device</h2>
+
+  <p><strong>Plaid (if you link a bank).</strong> Budget Magi connects to your bank through Plaid using Plaid keys from your own Plaid account. You sign in to your bank inside Plaid Link, and the app never sees your bank username or password. The app requests transactions and, where supported, credit card details such as due dates and interest rates. Plaid handles this data under its <a href="https://plaid.com/legal/#end-user-privacy-policy">End User Privacy Policy</a>.</p>
+
+  <p><strong>Anthropic and xAI (only if you choose them).</strong> Ask can use Claude from Anthropic or Grok from xAI, using your own API key. Nothing is sent until you add a key and agree. When you ask one of these models a question, the app sends that company your question, recent questions and answers in the chat, and the data needed to answer: merchant names, amounts, dates, categories, banks, account names with their last four digits, balances, and budget figures. Bank logins and Plaid keys are never sent. Each company handles this data under its own terms and your API account: <a href="https://www.anthropic.com/legal/privacy">Anthropic's privacy policy</a> and <a href="https://x.ai/legal/privacy-policy">xAI's privacy policy</a>.</p>
+
+  <p><strong>Apple Intelligence.</strong> The On-device model, the "Why?" summaries, AI search, and category suggestions use Apple's on-device model. That data stays on your device.</p>
+
+  <p><strong>Webhook and redirect.</strong> When you link a bank, Plaid is told to send status notifications to a small service run by the developer on Cloudflare. It acknowledges each notification and discards it without reading, logging, or storing it. These notifications contain identifiers such as a Plaid item ID, not your transactions. After some bank logins, your browser may also briefly visit a page on budgetmagi.pages.dev that returns you to the app. Cloudflare, which runs both, may process technical data such as IP addresses under its own policies.</p>
+
+  <p><strong>Backups you create.</strong> A Budget Magi backup is a file encrypted with a password you choose. It includes your keys, bank access tokens, and data. It goes only where you save or share it. The developer can't read it or recover a lost password.</p>
+
+  <h2>What the developer receives</h2>
+  <p>Nothing about your finances. If you email for support, the developer receives what you choose to send. Don't include API keys or backup passwords.</p>
+
+  <h2>Deleting your data</h2>
+  <ul>
+    <li>Remove a bank in Settings to delete its access token from the device. You can also remove it from your Plaid account.</li>
+    <li>Remove an Anthropic or xAI key in Settings → Cloud AI, which also withdraws your agreement to send data to that company.</li>
+    <li>Clear chat history with the Clear chat button in Ask.</li>
+    <li>Use Settings → Erase All Data to delete all of the app's data on this device, including banks and keys. It asks you to type DELETE first.</li>
+    <li>Deleting the app removes its data from this device. iOS can keep Keychain items after an app is deleted, so remove your banks and keys in the app first.</li>
+    <li>To delete data already held by Plaid, Anthropic, or xAI, contact that company or use your account with them.</li>
+  </ul>
+
+  <h2>Children</h2>
+  <p>Budget Magi isn't directed to children under 13, and the developer doesn't knowingly collect their information.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes, the new version will be posted here with a new effective date.</p>
+
+  <h2>Contact</h2>
+  <p><a href="mailto:magisupport@roberth.net">magisupport@roberth.net</a></p>
+</main>
+</body>
+</html>
