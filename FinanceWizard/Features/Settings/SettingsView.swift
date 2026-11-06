@@ -272,6 +272,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    ForEach(AskProvider.allCases) { provider in
+                        NavigationLink(provider.name) {
+                            AskProviderSetupView(provider: provider)
+                        }
+                    }
+                } header: {
+                    Text("Cloud AI")
+                } footer: {
+                    Text("Optional models for Ask, using your own API keys. Choosing one sends your financial data to that company.")
+                }
+
+                Section {
                     NavigationLink {
                         DebugMenuView()
                     } label: {

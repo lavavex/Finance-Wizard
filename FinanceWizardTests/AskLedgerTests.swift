@@ -237,10 +237,12 @@ final class AskLedgerTests: XCTestCase {
     }
 
     func testFailuresBecomePlainMessages() {
-        let message = AskConversation.message(for: URLError(.notConnectedToInternet))
+        struct Unknown: Error {}
+        XCTAssertTrue(AskConversation.message(for: Unknown()).contains("Apple Intelligence"))
 
-        XCTAssertFalse(message.contains("URLError"))
-        XCTAssertTrue(message.contains("Apple Intelligence"))
+        let offline = AskConversation.message(for: URLError(.notConnectedToInternet))
+        XCTAssertFalse(offline.contains("URLError"))
+        XCTAssertTrue(offline.contains("connection"))
     }
 
     // MARK: - Helpers

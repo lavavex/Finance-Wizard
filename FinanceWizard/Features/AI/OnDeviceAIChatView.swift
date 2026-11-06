@@ -2,7 +2,8 @@
 //  OnDeviceAIChatView.swift
 //  Finance Wizard
 //
-//  On-device Ask chat: streaming and a persisted thread. AskConversation runs the model.
+//  Ask chat: a model menu, streaming, and a persisted thread. AskConversation runs the on-device
+//  model and AskCloudChat runs Claude and Grok.
 //
 
 import SwiftData
@@ -13,6 +14,17 @@ private struct AskBubble: Identifiable {
     let isUser: Bool
     var text: String
     var warning: String?
+    var modelName: String?
+    var seconds: Double?
+    /// Failures show in the chat but aren't sent back to a model.
+    var failed = false
+}
+
+/// What to do once a provider has a key and consent.
+private struct AskSetupRequest: Identifiable {
+    let model: AskModel
+    let tryingQuestion: Bool
+    var id: String { model.id }
 }
 
 struct OnDeviceAIChatView: View {
@@ -27,6 +39,8 @@ struct OnDeviceAIChatView: View {
     @State private var isSending = false
     @State private var thread: AskThread?
     @State private var askContext = ModelContext(AskStore.container)
+    @State private var selectedModel = AskModel.selected
+    @State private var setupRequest: AskSetupRequest?
 
     private let promptHints = [
         "What's my biggest category?",
@@ -34,20 +48,25 @@ struct OnDeviceAIChatView: View {
         "What recurring charges are coming up?",
     ]
 
-    private var availability: OnDeviceAIAvailability { OnDeviceAI.availabilityStatus() }
-
     var body: some View {
         NavigationStack {
-            Group {
-                switch availability {
-                case .available:
-                    chatBody
-                case .unavailable(let reason), .notEnabled(let reason):
-                    ContentUnavailableView(
-                        "On-device AI unavailable",
-                        systemImage: "apple.intelligence.badge.xmark",
-                        description: Text(reason)
-                    )
+            chatBody
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .principal) { modelMenu }
+                }
+        }
+        .sheet(item: $setupRequest) { request in
+            NavigationStack {
+                if let provider = request.model.provider {
+                    AskProviderSetupView(provider: provider) {
+                        finishSetup(request)
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { setupRequest = nil }
+                        }
+                    }
                 }
             }
         }
@@ -55,6 +74,40 @@ struct OnDeviceAIChatView: View {
             loadThread()
             prepareSession()
             await cyclePrompts()
+        }
+    }
+
+    private var modelMenu: some View {
+        Menu {
+            modelButton(.onDevice)
+            ForEach(AskProvider.allCases) { provider in
+                Section(provider.name) {
+                    ForEach(AskModel.allCases.filter { $0.provider == provider }) { model in
+                        modelButton(model)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(selectedModel.name)
+                    .font(.headline)
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(.primary)
+        }
+        .accessibilityLabel("AI model, \(selectedModel.name)")
+    }
+
+    private func modelButton(_ model: AskModel) -> some View {
+        Button {
+            choose(model)
+        } label: {
+            if model == selectedModel {
+                Label(model.name, systemImage: "checkmark")
+            } else {
+                Text(model.name)
+            }
         }
     }
 
@@ -88,9 +141,13 @@ struct OnDeviceAIChatView: View {
                 }
             }
 
-            if !followUps.isEmpty, !isSending {
+            if !isSending, !followUps.isEmpty || !tryModels.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
+                        ForEach(tryModels) { model in
+                            Button("Try with \(model.name)") { tryAgain(with: model) }
+                                .buttonStyle(.borderedProminent)
+                        }
                         ForEach(followUps, id: \.self) { tip in
                             Button(tip) { send(tip) }
                                 .buttonStyle(.bordered)
@@ -136,7 +193,16 @@ struct OnDeviceAIChatView: View {
         HStack {
             if message.isUser { Spacer(minLength: 48) }
             VStack(alignment: .leading, spacing: 6) {
-                Text(message.text)
+                if message.text.isEmpty {
+                    ProgressView()
+                } else {
+                    Text(message.text)
+                }
+                if let caption = caption(for: message) {
+                    Text(caption)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 if let warning = message.warning {
                     Label(warning, systemImage: "exclamationmark.triangle")
                         .font(.caption)
@@ -150,18 +216,68 @@ struct OnDeviceAIChatView: View {
         }
     }
 
+    private func caption(for message: AskBubble) -> String? {
+        guard let name = message.modelName else { return nil }
+        guard let seconds = message.seconds else { return name }
+        return "\(name) · \(seconds.formatted(.number.precision(.fractionLength(1))))s"
+    }
+
+    /// The other models to compare, once the last question has an answer.
+    private var tryModels: [AskModel] {
+        guard let last = messages.last, !last.isUser else { return [] }
+        let answered = AskModel.allCases.first { $0.name == last.modelName } ?? selectedModel
+        return answered.alternatives()
+    }
+
+    private func choose(_ model: AskModel) {
+        guard model.isReady else {
+            setupRequest = AskSetupRequest(model: model, tryingQuestion: false)
+            return
+        }
+        select(model)
+    }
+
+    private func select(_ model: AskModel) {
+        AskModel.selected = model
+        selectedModel = model
+    }
+
+    private func finishSetup(_ request: AskSetupRequest) {
+        setupRequest = nil
+        if request.tryingQuestion {
+            tryAgain(with: request.model)
+        } else {
+            select(request.model)
+        }
+    }
+
     private func send(_ raw: String) {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
         composerFocused = false
         draft = ""
-        followUps = []
-        let history = chatHistory
+        let history = chatHistory(messages)
         messages.append(AskBubble(id: UUID(), isUser: true, text: text))
         persist(text: text, isUser: true)
+        answer(text, history: history, model: selectedModel)
+    }
+
+    /// Asks the last question again on another model, and keeps both answers.
+    private func tryAgain(with model: AskModel) {
+        guard !isSending, let index = messages.lastIndex(where: \.isUser) else { return }
+        guard model.isReady else {
+            setupRequest = AskSetupRequest(model: model, tryingQuestion: true)
+            return
+        }
+        answer(messages[index].text, history: chatHistory(Array(messages[..<index])), model: model)
+    }
+
+    private func answer(_ question: String, history: [AskChatTurn], model: AskModel) {
+        followUps = []
         let assistantID = UUID()
-        messages.append(AskBubble(id: assistantID, isUser: false, text: ""))
+        messages.append(AskBubble(id: assistantID, isUser: false, text: "", modelName: model.name))
         isSending = true
+        let started = Date()
         Task {
             defer { isSending = false }
             let setText = { (value: String) in
@@ -170,21 +286,45 @@ struct OnDeviceAIChatView: View {
                 }
             }
             do {
-                let reply = try await activeConversation().send(text, history: history, onText: setText)
+                let reply = try await reply(to: question, history: history, model: model, onText: setText)
+                let seconds = Date().timeIntervalSince(started)
                 setText(reply.text)
                 if let index = messages.firstIndex(where: { $0.id == assistantID }) {
                     messages[index].warning = reply.warning
+                    messages[index].seconds = seconds
                 }
-                persist(text: reply.text, isUser: false)
+                persist(text: reply.text, isUser: false, modelName: model.name, seconds: seconds)
                 followUps = reply.followUps
             } catch {
                 setText(AskConversation.message(for: error))
+                if let index = messages.firstIndex(where: { $0.id == assistantID }) {
+                    messages[index].failed = true
+                }
             }
         }
     }
 
-    private var chatHistory: [AskChatTurn] {
-        messages.filter { !$0.text.isEmpty }.map { AskChatTurn(isUser: $0.isUser, text: $0.text) }
+    private func reply(
+        to question: String,
+        history: [AskChatTurn],
+        model: AskModel,
+        onText: @escaping (String) -> Void
+    ) async throws -> AskReply {
+        if model.provider != nil {
+            // An on-device session wouldn't know about this answer, so the next one starts fresh.
+            conversation = nil
+            return try await AskCloudChat.send(question, history: history, model: model, modelContext: financeContext)
+        }
+        switch OnDeviceAI.availabilityStatus() {
+        case .available:
+            return try await activeConversation().send(question, history: history, onText: onText)
+        case .unavailable(let reason), .notEnabled(let reason):
+            throw OnDeviceAIError.modelUnavailable(reason)
+        }
+    }
+
+    private func chatHistory(_ bubbles: [AskBubble]) -> [AskChatTurn] {
+        bubbles.filter { !$0.text.isEmpty && !$0.failed }.map { AskChatTurn(isUser: $0.isUser, text: $0.text) }
     }
 
     private func activeConversation() -> AskConversation {
@@ -195,8 +335,8 @@ struct OnDeviceAIChatView: View {
     }
 
     private func prepareSession() {
-        guard case .available = availability else { return }
-        activeConversation().prepare(history: chatHistory)
+        guard selectedModel == .onDevice, case .available = OnDeviceAI.availabilityStatus() else { return }
+        activeConversation().prepare(history: chatHistory(messages))
     }
 
     private func loadThread() {
@@ -206,7 +346,9 @@ struct OnDeviceAIChatView: View {
             thread = existing
             messages = existing.turns
                 .sorted { $0.createdAt < $1.createdAt }
-                .map { AskBubble(id: UUID(), isUser: $0.isUser, text: $0.text) }
+                .map {
+                    AskBubble(id: UUID(), isUser: $0.isUser, text: $0.text, modelName: $0.modelName, seconds: $0.seconds)
+                }
         } else {
             let fresh = AskThread()
             askContext.insert(fresh)
@@ -215,9 +357,9 @@ struct OnDeviceAIChatView: View {
         }
     }
 
-    private func persist(text: String, isUser: Bool) {
+    private func persist(text: String, isUser: Bool, modelName: String? = nil, seconds: Double? = nil) {
         guard let thread else { return }
-        let turn = AskTurn(isUser: isUser, text: text, thread: thread)
+        let turn = AskTurn(isUser: isUser, text: text, modelName: modelName, seconds: seconds, thread: thread)
         askContext.insert(turn)
         thread.updatedAt = .now
         try? askContext.save()

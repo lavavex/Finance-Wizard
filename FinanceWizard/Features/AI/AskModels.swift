@@ -26,12 +26,24 @@ final class AskTurn {
     var createdAt: Date
     var isUser: Bool
     var text: String
+    /// Which model answered, and how long it took. Nil on questions and older answers.
+    var modelName: String?
+    var seconds: Double?
     var thread: AskThread?
 
-    init(createdAt: Date = .now, isUser: Bool, text: String, thread: AskThread? = nil) {
+    init(
+        createdAt: Date = .now,
+        isUser: Bool,
+        text: String,
+        modelName: String? = nil,
+        seconds: Double? = nil,
+        thread: AskThread? = nil
+    ) {
         self.createdAt = createdAt
         self.isUser = isUser
         self.text = text
+        self.modelName = modelName
+        self.seconds = seconds
         self.thread = thread
     }
 }

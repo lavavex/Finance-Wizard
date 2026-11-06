@@ -34,6 +34,10 @@ Plaid keys and banks are required to pull transactions. See [Getting started](ge
 
 **Restore** default is **Safe merge**. It adds banks that aren’t on this phone, with their data. Banks already here keep their tokens and transactions, and Sync keeps them current. **Replace connections from backup** lets the backup’s keys, tokens, and rows win. **Wipe device, then restore** deletes local data first, then restores the backup. If that restore fails, your previous data is put back. Restore only accepts a backup from this app version.
 
+## Cloud AI
+
+**Settings → Cloud AI** adds or removes your Anthropic and xAI API keys for Ask. Removing a key also withdraws your consent to send data to that company.
+
 ## On-device AI
 
 **Settings → On-device AI** shows whether Apple Intelligence can run on this iPhone (checks when you open Settings).
