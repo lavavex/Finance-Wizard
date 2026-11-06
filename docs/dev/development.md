@@ -87,6 +87,27 @@ xcodebuild -project FinanceWizard.xcodeproj -scheme FinanceWizard \
 
 Or **Settings → Developer → Debug → Run classifier cases**.
 
+## Screenshots with demo data
+
+`scripts/sim-shot.sh` needs Xcode 27.2 (release) and an iOS 27.1+ Simulator runtime (`xcodebuild -downloadPlatform iOS`). It builds the Debug app and captures each tab on iPhone 17 and iPhone Duo, creating those simulators if needed:
+
+```bash
+./scripts/sim-shot.sh                  # every tab, light mode
+./scripts/sim-shot.sh budget accounts  # only these tabs
+APPEARANCE=dark ./scripts/sim-shot.sh  # dark mode
+SKIP_BUILD=1 ./scripts/sim-shot.sh     # reuse the last build
+```
+
+Images land in `.sim-shots/<device>/` (gitignored). iPhone Duo uses its own iOS runtime and has two displays (1398×2034 and 2007×2853). Only the active one has content, so the script captures both and keeps the one that isn't black.
+
+The script uses these launch arguments, which also work from an Xcode scheme:
+
+| Argument | Effect |
+|----------|--------|
+| `-demoData YES` | Debug only. Opens an in-memory store seeded with made-up rows (`FinanceWizard/App/DemoMode.swift`). The App Group database is not touched, and the widget still reads the App Group database. |
+| `-screen <tab>` | Debug only. Opens `transactions`, `accounts`, `budget`, `subscriptions`, or `settings`. |
+| `-settings.onboardingCompleted YES` | Skips Welcome for this launch. |
+
 ## Version & build numbers (local ↔ Xcode Cloud)
 
 | Setting | Meaning |

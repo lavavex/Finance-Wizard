@@ -13,6 +13,8 @@ build/
 **/AuthKey_*.p8
 # Local Instruments captures
 .perf-traces/
+# scripts/sim-shot.sh output
+.sim-shots/
 
 # Cloudflare Workers local
 node_modules/

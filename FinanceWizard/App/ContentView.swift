@@ -12,7 +12,7 @@ import SwiftData
 // MARK: - Root tabs
 
 /// Which main tab is selected.
-private enum AppTab: Hashable {
+private enum AppTab: String, Hashable {
     case transactions
     case accounts
     case budget
@@ -23,10 +23,20 @@ private enum AppTab: Hashable {
 /// Root of the main UI: a TabView with lazy-loaded secondary tabs for faster launch.
 struct ContentView: View {
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
-    @State private var selectedTab: AppTab = .transactions
+    @State private var selectedTab: AppTab = Self.launchTab
     /// Only build heavy tabs after the user opens them (first switch is still work; launch is not).
-    @State private var loadedTabs: Set<AppTab> = [.transactions]
+    @State private var loadedTabs: Set<AppTab> = [.transactions, Self.launchTab]
     @State private var showAsk = false
+
+    /// Transactions, unless a Debug build was launched with `-screen <tab>`.
+    private static var launchTab: AppTab {
+        #if DEBUG
+        if let tab = DemoMode.launchScreen.flatMap(AppTab.init(rawValue:)) {
+            return tab
+        }
+        #endif
+        return .transactions
+    }
 
     /// Custom Binding so selecting a tab also marks it “loaded” before assignment.
     private var tabSelection: Binding<AppTab> {

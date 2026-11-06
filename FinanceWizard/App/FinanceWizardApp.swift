@@ -15,6 +15,12 @@ struct FinanceWizardApp: App {
 
     init() {
         do {
+            #if DEBUG
+            if DemoMode.isEnabled {
+                container = try DemoMode.makeSeededContainer()
+                return
+            }
+            #endif
             // Shared App Group store — same on-disk database the widget reads.
             container = try SharedStore.makeContainer()
         } catch {
