@@ -98,6 +98,35 @@ final class RefundTotalsTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(snapshot.totalRemaining), 390, accuracy: 0.001)
     }
 
+    func testAskUsesTheSameTotalsAsTheApp() async throws {
+        let rows = try insert([("Shopping", -100, "Card A"), ("Refund", 30, "Card A")])
+        context.insert(CreditCardPayment(
+            transactionId: "checking-side",
+            amount: 500,
+            date: today,
+            cardName: "CREDIT CARD ···1234",
+            sourceAccount: "CHECKING ···9999",
+            title: "Payment to Example card ending in 1234",
+            creditAccountId: "card-account"
+        ))
+        context.insert(CreditCardPayment(
+            transactionId: "card-side",
+            amount: 500,
+            date: today,
+            cardName: "CREDIT CARD ···1234",
+            title: "Payment Thank You-Mobile",
+            creditAccountId: "card-account"
+        ))
+        try context.save()
+
+        let result = try await MoneySnapshotTool(modelContext: context)
+            .call(arguments: .init(monthOffset: 0))
+
+        XCTAssertEqual(result.spendUSD, TransactionAnalytics.totalSpend(in: rows), accuracy: 0.001)
+        XCTAssertEqual(result.spendUSD, 70, accuracy: 0.001)
+        XCTAssertEqual(result.cardPaymentsUSD, 500, accuracy: 0.001)
+    }
+
     private func insert(_ rows: [(category: String, amount: Double, method: String)]) throws -> [Transaction] {
         for (index, row) in rows.enumerated() {
             context.insert(Transaction(

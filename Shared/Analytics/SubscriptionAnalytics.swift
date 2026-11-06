@@ -407,7 +407,7 @@ enum SubscriptionAnalytics {
     nonisolated private static func looksLikeBillCategory(_ category: String) -> Bool {
         let c = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return c == "utilities" || c == "home internet" || c == "car insurance"
-            || c == "subscriptions"
+            || c == "insurance" || c == "subscriptions"
     }
 
     /// Title keywords for grocery/coffee/gas/etc. habits to exclude from auto-detect.

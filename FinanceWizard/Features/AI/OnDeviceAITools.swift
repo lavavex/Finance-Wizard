@@ -70,11 +70,14 @@ struct MoneySnapshotTool: Tool {
                 )
             )) ?? []
             let consumption = spendInMonth.filter { !TransactionAnalytics.isExcludedFromSpendCategory($0.category) }
-            // Only real bill payments — Loan / Refund / Installment are excluded from spend
-            // for other reasons and would overstate what was paid toward cards.
-            let cardPayments = spendInMonth.filter { TransactionAnalytics.isCreditCardPaymentCategory($0.category) }
-            let spendTotal = consumption.reduce(0.0) { $0 + abs($1.amount) }
-            let cardPaymentTotal = cardPayments.reduce(0.0) { $0 + abs($1.amount) }
+            // Same totals as the app: spend after refunds, and each bill pay counted once.
+            let cardPayments = (try? modelContext.fetch(
+                FetchDescriptor<CreditCardPayment>(
+                    predicate: #Predicate { $0.date >= start && $0.date < end }
+                )
+            )) ?? []
+            let spendTotal = TransactionAnalytics.totalSpend(in: spendInMonth)
+            let cardPaymentTotal = CreditAnalytics.totalPaid(in: cardPayments)
             let incomeTotal = IncomeAnalytics.totalEarned(in: incomeInMonth)
             let net = incomeTotal - spendTotal
 
@@ -107,7 +110,7 @@ struct MoneySnapshotTool: Tool {
                 cardPaymentsUSD: cardPaymentTotal,
                 netUSD: net,
                 topCategories: Array(top),
-                note: "Spend excludes credit card payments (those are transfers, not new spending).",
+                note: "Spend is after refunds and excludes credit card payments (those are transfers, not new spending). Top categories are before refunds.",
                 headline: headline,
                 suggestedFollowUps: followUps
             )
@@ -193,11 +196,8 @@ struct RecurringChargesTool: Tool {
 
     func call(arguments: Arguments) async throws -> RecurringChargeList {
         try await MainActor.run {
-            var descriptor = FetchDescriptor<Transaction>(
-                sortBy: [SortDescriptor(\.date, order: .reverse)]
-            )
-            descriptor.fetchLimit = 400
-            let rows = (try? modelContext.fetch(descriptor)) ?? []
+            // Uncapped: detection looks back 400 days, and a yearly charge can be that old.
+            let rows = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
             let snaps = SubscriptionAnalytics.snapshots(from: rows)
             let groups = SubscriptionAnalytics.detect(snapshots: snaps)
             let active = Array(groups.prefix(20))

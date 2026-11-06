@@ -162,6 +162,25 @@ final class ClassifierTaxonomyTests: XCTestCase {
         XCTAssertTrue(PlaidCategoryMapper.looksLikeNonSpendTitle("Online transfer to savings"))
     }
 
+    func testInsuranceBillWithChangingAmountIsRecurring() throws {
+        let context = try makeContext()
+        let calendar = Calendar.current
+        for (index, amount) in [120.0, 131.5, 118.25, 140.0].enumerated() {
+            context.insert(Transaction(
+                transactionId: "insurance-\(index)",
+                title: "Example Insurer",
+                amount: -amount,
+                date: try XCTUnwrap(calendar.date(byAdding: .day, value: -30 * index, to: Date())),
+                category: KnownCategory.insurance.rawValue,
+                paymentMethod: "Card"
+            ))
+        }
+
+        let rows = try context.fetch(FetchDescriptor<Transaction>())
+
+        XCTAssertEqual(SubscriptionAnalytics.detect(in: rows).first?.cadence, .monthly)
+    }
+
     // MARK: - Payroll
 
     func testPaycheckSizedDepositsFromAKnownPayrollSourceBecomePayroll() throws {
