@@ -44,18 +44,26 @@ enum OnDeviceAI {
         }
     }
 
-    static let askInstructions = """
-        You are Budget Magi's on-device assistant. All money facts must come from tools. \
-        Never invent amounts, merchants, or balances. Never reverse a comparison: if headline says you are ahead, do not say spending exceeded income. \
-        When getMoneySnapshot returns a headline, lead with that headline (you may add one short sentence on top categories). \
-        Credit card payments are transfers, not new spending. \
-        For overall money or why the user feels broke, call getMoneySnapshot (monthOffset 0; also -1 to compare months). \
-        Call getAccountBalances for cash or what is owed. \
-        Call getRecurringCharges for subscriptions, repeating bills, and card payoff plans (My Loan, Pay Over Time, promo APR). \
-        Call searchTransactions only for a named merchant or category, never for vague "any transactions to review". \
-        When a tool row has name or cardLabel, say that string exactly. Never say CREDIT CARD or a last-four unless that field is that string. \
-        Be concise. Treat currency as USD unless a tool says otherwise.
-        """
+    /// Short on purpose: instructions count against the small on-device context window.
+    static func askInstructions(today: Date = .now) -> String {
+        let date = today.formatted(.dateTime.month(.wide).day().year().locale(Locale(identifier: "en_US")))
+        let month = today.formatted(.iso8601.year().month())
+        return """
+            You are Budget Magi's assistant. Today is \(date), and this month is \(month).
+            Every money fact must come from a tool, in this conversation. Never estimate or do math yourself.
+            Tools:
+            getSpending: any how-much question, by merchant, category, or month.
+            getMoneySnapshot: income vs spending for a month, or why money feels tight.
+            getBudgetStatus: budget left, and categories over limit.
+            getUpcomingPayments: card due dates and minimum payments.
+            getAccountBalances: cash, or what is owed.
+            getRecurringCharges: subscriptions, repeating bills, and payoff plans.
+            searchTransactions: to list individual charges.
+            When a tool returns a headline, answer with it, then add at most one short sentence.
+            Use names exactly as tools give them. Credit card payments aren't spending.
+            If no tool covers the question, say so briefly.
+            """
+    }
 
     static func makeSession() throws -> LanguageModelSession {
         switch availabilityStatus() {
@@ -66,18 +74,30 @@ enum OnDeviceAI {
         }
     }
 
+    static func askTools(modelContext: ModelContext) -> [any Tool] {
+        [
+            SpendingQueryTool(modelContext: modelContext),
+            MoneySnapshotTool(modelContext: modelContext),
+            BudgetStatusTool(modelContext: modelContext),
+            UpcomingPaymentsTool(modelContext: modelContext),
+            AccountBalancesTool(modelContext: modelContext),
+            RecurringChargesTool(modelContext: modelContext),
+            SearchTransactionsTool(modelContext: modelContext),
+        ]
+    }
+
     /// Chat session: developer instructions + ledger tools (Apple's tool-calling path).
-    static func makeAskSession(modelContext: ModelContext) throws -> LanguageModelSession {
+    /// - Parameter earlierChat: Recap of the conversation so far, for a new session.
+    static func makeAskSession(modelContext: ModelContext, earlierChat: String? = nil) throws -> LanguageModelSession {
         switch availabilityStatus() {
         case .available:
+            var instructions = askInstructions()
+            if let earlierChat, !earlierChat.isEmpty {
+                instructions += "\nEarlier in this chat, for context only:\n\(earlierChat)"
+            }
             return LanguageModelSession(
-                tools: [
-                    MoneySnapshotTool(modelContext: modelContext),
-                    AccountBalancesTool(modelContext: modelContext),
-                    RecurringChargesTool(modelContext: modelContext),
-                    SearchTransactionsTool(modelContext: modelContext),
-                ],
-                instructions: askInstructions
+                tools: askTools(modelContext: modelContext),
+                instructions: instructions
             )
         case .unavailable(let reason), .notEnabled(let reason):
             throw OnDeviceAIError.modelUnavailable(reason)

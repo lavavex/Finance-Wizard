@@ -2,17 +2,17 @@
 //  OnDeviceAIChatView.swift
 //  Finance Wizard
 //
-//  On-device Ask chat: streaming, tools, prewarm, persisted thread.
+//  On-device Ask chat: streaming and a persisted thread. AskConversation runs the model.
 //
 
 import SwiftData
 import SwiftUI
-import FoundationModels
 
 private struct AskBubble: Identifiable {
     let id: UUID
     let isUser: Bool
     var text: String
+    var warning: String?
 }
 
 struct OnDeviceAIChatView: View {
@@ -23,7 +23,7 @@ struct OnDeviceAIChatView: View {
     @FocusState private var composerFocused: Bool
     @State private var followUps: [String] = []
     @State private var promptIndex = 0
-    @State private var session: LanguageModelSession?
+    @State private var conversation: AskConversation?
     @State private var isSending = false
     @State private var thread: AskThread?
     @State private var askContext = ModelContext(AskStore.container)
@@ -135,10 +135,17 @@ struct OnDeviceAIChatView: View {
     private func bubble(_ message: AskBubble) -> some View {
         HStack {
             if message.isUser { Spacer(minLength: 48) }
-            Text(message.text)
-                .padding(10)
-                .background(message.isUser ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.16))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(message.text)
+                if let warning = message.warning {
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(10)
+            .background(message.isUser ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.16))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             if !message.isUser { Spacer(minLength: 48) }
         }
     }
@@ -149,66 +156,47 @@ struct OnDeviceAIChatView: View {
         composerFocused = false
         draft = ""
         followUps = []
-        let user = AskBubble(id: UUID(), isUser: true, text: text)
-        messages.append(user)
+        let history = chatHistory
+        messages.append(AskBubble(id: UUID(), isUser: true, text: text))
         persist(text: text, isUser: true)
         let assistantID = UUID()
         messages.append(AskBubble(id: assistantID, isUser: false, text: ""))
         isSending = true
         Task {
             defer { isSending = false }
-            do {
-                try rotateSessionIfNeeded()
-                if session == nil {
-                    session = try OnDeviceAI.makeAskSession(modelContext: financeContext)
-                    session?.prewarm()
-                }
-                guard let session else { return }
-                let stream = session.streamResponse(to: text)
-                var answer = ""
-                for try await snapshot in stream {
-                    answer = snapshot.content
-                    if let index = messages.firstIndex(where: { $0.id == assistantID }) {
-                        messages[index].text = answer
-                    }
-                }
-                answer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-                if answer.isEmpty {
-                    throw OnDeviceAIError.emptyResponse
-                }
-                persist(text: answer, isUser: false)
-                followUps = [
-                    "Compare to last month",
-                    "What are my account balances?",
-                    "What recurring charges do I have?",
-                ]
-            } catch {
+            let setText = { (value: String) in
                 if let index = messages.firstIndex(where: { $0.id == assistantID }) {
-                    messages[index].text = error.localizedDescription
+                    messages[index].text = value
                 }
             }
+            do {
+                let reply = try await activeConversation().send(text, history: history, onText: setText)
+                setText(reply.text)
+                if let index = messages.firstIndex(where: { $0.id == assistantID }) {
+                    messages[index].warning = reply.warning
+                }
+                persist(text: reply.text, isUser: false)
+                followUps = reply.followUps
+            } catch {
+                setText(AskConversation.message(for: error))
+            }
         }
+    }
+
+    private var chatHistory: [AskChatTurn] {
+        messages.filter { !$0.text.isEmpty }.map { AskChatTurn(isUser: $0.isUser, text: $0.text) }
+    }
+
+    private func activeConversation() -> AskConversation {
+        if let conversation { return conversation }
+        let created = AskConversation(modelContext: financeContext)
+        conversation = created
+        return created
     }
 
     private func prepareSession() {
         guard case .available = availability else { return }
-        do {
-            if session == nil {
-                session = try OnDeviceAI.makeAskSession(modelContext: financeContext)
-            }
-            session?.prewarm()
-        } catch {
-            // Availability UI covers this.
-        }
-    }
-
-    private func rotateSessionIfNeeded() throws {
-        guard let session else { return }
-        let count = session.transcript.count
-        if count > 28 {
-            self.session = try OnDeviceAI.makeAskSession(modelContext: financeContext)
-            self.session?.prewarm()
-        }
+        activeConversation().prepare(history: chatHistory)
     }
 
     private func loadThread() {

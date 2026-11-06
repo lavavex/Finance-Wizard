@@ -73,7 +73,7 @@ docs/                          GitHub Pages documentation
 | **Where data stays** | Inference is on-device (Apple Intelligence); still prefer minimal transaction context in prompts |
 | **Capability / entitlement** | None beyond what the system already requires for Apple Intelligence |
 
-`Features/AI/` — availability on Settings. **Ask** overlay button on `ContentView` (sheet, not a sixth tab): tool calling, streaming, prewarm, persisted thread (separate store). `suggestCategory` on transaction detail.
+`Features/AI/` — availability on Settings. **Ask** tab bar accessory on `ContentView` (sheet, not a sixth tab). `AskLedger` computes every total, tools hand short results to the model, and `AskConversation` manages the context window, recap, and answer checks. Persisted thread (separate store). `suggestCategory` on transaction detail.
 
 ### Cost of the hot paths
 

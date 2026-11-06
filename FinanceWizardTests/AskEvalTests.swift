@@ -2,29 +2,16 @@
 //  AskEvalTests.swift
 //  Finance Wizard
 //
-//  Scores Ask against the on-device model using demo data, with answers computed from the rows.
-//  Needs a device or Mac with Apple Intelligence, so it's opt-in. On "My Mac (Designed for iPhone)":
-//  TEST_RUNNER_FW_ASK_EVAL=1 xcodebuild ... -only-testing:FinanceWizardTests/AskEvalTests test
-//  Results print as ASKEVAL lines. The model varies between runs, so this reports a score
-//  rather than failing on one wrong answer.
+//  Runs AskEval where tests can reach the on-device model, such as a device with
+//  Apple Intelligence. Opt in with TEST_RUNNER_FW_ASK_EVAL=1.
 //
 
 import XCTest
-import SwiftData
 import FoundationModels
 @testable import FinanceWizard
 
 @MainActor
 final class AskEvalTests: XCTestCase {
-    private struct Question {
-        let name: String
-        /// Earlier turns in the same chat.
-        var setup: [String] = []
-        let prompt: String
-        /// The answer must contain at least one of these.
-        let expected: [String]
-    }
-
     func testScoreOnDeviceAsk() async throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["FW_ASK_EVAL"] == "1",
@@ -33,91 +20,6 @@ final class AskEvalTests: XCTestCase {
         guard case .available = SystemLanguageModel.default.availability else {
             throw XCTSkip("Apple Intelligence isn't available here.")
         }
-
-        let container = try DemoMode.makeSeededContainer()
-        let context = ModelContext(container)
-        let questions = try makeQuestions(context: context)
-        var passed = 0
-
-        for question in questions {
-            let started = Date()
-            var outcome = "FAIL"
-            var answer = ""
-            do {
-                let session = try OnDeviceAI.makeAskSession(modelContext: context)
-                for turn in question.setup {
-                    _ = try await session.respond(to: turn)
-                }
-                answer = try await session.respond(to: question.prompt).content
-                if question.expected.contains(where: { answer.localizedCaseInsensitiveContains($0) }) {
-                    outcome = "PASS"
-                    passed += 1
-                }
-            } catch {
-                outcome = "ERROR"
-                answer = String(describing: error)
-            }
-            let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
-            let flat = answer.replacingOccurrences(of: "\n", with: " ")
-            print("ASKEVAL|\(outcome)|\(question.name)|\(seconds)s|want \(question.expected)|\(flat.prefix(300))")
-        }
-        print("ASKEVAL|SCORE|\(passed)/\(questions.count)")
-    }
-
-    // MARK: - Questions
-
-    private func makeQuestions(context: ModelContext) throws -> [Question] {
-        let rows = try context.fetch(FetchDescriptor<Transaction>())
-        let accounts = try context.fetch(FetchDescriptor<BankAccount>())
-        let thisMonth = TransactionAnalytics.inPeriod(rows, period: .month)
-        let previousStart = try XCTUnwrap(Calendar.current.date(byAdding: .month, value: -1, to: Date()))
-        let lastMonth = TransactionAnalytics.inPeriod(rows, period: .month, referenceDate: previousStart)
-        let categories = TransactionAnalytics.categorySummaries(from: thisMonth)
-        let biggest = try XCTUnwrap(categories.first).category
-        let card = try XCTUnwrap(accounts.first(where: \.isCredit))
-        let checking = try XCTUnwrap(accounts.first { $0.subtype == "checking" })
-        let plan = try XCTUnwrap(context.fetch(FetchDescriptor<BudgetPlan>()).first)
-        let budget = BudgetAnalytics.snapshot(plan: plan, transactions: rows)
-        let recurring = SubscriptionAnalytics.detect(in: rows)
-            .reduce(0) { $0 + $1.estimatedMonthly }
-
-        func spent(_ merchant: String, in period: [Transaction]) -> Double {
-            TransactionAnalytics.totalSpend(in: period.filter { $0.title == merchant })
-        }
-        func money(_ value: Double) -> [String] {
-            let cents = String(format: "%.2f", value)
-            let grouped = value.formatted(.number.precision(.fractionLength(2)).locale(Locale(identifier: "en_US")))
-            return [cents, grouped]
-        }
-
-        return [
-            Question(name: "total-this-month", prompt: "How much did I spend this month?",
-                     expected: money(TransactionAnalytics.totalSpend(in: thisMonth))),
-            Question(name: "biggest-category", prompt: "What's my biggest spending category this month?",
-                     expected: [biggest]),
-            Question(name: "category-amount", prompt: "How much did I spend on dining this month?",
-                     expected: money(categories.first { $0.category == "Dining" }?.spent ?? 0)),
-            Question(name: "merchant-this-month", prompt: "How much did I spend at Corner Market this month?",
-                     expected: money(spent("Corner Market", in: thisMonth))),
-            Question(name: "merchant-last-month", prompt: "How much did I spend at Corner Market last month?",
-                     expected: money(spent("Corner Market", in: lastMonth))),
-            Question(name: "follow-up", setup: ["How much did I spend at Corner Market this month?"],
-                     prompt: "And last month?",
-                     expected: money(spent("Corner Market", in: lastMonth))),
-            Question(name: "checking-balance", prompt: "What's my checking balance?",
-                     expected: money(checking.currentBalance) + money(checking.availableBalance ?? 0)),
-            Question(name: "card-owed", prompt: "How much do I owe on my credit card?",
-                     expected: money(card.currentBalance)),
-            Question(name: "recurring-total", prompt: "How much do my recurring charges cost per month?",
-                     expected: money(recurring)),
-            Question(name: "budget-left", prompt: "How much of my budget do I have left this month?",
-                     expected: money(budget.totalRemaining ?? 0)),
-            Question(name: "next-payment", prompt: "What's the minimum payment due on my card?",
-                     expected: money(card.minimumPaymentAmount ?? 0)),
-            Question(name: "over-under", prompt: "Did I spend more than I earned this month?",
-                     expected: money(abs(budget.income - budget.totalSpent))),
-            Question(name: "no-data-no-guess", prompt: "How much did I spend at Example Nonexistent Store this month?",
-                     expected: ["no ", "$0", "0.00", "didn't", "did not", "couldn't", "not find"])
-        ]
+        try await AskEval.run()
     }
 }

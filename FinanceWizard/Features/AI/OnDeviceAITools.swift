@@ -3,7 +3,7 @@
 //  Finance Wizard
 //
 //  Foundation Models tools. Fetches happen on the main actor when the model asks,
-//  not in SwiftUI body. Caps keep the on-device context window small.
+//  not in SwiftUI body. Results stay short because the on-device context window is small.
 //
 
 import Foundation
@@ -28,6 +28,10 @@ private enum LedgerToolSupport {
         let start = calendar.date(byAdding: .month, value: clamped, to: startOfThisMonth) ?? startOfThisMonth
         let end = calendar.date(byAdding: .month, value: 1, to: start) ?? start
         return DateInterval(start: start, end: end)
+    }
+
+    static func day(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day().year().locale(Locale(identifier: "en_US")))
     }
 
     static func monthLabel(offset: Int, calendar: Calendar = .current, now: Date = .now) -> String {
@@ -86,7 +90,7 @@ struct MoneySnapshotTool: Tool {
                 byCategory[row.category, default: 0] += abs(row.amount)
             }
             let top = byCategory.sorted { $0.value > $1.value }.prefix(5).map {
-                MoneyCategorySlice(name: $0.key, amountUSD: $0.value)
+                MoneyCategorySlice(name: $0.key, amountUSD: AskLedger.rounded($0.value))
             }
 
             let topName = top.first?.name
@@ -96,23 +100,15 @@ struct MoneySnapshotTool: Tool {
             } else {
                 headline = "\(label): spend \(LedgerToolSupport.money(spendTotal)) minus income \(LedgerToolSupport.money(incomeTotal)) leaves \(LedgerToolSupport.money(abs(net))) behind. \(topName.map { "Largest category: \($0)." } ?? "") Card payments of \(LedgerToolSupport.money(cardPaymentTotal)) are transfers, not extra spending."
             }
-            var followUps = ["Compare to last month", "What are my account balances?"]
-            if let topName {
-                followUps.insert("Break down \(topName) this month", at: 0)
-            } else {
-                followUps.append("What recurring charges do I have?")
-            }
-
             return MoneySnapshotResult(
                 monthLabel: label,
-                incomeUSD: incomeTotal,
-                spendUSD: spendTotal,
-                cardPaymentsUSD: cardPaymentTotal,
-                netUSD: net,
+                incomeUSD: AskLedger.rounded(incomeTotal),
+                spendUSD: AskLedger.rounded(spendTotal),
+                cardPaymentsUSD: AskLedger.rounded(cardPaymentTotal),
+                netUSD: AskLedger.rounded(net),
                 topCategories: Array(top),
-                note: "Spend is after refunds and excludes credit card payments (those are transfers, not new spending). Top categories are before refunds.",
-                headline: headline,
-                suggestedFollowUps: followUps
+                note: "Spend is after refunds. Top categories are before refunds.",
+                headline: headline
             )
         }
     }
@@ -134,7 +130,6 @@ struct MoneySnapshotResult {
     var topCategories: [MoneyCategorySlice]
     var note: String
     var headline: String
-    var suggestedFollowUps: [String]
 }
 
 /// Linked account balances (cash and credit).
@@ -158,8 +153,8 @@ struct AccountBalancesTool: Tool {
                     name: account.displayName,
                     kind: account.type,
                     institution: account.institutionName,
-                    currentUSD: account.currentBalance,
-                    availableUSD: account.availableBalance ?? account.currentBalance
+                    currentUSD: AskLedger.rounded(account.currentBalance),
+                    availableUSD: AskLedger.rounded(account.availableBalance ?? account.currentBalance)
                 )
             }
             return AccountBalanceList(accounts: rows)
@@ -200,30 +195,36 @@ struct RecurringChargesTool: Tool {
             let rows = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
             let snaps = SubscriptionAnalytics.snapshots(from: rows)
             let groups = SubscriptionAnalytics.detect(snapshots: snaps)
-            let active = Array(groups.prefix(20))
-            var items = active.map {
+            let monthlyTotal = groups.reduce(0.0) { $0 + $1.estimatedMonthly }
+            var items = groups.prefix(8).map {
                 RecurringChargeRow(
                     vendor: $0.displayVendor,
-                    typicalAmountUSD: $0.typicalAmount,
+                    typicalAmountUSD: AskLedger.rounded($0.typicalAmount),
                     cadence: $0.cadence.displayName,
-                    estimatedMonthlyUSD: $0.estimatedMonthly
+                    estimatedMonthlyUSD: AskLedger.rounded($0.estimatedMonthly)
                 )
             }
             let payoffs = ((try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? [])
                 .filter(\.isActive)
-            for plan in payoffs.prefix(20) {
+            var extraPrincipal = 0.0
+            for plan in payoffs.prefix(4) {
                 let onCard = plan.kind.followsCardStatement
+                if !onCard { extraPrincipal += plan.monthlyPayment }
                 items.append(
                     RecurringChargeRow(
                         vendor: "\(plan.kind.displayName): \(plan.name)",
-                        typicalAmountUSD: plan.installmentTotal,
+                        typicalAmountUSD: AskLedger.rounded(plan.installmentTotal),
                         cadence: onCard ? "On card statement (in minimum)" : "Extra principal",
-                        estimatedMonthlyUSD: onCard ? 0 : plan.monthlyPayment
+                        estimatedMonthlyUSD: onCard ? 0 : AskLedger.rounded(plan.monthlyPayment)
                     )
                 )
             }
-            let monthly = items.reduce(0.0) { $0 + $1.estimatedMonthlyUSD }
-            return RecurringChargeList(estimatedMonthlyUSD: monthly, charges: items)
+            let total = AskLedger.rounded(monthlyTotal + extraPrincipal)
+            return RecurringChargeList(
+                headline: "Recurring charges cost about \(AskLedger.money(total)) a month across \(groups.count) charges.",
+                estimatedMonthlyUSD: total,
+                charges: Array(items)
+            )
         }
     }
 }
@@ -238,14 +239,163 @@ struct RecurringChargeRow {
 
 @Generable
 struct RecurringChargeList {
+    var headline: String
     var estimatedMonthlyUSD: Double
     var charges: [RecurringChargeRow]
 }
 
-/// Keyword search over recent expenses (capped).
+/// Totals for a merchant, category, or date range. The app does the math, not the model.
+struct SpendingQueryTool: Tool {
+    let name = "getSpending"
+    let description = "Exact spending total for any merchant, category, month, or range of months. Use for every how-much question."
+
+    let modelContext: ModelContext
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Merchant name, or empty for all merchants")
+        var merchant: String
+        @Guide(description: "Spending category, or empty for all categories")
+        var category: String
+        @Guide(description: "First month as YYYY-MM, or empty for this month")
+        var fromMonth: String
+        @Guide(description: "Last month as YYYY-MM, or empty for the same month as fromMonth")
+        var toMonth: String
+    }
+
+    func call(arguments: Arguments) async throws -> SpendingResult {
+        try await MainActor.run {
+            let range = AskLedger.monthRange(from: arguments.fromMonth, to: arguments.toMonth)
+            let result = AskLedger.spending(
+                merchant: arguments.merchant,
+                category: arguments.category,
+                range: range,
+                in: modelContext
+            )
+            return SpendingResult(
+                headline: result.headline,
+                totalUSD: result.total,
+                chargeCount: result.chargeCount,
+                largestCharges: result.largest.map {
+                    SpendingCharge(title: $0.title, amountUSD: $0.amount, date: LedgerToolSupport.day($0.date))
+                },
+                topMerchants: result.topMerchants.map {
+                    MoneyCategorySlice(name: $0.name, amountUSD: $0.amount)
+                }
+            )
+        }
+    }
+}
+
+@Generable
+struct SpendingCharge {
+    var title: String
+    var amountUSD: Double
+    var date: String
+}
+
+@Generable
+struct SpendingResult {
+    var headline: String
+    var totalUSD: Double
+    var chargeCount: Int
+    var largestCharges: [SpendingCharge]
+    var topMerchants: [MoneyCategorySlice]
+}
+
+/// Progress against the monthly budget.
+struct BudgetStatusTool: Tool {
+    let name = "getBudgetStatus"
+    let description = "This month's spending against the budget: amount left, and categories over or near their limits."
+
+    let modelContext: ModelContext
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Pass 0; this tool takes no real arguments")
+        var unused: Int
+    }
+
+    func call(arguments: Arguments) async throws -> BudgetStatusResult {
+        try await MainActor.run {
+            let status = AskLedger.budgetStatus(in: modelContext)
+            let row = { (item: AskLedger.BudgetStatus.Category) in
+                BudgetCategoryRow(name: item.name, spentUSD: item.spent, limitUSD: item.limit)
+            }
+            return BudgetStatusResult(
+                headline: status.headline,
+                overLimit: status.overLimit.map(row),
+                closestToLimit: status.closestToLimit.map(row)
+            )
+        }
+    }
+}
+
+@Generable
+struct BudgetCategoryRow {
+    var name: String
+    var spentUSD: Double
+    var limitUSD: Double
+}
+
+@Generable
+struct BudgetStatusResult {
+    var headline: String
+    var overLimit: [BudgetCategoryRow]
+    var closestToLimit: [BudgetCategoryRow]
+}
+
+/// Card due dates and minimum payments.
+struct UpcomingPaymentsTool: Tool {
+    let name = "getUpcomingPayments"
+    let description = "Credit card due dates and minimum payments. Use for what's due, when, and how much."
+
+    let modelContext: ModelContext
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Pass 0; this tool takes no real arguments")
+        var unused: Int
+    }
+
+    func call(arguments: Arguments) async throws -> UpcomingPaymentsResult {
+        try await MainActor.run {
+            let upcoming = AskLedger.upcomingPayments(in: modelContext)
+            return UpcomingPaymentsResult(
+                headline: upcoming.headline,
+                cards: upcoming.cards.map {
+                    UpcomingPaymentRow(
+                        name: $0.name,
+                        minimumDueUSD: $0.minimumDue ?? 0,
+                        balanceUSD: $0.balance,
+                        dueDate: LedgerToolSupport.day($0.dueDate),
+                        isOverdue: $0.isOverdue
+                    )
+                }
+            )
+        }
+    }
+}
+
+@Generable
+struct UpcomingPaymentRow {
+    var name: String
+    var minimumDueUSD: Double
+    var balanceUSD: Double
+    var dueDate: String
+    var isOverdue: Bool
+}
+
+@Generable
+struct UpcomingPaymentsResult {
+    var headline: String
+    var cards: [UpcomingPaymentRow]
+}
+
+/// Finds specific charges. Totals come from getSpending.
 struct SearchTransactionsTool: Tool {
     let name = "searchTransactions"
-    let description = "Search recent expenses by merchant name, title, or category. Use for a specific store or charge, not for overall totals."
+    let description = "List individual charges by merchant, title, or category. Use to show specific charges, not for totals."
 
     let modelContext: ModelContext
 
@@ -253,30 +403,21 @@ struct SearchTransactionsTool: Tool {
     struct Arguments {
         @Guide(description: "Merchant, category, or keyword")
         var query: String
-        @Guide(description: "Max rows to return, from 1 to 20")
+        @Guide(description: "Max rows to return, from 1 to 8")
         var limit: Int
     }
 
     func call(arguments: Arguments) async throws -> TransactionSearchList {
         try await MainActor.run {
             let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
-            let limit = min(20, max(1, arguments.limit))
-            var descriptor = FetchDescriptor<Transaction>(
+            let limit = min(8, max(1, arguments.limit))
+            let descriptor = FetchDescriptor<Transaction>(
                 sortBy: [SortDescriptor(\.date, order: .reverse)]
             )
-            // FIX: the cap was applied to the *fetch*, so search only ever saw the most
-            // recent ~120 rows — about a month with four cards. "How much did I spend at Home
-            // Depot in March?" asked in September matched nothing and the model answered that
-            // there were no such charges. Match across history, then cap the results.
-            // OLD: descriptor.fetchLimit = 120
+            // Match across history, then cap the results: an older charge must still be findable.
             let rows = (try? modelContext.fetch(descriptor)) ?? []
-            let matches = TransactionSearch
-                .filter(rows, query: arguments.query, accounts: accounts)
-                .prefix(limit)
-            let day = DateFormatter()
-            day.dateStyle = .medium
-            day.timeStyle = .none
-            let items = matches.map { row in
+            let matches = TransactionSearch.filter(rows, query: arguments.query, accounts: accounts)
+            let items = matches.prefix(limit).map { row in
                 let account = BankAccount.matching(paymentMethod: row.paymentMethod, in: accounts)
                 let cardLabel = CardLabelStore.label(
                     paymentMethod: row.paymentMethod,
@@ -284,15 +425,18 @@ struct SearchTransactionsTool: Tool {
                     fallback: row.paymentMethod
                 )
                 return TransactionSearchRow(
-                    date: day.string(from: row.displayDate),
+                    date: LedgerToolSupport.day(row.displayDate),
                     title: row.title,
                     category: row.category,
-                    amountUSD: abs(row.amount),
-                    cardLabel: cardLabel,
-                    transactionId: row.transactionId
+                    amountUSD: AskLedger.rounded(abs(row.amount)),
+                    cardLabel: cardLabel
                 )
             }
-            return TransactionSearchList(query: arguments.query, rows: Array(items))
+            return TransactionSearchList(
+                query: arguments.query,
+                matchCount: matches.count,
+                rows: Array(items)
+            )
         }
     }
 }
@@ -304,11 +448,11 @@ struct TransactionSearchRow {
     var category: String
     var amountUSD: Double
     var cardLabel: String
-    var transactionId: String
 }
 
 @Generable
 struct TransactionSearchList {
     var query: String
+    var matchCount: Int
     var rows: [TransactionSearchRow]
 }

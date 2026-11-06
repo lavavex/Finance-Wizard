@@ -71,7 +71,7 @@ Open a card from Accounts to see **all** activity grouped by **statement** (clos
 
 ## Ask
 
-Circular **Ask** button, bottom-right, above the tab bar (not a sixth tab — that would open iOS **More**). On-device chat (Apple Intelligence). It looks up **totals, balances, recurring, and recent charges** when needed. Card names match the nicknames you set in Accounts (not the bank’s “Credit Card” label). Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
+**Ask** sits above the tab bar (not a sixth tab — that would open iOS **More**). On-device chat (Apple Intelligence). The app works out the numbers itself: spending by merchant, category, or month, plus your budget, card due dates, balances, recurring charges, and individual charges. If an answer has an amount that doesn’t match your data, Ask tries again, then warns you. Card names match the nicknames you set in Accounts (not the bank’s “Credit Card” label). Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
 
 Transaction detail: **Suggest with Apple Intelligence** picks a category from the app’s list.
 
