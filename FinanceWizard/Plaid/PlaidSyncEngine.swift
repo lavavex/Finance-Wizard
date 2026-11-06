@@ -591,7 +591,7 @@ enum PlaidSyncEngine {
             deleteCreditPaymentOnly(transactionID: tx.transaction_id, modelContext: modelContext)
             upsertIncome(
                 tx: tx,
-                title: title,
+                title: tx.payerName ?? title,
                 date: date,
                 paymentMethod: paymentMethod,
                 pfcDetailed: tx.personal_finance_category?.detailed,

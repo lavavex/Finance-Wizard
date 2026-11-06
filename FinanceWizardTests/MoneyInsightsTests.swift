@@ -188,6 +188,39 @@ final class MoneyInsightsTests: XCTestCase {
         XCTAssertTrue(plan.facts.contains("Other spending, monthly average: Dining: $20.00"), "\(plan.facts)")
     }
 
+    func testMoneyPlanListsIncomeBySource() {
+        func paycheck(_ source: String, _ amount: Double, month: Int) -> Income {
+            Income(
+                transactionId: UUID().uuidString, source: source, amount: amount, date: date(month),
+                category: "Payroll", accountName: nil, accountMask: nil, sourceInstitution: nil,
+                rawName: nil, pfc: nil, pending: false, kind: "income"
+            )
+        }
+        let plan = MoneyInsights.moneyPlan(
+            [],
+            income: [paycheck("Example Employer", 600, month: 8), paycheck("Example Employer", 620, month: 9), paycheck("PAYROLLXYZ", 590, month: 10)],
+            accounts: [],
+            plans: [],
+            now: date(11, 6)
+        )
+        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Income: Example Employer (Payroll): 2 deposits, about $610.00 each") }, "\(plan.facts)")
+        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Income: PAYROLLXYZ") }, "\(plan.facts)")
+    }
+
+    func testPayerNameNeedsAConfidentCounterparty() throws {
+        func decode(_ counterparty: String, merchant: String = "null") throws -> PlaidTransaction {
+            let json = """
+            {"account_id":"a","amount":-500,"date":"2026-11-03","name":"PAYROLLXYZ","merchant_name":\(merchant),
+             "transaction_id":"t","counterparties":[\(counterparty)]}
+            """
+            return try JSONDecoder().decode(PlaidTransaction.self, from: Data(json.utf8))
+        }
+        XCTAssertEqual(try decode(#"{"name":"Example Employer","type":"merchant","confidence_level":"HIGH"}"#).payerName, "Example Employer")
+        XCTAssertNil(try decode(#"{"name":"Example Employer","type":"merchant","confidence_level":"LOW"}"#).payerName)
+        XCTAssertNil(try decode(#"{"name":"Example Bank","type":"financial_institution","confidence_level":"HIGH"}"#).payerName)
+        XCTAssertNil(try decode(#"{"name":"Example Employer","type":"merchant","confidence_level":"HIGH"}"#, merchant: "\"Named\"").payerName)
+    }
+
     func testSearchFilterCombinesConditions() {
         let rows = [
             row("Example Market", 80, month: 8, category: "Groceries"),

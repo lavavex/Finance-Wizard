@@ -164,6 +164,8 @@ struct OnDeviceAIChatView: View {
                         ForEach(tryModels) { model in
                             Button("Try with \(model.name)") { tryAgain(with: model) }
                                 .buttonStyle(.borderedProminent)
+                                // AccentColor is ink, light in Dark, and the default label vanishes on it.
+                                .foregroundStyle(Color(.systemBackground))
                         }
                         ForEach(followUps, id: \.self) { tip in
                             Button(tip) { send(tip) }

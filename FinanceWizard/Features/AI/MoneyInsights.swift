@@ -286,13 +286,23 @@ extension MoneyInsights {
             $0.date >= earliest && $0.date < thisMonth && !IncomeAnalytics.nonEarningsCategories.contains($0.category)
         }
         if !paid.isEmpty {
-            let recent = income.filter { !IncomeAnalytics.nonEarningsCategories.contains($0.category) }
+            let yearAgo = calendar.date(byAdding: .year, value: -1, to: now) ?? now
+            let earned = income.filter { $0.date >= yearAgo && !IncomeAnalytics.nonEarningsCategories.contains($0.category) }
+            // By source, so a question about one employer has an answer. A bank can rename the
+            // same paycheck partway through, so these can overlap.
+            let sources = Dictionary(grouping: earned, by: \.source)
+                .map { source, rows -> (date: Date, line: String) in
+                    let last = rows.map(\.date).max() ?? now
+                    let average = rows.reduce(0) { $0 + $1.amount } / Double(rows.count)
+                    let category = rows.last?.category ?? "Income"
+                    return (last, "\(source) (\(category)): \(rows.count) deposits, about \(dollars(average)) each, last \(shortDay(last))")
+                }
                 .sorted { $0.date > $1.date }
-                .prefix(4)
-                .map { "\($0.source): \(dollars($0.amount)) on \(shortDay($0.date))" }
+                .prefix(8)
+                .map(\.line)
             sections.append(.init(
                 title: "Income",
-                lines: ["Average \(dollars(paid.reduce(0) { $0 + $1.amount } / 3)) a month"] + recent
+                lines: ["Average \(dollars(paid.reduce(0) { $0 + $1.amount } / 3)) a month"] + sources
             ))
         }
 

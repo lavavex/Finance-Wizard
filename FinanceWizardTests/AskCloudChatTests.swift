@@ -221,6 +221,12 @@ final class AskCloudChatTests: XCTestCase {
         XCTAssertTrue(AskCloudChat.instructions().contains("getMoneyPlan"))
     }
 
+    func testPromptsHandleBudgetsAndShortenedEmployers() {
+        XCTAssertTrue(AskCloudChat.instructions().contains("making a budget"))
+        XCTAssertTrue(AskCloudChat.instructions().contains("payroll code"))
+        XCTAssertTrue(OnDeviceAI.askInstructions().contains("make a budget"))
+    }
+
     func testNotesReachTheCloudPrompt() {
         XCTAssertTrue(AskCloudChat.instructions(notes: ["Example Stream is cancelled"]).contains("- Example Stream is cancelled"))
         XCTAssertFalse(AskCloudChat.instructions(notes: []).contains("told you earlier"))
