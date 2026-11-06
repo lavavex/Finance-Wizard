@@ -39,13 +39,19 @@ enum AskEval {
             let started = Date()
             var outcome = "FAIL"
             var answer = ""
+            var toolActivity: [String] = []
             do {
-                let session = try OnDeviceAI.makeAskSession(modelContext: context)
+                let conversation = AskConversation(modelContext: context)
+                var history: [AskChatTurn] = []
                 for turn in question.setup {
-                    _ = try await session.respond(to: turn)
+                    let reply = try await conversation.send(turn, history: history) { _ in }
+                    history += [AskChatTurn(isUser: true, text: turn), AskChatTurn(isUser: false, text: reply.text)]
                 }
-                answer = try await session.respond(to: question.prompt).content
-                if question.expected.contains(where: { answer.localizedCaseInsensitiveContains($0) }) {
+                let reply = try await conversation.send(question.prompt, history: history) { _ in }
+                answer = reply.text
+                if reply.warning != nil { answer += " [WARNED]" }
+                if let transcript = conversation.transcript { toolActivity = toolActivityLines(in: transcript) }
+                if isCorrect(answer, expected: question.expected) {
                     outcome = "PASS"
                     passed += 1
                 }
@@ -55,10 +61,66 @@ enum AskEval {
             }
             let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
             let flat = answer.replacingOccurrences(of: "\n", with: " ")
+            for line in toolActivity { print("ASKEVAL|  \(line)") }
             print("ASKEVAL|\(outcome)|\(question.name)|\(seconds)s|want \(question.expected)|\(flat.prefix(300))")
         }
         print("ASKEVAL|SCORE|\(passed)/\(questions.count)")
+        await runLongChat(questions, context: context)
         return (passed, questions.count)
+    }
+
+    /// Every question in one chat, which is what fills the context window and rotates the session.
+    private static func runLongChat(_ questions: [Question], context: ModelContext) async {
+        let conversation = AskConversation(modelContext: context)
+        var history: [AskChatTurn] = []
+        var passed = 0
+        for question in questions where question.setup.isEmpty {
+            do {
+                let reply = try await conversation.send(question.prompt, history: history) { _ in }
+                history += [AskChatTurn(isUser: true, text: question.prompt), AskChatTurn(isUser: false, text: reply.text)]
+                let correct = isCorrect(reply.text, expected: question.expected)
+                if !correct, let transcript = conversation.transcript {
+                    for line in toolActivityLines(in: transcript).suffix(4) { print("ASKEVAL|  \(line)") }
+                }
+                if correct { passed += 1 }
+                let flat = reply.text.replacingOccurrences(of: "\n", with: " ")
+                print("ASKEVAL|CHAT|\(correct ? "PASS" : "FAIL")|\(question.name)|\(reply.warning == nil ? "" : "WARNED ")\(flat.prefix(200))")
+            } catch {
+                print("ASKEVAL|CHAT|ERROR|\(question.name)|\(AskConversation.message(for: error))")
+            }
+        }
+        print("ASKEVAL|CHATSCORE|\(passed)/\(questions.filter { $0.setup.isEmpty }.count)")
+    }
+
+    /// A number matches by value, so "$40" and "92.7 USD" count as 40.00 and 92.70.
+    private static func isCorrect(_ answer: String, expected: [String]) -> Bool {
+        let answer = answer.replacingOccurrences(of: "\u{2019}", with: "'")
+        let stated = AskAnswerCheck.numbers(in: answer)
+        return expected.contains { want in
+            if let amount = Double(want.replacingOccurrences(of: ",", with: "")) {
+                return stated.contains { abs($0 - amount) < 0.005 }
+            }
+            return answer.localizedCaseInsensitiveContains(want)
+        }
+    }
+
+    /// What the model asked the tools and what they returned, for reading a wrong answer.
+    private static func toolActivityLines(in transcript: Transcript) -> [String] {
+        transcript.flatMap { entry -> [String] in
+            switch entry {
+            case .toolCalls(let calls):
+                return calls.map { "call \($0.toolName) \($0.arguments.jsonString)" }
+            case .toolOutput(let output):
+                return output.segments.compactMap { segment in
+                    if case .structure(let structure) = segment {
+                        return "gave \(structure.content.jsonString.prefix(200))"
+                    }
+                    return nil
+                }
+            default:
+                return []
+            }
+        }
     }
 
     private static func makeQuestions(context: ModelContext) throws -> [Question] {
@@ -152,6 +214,38 @@ enum AskEval {
             questions.append(Question(name: "over-under", prompt: "How much more did I spend than I earned this month?",
                                       expected: money(abs(budget.income - budget.totalSpent))))
         }
+        let twoMonthsDate = try required(Calendar.current.date(byAdding: .month, value: -2, to: now))
+        let twoMonthsAgo = TransactionAnalytics.inPeriod(rows, period: .month, referenceDate: twoMonthsDate)
+        let lastMonthName = lastMonthDate.formatted(.dateTime.month(.wide).year().locale(Locale(identifier: "en_US")))
+        let thisMonthName = now.formatted(.dateTime.month(.wide).locale(Locale(identifier: "en_US")))
+        questions.append(Question(name: "range-of-months",
+                                  prompt: "What did I spend in total from \(olderName) through \(lastMonthName)?",
+                                  expected: money(TransactionAnalytics.totalSpend(in: olderMonth + twoMonthsAgo + lastMonth))))
+        questions.append(Question(name: "reworded-total",
+                                  prompt: "what's my spending looking like so far in \(thisMonthName)",
+                                  expected: money(TransactionAnalytics.totalSpend(in: thisMonth))))
+        if let category = categories.dropFirst().first {
+            questions.append(Question(name: "reworded-category",
+                                      prompt: "\(category.category.lowercased()) total this month?",
+                                      expected: money(category.spent)))
+        }
+        if let merchant = busiestMerchant(in: twoMonthsAgo) {
+            let monthName = twoMonthsDate.formatted(.dateTime.month(.wide).locale(Locale(identifier: "en_US")))
+            questions.append(Question(name: "reworded-merchant",
+                                      prompt: "what did \(merchant) cost me in \(monthName)",
+                                      expected: money(spent(merchant, in: twoMonthsAgo))))
+        }
+        if let largest = TransactionAnalytics.spendOnly(lastMonth).map({ abs($0.amount) }).max() {
+            questions.append(Question(name: "largest-charge", prompt: "What was my largest charge last month?",
+                                      expected: money(largest)))
+        }
+        let cards = accounts.filter(\.isCredit)
+        if cards.count > 1 {
+            questions.append(Question(name: "total-owed", prompt: "How much do I owe across all my credit cards?",
+                                      expected: money(cards.reduce(0) { $0 + $1.currentBalance })))
+        }
+        questions.append(Question(name: "cant-do-that", prompt: "Move $100 into my savings account.",
+                                  expected: ["can't", "cannot", "unable", "not able", "don't have"]))
         return questions
     }
 

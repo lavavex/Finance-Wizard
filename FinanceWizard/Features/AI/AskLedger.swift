@@ -109,9 +109,9 @@ enum AskLedger {
         let rows = (try? context.fetch(FetchDescriptor<Transaction>(
             predicate: #Predicate { $0.date >= start && $0.date < end }
         ))) ?? []
-        let merchantKey = searchKey(merchant)
-        let wantedCategory = KnownCategory.canonicalName(for: category)
-            ?? category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filters = spendingFilters(merchant: merchant, category: category, categoriesInUse: rows.map(\.category))
+        let merchantKey = searchKey(filters.merchant)
+        let wantedCategory = filters.category
 
         let matching = rows.filter { row in
             if !merchantKey.isEmpty, !matchesMerchant(row, key: merchantKey) { return false }
@@ -131,7 +131,7 @@ enum AskLedger {
         let subject: String = {
             var parts: [String] = []
             if !wantedCategory.isEmpty { parts.append("on \(wantedCategory)") }
-            if !merchantKey.isEmpty { parts.append("at \(merchant.trimmingCharacters(in: .whitespaces))") }
+            if !merchantKey.isEmpty { parts.append("at \(filters.merchant)") }
             return parts.isEmpty ? "" : " " + parts.joined(separator: " ")
         }()
         let headline: String
@@ -158,6 +158,41 @@ enum AskLedger {
                 : []
         )
     }
+
+    /// The model sometimes fills an unused field with "all" or the field's own name, or puts a
+    /// category in the merchant field. Left alone, those filters match nothing and read as $0.
+    static func spendingFilters(
+        merchant: String,
+        category: String,
+        categoriesInUse: [String] = []
+    ) -> (merchant: String, category: String) {
+        func cleaned(_ text: String) -> String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return fillerWords.contains(trimmed.lowercased()) ? "" : trimmed
+        }
+        func categoryName(_ text: String) -> String? {
+            KnownCategory.canonicalName(for: text)
+                ?? categoriesInUse.first { $0.caseInsensitiveCompare(text) == .orderedSame }
+        }
+        var merchantName = cleaned(merchant)
+        let categoryText = cleaned(category)
+        var resolved = categoryText.isEmpty ? nil : categoryName(categoryText)
+
+        if resolved == nil, !merchantName.isEmpty, let named = categoryName(merchantName) {
+            resolved = named
+            merchantName = ""
+        } else if let resolved, merchantName.caseInsensitiveCompare(resolved) == .orderedSame {
+            merchantName = ""
+        }
+        // A real name in the category field that isn't a category is most likely a merchant.
+        if resolved == nil, merchantName.isEmpty { merchantName = categoryText }
+        return (merchantName, resolved ?? "")
+    }
+
+    private static let fillerWords: Set<String> = [
+        "all", "any", "none", "n/a", "na", "null", "nil", "empty", "unknown", "everything",
+        "merchant", "merchants", "category", "categories", "all merchants", "all categories"
+    ]
 
     /// Letters and digits only, so "Corner-Market" and "corner market" match.
     private static func searchKey(_ text: String) -> String {

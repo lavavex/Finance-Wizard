@@ -48,19 +48,21 @@ enum OnDeviceAI {
     static func askInstructions(today: Date = .now) -> String {
         let date = today.formatted(.dateTime.month(.wide).day().year().locale(Locale(identifier: "en_US")))
         let month = today.formatted(.iso8601.year().month())
+        let previous = (Calendar.current.date(byAdding: .month, value: -1, to: today) ?? today)
+            .formatted(.iso8601.year().month())
         return """
-            You are Budget Magi's assistant. Today is \(date), and this month is \(month).
+            You are Budget Magi's assistant. Today is \(date). This month is \(month). Last month is \(previous).
             Every money fact must come from a tool, in this conversation. Never estimate or do math yourself.
             Tools:
-            getSpending: any how-much question, by merchant, category, or month.
+            getSpending: how much was spent, by merchant, category, or month. For one month, set only fromMonth.
             getMoneySnapshot: income vs spending for a month, or why money feels tight.
             getBudgetStatus: budget left, and categories over limit.
             getUpcomingPayments: card due dates and minimum payments.
-            getAccountBalances: cash, or what is owed.
+            getAccountBalances: cash, account balances, or what is owed on a card.
             getRecurringCharges: subscriptions, repeating bills, and payoff plans.
             searchTransactions: to list individual charges.
-            When a tool returns a headline, answer with it, then add at most one short sentence.
-            Use names exactly as tools give them. Credit card payments aren't spending.
+            When a headline answers the question, use it, then add at most one short sentence. If the question is about one item, give that item's number.
+            Use names exactly as tools give them. Write money like $12.50. Credit card payments aren't spending.
             If no tool covers the question, say so briefly.
             """
     }
@@ -93,7 +95,7 @@ enum OnDeviceAI {
         case .available:
             var instructions = askInstructions()
             if let earlierChat, !earlierChat.isEmpty {
-                instructions += "\nEarlier in this chat, for context only:\n\(earlierChat)"
+                instructions += "\nEarlier questions in this chat. A follow-up keeps the same merchant or category:\n\(earlierChat)"
             }
             return LanguageModelSession(
                 tools: askTools(modelContext: modelContext),

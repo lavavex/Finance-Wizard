@@ -28,7 +28,7 @@ enum AskAnswerCheck {
         values(in: text, pattern: #"\$\s?(\d[\d,]*(?:\.\d+)?)"#)
     }
 
-    private static func numbers(in text: String) -> [Double] {
+    static func numbers(in text: String) -> [Double] {
         values(in: text, pattern: #"(\d[\d,]*(?:\.\d+)?)"#)
     }
 

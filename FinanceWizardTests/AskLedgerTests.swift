@@ -134,6 +134,43 @@ final class AskLedgerTests: XCTestCase {
 
     // MARK: - Tools
 
+    // The on-device model fills unused fields with words like these instead of leaving them out.
+    func testFillerWordsDoNotFilterSpending() {
+        for filler in ["all", "ANY", " merchant ", "category", "none", "n/a"] {
+            let filters = AskLedger.spendingFilters(merchant: filler, category: filler)
+            XCTAssertEqual(filters.merchant, "", filler)
+            XCTAssertEqual(filters.category, "", filler)
+        }
+        let named = AskLedger.spendingFilters(merchant: "Example Market", category: "merchant")
+        XCTAssertEqual(named.merchant, "Example Market")
+        XCTAssertEqual(named.category, "")
+    }
+
+    func testCategoryInTheWrongFieldStillFiltersByCategory() {
+        let doubled = AskLedger.spendingFilters(merchant: "Dining", category: "Dining")
+        XCTAssertEqual(doubled.merchant, "")
+        XCTAssertEqual(doubled.category, "Dining")
+
+        let swapped = AskLedger.spendingFilters(merchant: "dining", category: "")
+        XCTAssertEqual(swapped.merchant, "")
+        XCTAssertEqual(swapped.category, "Dining")
+
+        let custom = AskLedger.spendingFilters(merchant: "pet stuff", category: "", categoriesInUse: ["Pet Stuff"])
+        XCTAssertEqual(custom.merchant, "")
+        XCTAssertEqual(custom.category, "Pet Stuff")
+
+        let merchantInCategory = AskLedger.spendingFilters(merchant: "", category: "Example Market")
+        XCTAssertEqual(merchantInCategory.merchant, "Example Market")
+        XCTAssertEqual(merchantInCategory.category, "")
+    }
+
+    func testInstructionsNameThisMonthAndLastMonth() {
+        let january = DateComponents(calendar: .current, year: 2027, month: 1, day: 15, hour: 12).date!
+        let instructions = OnDeviceAI.askInstructions(today: january)
+        XCTAssertTrue(instructions.contains("This month is 2027-01."))
+        XCTAssertTrue(instructions.contains("Last month is 2026-12."))
+    }
+
     func testToolAnswersWithoutTheModel() async throws {
         insert("Example Market", -25, "Groceries", day: Calendar.current.component(.day, from: Date()), month: nil)
         try context.save()
@@ -172,15 +209,23 @@ final class AskLedgerTests: XCTestCase {
 
     // MARK: - Conversation
 
-    func testRecapKeepsRecentTurnsAndShortensLongOnes() {
+    func testRecapKeepsRecentQuestionsAndLeavesOutAnswers() {
         let long = String(repeating: "x", count: 1000)
-        let history = (0..<6).map { AskChatTurn(isUser: $0 % 2 == 0, text: "turn \($0) \(long)") }
+        let history = (0..<8).map { AskChatTurn(isUser: $0 % 2 == 0, text: "turn \($0) \(long)") }
 
         let recap = AskConversation.recap(of: history)
 
-        XCTAssertFalse(recap.contains("turn 1 "))
+        XCTAssertFalse(recap.contains("turn 0 "))
         XCTAssertTrue(recap.contains("turn 2 "))
-        XCTAssertLessThan(recap.count, 1100)
+        XCTAssertFalse(recap.contains("turn 3 "), "An old amount in the recap gets repeated as if it were new.")
+        XCTAssertLessThan(recap.count, 600)
+    }
+
+    func testFollowUpWordingIsRecognized() {
+        XCTAssertTrue(AskConversation.isFollowUp("And last month?"))
+        XCTAssertTrue(AskConversation.isFollowUp("  what about groceries?"))
+        XCTAssertFalse(AskConversation.isFollowUp("How much did I spend this month?"))
+        XCTAssertFalse(AskConversation.isFollowUp("Android subscriptions?"))
     }
 
     func testFollowUpsMatchWhatWasAnswered() {

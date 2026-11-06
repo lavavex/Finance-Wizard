@@ -157,7 +157,14 @@ struct AccountBalancesTool: Tool {
                     availableUSD: AskLedger.rounded(account.availableBalance ?? account.currentBalance)
                 )
             }
-            return AccountBalanceList(accounts: rows)
+            return AccountBalanceList(
+                accounts: rows,
+                totalOwedAllCardsUSD: AskLedger.rounded(accounts.filter(\.isCredit).reduce(0) { $0 + $1.currentBalance }),
+                totalCheckingAndSavingsUSD: AskLedger.rounded(
+                    accounts.filter { $0.subtype == "checking" || $0.subtype == "savings" }
+                        .reduce(0) { $0 + $1.currentBalance }
+                )
+            )
         }
     }
 }
@@ -174,6 +181,9 @@ struct AccountBalanceRow {
 @Generable
 struct AccountBalanceList {
     var accounts: [AccountBalanceRow]
+    /// Totals, since the model can't reliably add a list of balances.
+    var totalOwedAllCardsUSD: Double
+    var totalCheckingAndSavingsUSD: Double
 }
 
 /// Detected recurring charges (capped).
@@ -247,28 +257,28 @@ struct RecurringChargeList {
 /// Totals for a merchant, category, or date range. The app does the math, not the model.
 struct SpendingQueryTool: Tool {
     let name = "getSpending"
-    let description = "Exact spending total for any merchant, category, month, or range of months. Use for every how-much question."
+    let description = "Exact spending total. Leave out merchant and category for all spending. Set toMonth only when the user asks about several months."
 
     let modelContext: ModelContext
 
     @Generable
     struct Arguments {
-        @Guide(description: "Merchant name, or empty for all merchants")
-        var merchant: String
-        @Guide(description: "Spending category, or empty for all categories")
-        var category: String
-        @Guide(description: "First month as YYYY-MM, or empty for this month")
+        @Guide(description: "Store or business the user named")
+        var merchant: String?
+        @Guide(description: "Spending category the user named")
+        var category: String?
+        @Guide(description: "The month as YYYY-MM")
         var fromMonth: String
-        @Guide(description: "Last month as YYYY-MM, or empty for the same month as fromMonth")
-        var toMonth: String
+        @Guide(description: "Last month of a multi-month range as YYYY-MM")
+        var toMonth: String?
     }
 
     func call(arguments: Arguments) async throws -> SpendingResult {
         try await MainActor.run {
-            let range = AskLedger.monthRange(from: arguments.fromMonth, to: arguments.toMonth)
+            let range = AskLedger.monthRange(from: arguments.fromMonth, to: arguments.toMonth ?? "")
             let result = AskLedger.spending(
-                merchant: arguments.merchant,
-                category: arguments.category,
+                merchant: arguments.merchant ?? "",
+                category: arguments.category ?? "",
                 range: range,
                 in: modelContext
             )

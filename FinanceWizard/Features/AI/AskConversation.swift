@@ -27,6 +27,7 @@ final class AskConversation {
     private let modelContext: ModelContext
     private var session: LanguageModelSession?
     private var recap = ""
+    private var hasAnswered = false
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
@@ -45,8 +46,11 @@ final class AskConversation {
         history: [AskChatTurn],
         onText: @escaping (String) -> Void
     ) async throws -> AskReply {
-        if session == nil { startSession(history: history) }
-        if await isNearContextLimit() { startSession(history: history) }
+        // A new session per question, carrying the earlier questions. In one long session the model
+        // picks worse tools as it fills, and it answers from old results instead of asking again.
+        // A follow-up stays in the session, since it only makes sense with the last answer.
+        if session == nil || (hasAnswered && !Self.isFollowUp(text)) { startSession(history: history) }
+        hasAnswered = true
 
         var answer: String
         do {
@@ -77,6 +81,8 @@ final class AskConversation {
 
     // MARK: - Session
 
+    var transcript: Transcript? { session?.transcript }
+
     private func startSession(history: [AskChatTurn]) {
         recap = Self.recap(of: history)
         session = try? OnDeviceAI.makeAskSession(modelContext: modelContext, earlierChat: recap)
@@ -94,25 +100,18 @@ final class AskConversation {
         return answer
     }
 
-    /// Leaves room for the next question and its tool results.
-    private func isNearContextLimit() async -> Bool {
-        guard let session else { return false }
-        if #available(iOS 26.4, *) {
-            let model = SystemLanguageModel.default
-            guard let used = try? await model.tokenCount(for: session.transcript) else {
-                return session.transcript.count > 14
-            }
-            return Double(used) > Double(model.contextSize) * 0.6
-        }
-        return session.transcript.count > 14
+    /// Wording that leans on the previous question, such as "And last month?".
+    static func isFollowUp(_ text: String) -> Bool {
+        let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["and ", "what about", "how about", "same ", "compare", "show the", "how much in total"]
+            .contains { lower.hasPrefix($0) }
     }
 
-    /// The last few turns, shortened, for the instructions of a new session.
+    /// The last few questions, for the instructions of a new session. Answers stay out, so the
+    /// model can't repeat an old amount as if it were new.
     static func recap(of history: [AskChatTurn]) -> String {
-        history.suffix(4).map { turn in
-            "\(turn.isUser ? "User" : "Assistant"): \(turn.text.prefix(240))"
-        }
-        .joined(separator: "\n")
+        history.filter(\.isUser).suffix(3).map { "User: \($0.text.prefix(160))" }
+            .joined(separator: "\n")
     }
 
     // MARK: - Checking answers
