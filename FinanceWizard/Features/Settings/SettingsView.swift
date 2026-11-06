@@ -44,6 +44,7 @@ struct SettingsView: View {
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
     @Environment(\.sampleData) private var sampleData
     @State private var showsDeveloperTools = false
+    @State private var showEraseAllData = false
 
     var body: some View {
         NavigationStack {
@@ -235,6 +236,12 @@ struct SettingsView: View {
                     Text("Backup & restore")
                 }
 
+                Section {
+                    Button("Erase All Data", role: .destructive) { showEraseAllData = true }
+                } footer: {
+                    Text("Deletes everything on this device, including your banks and keys.")
+                }
+
                 }
 
                 if let statusMessage {
@@ -310,6 +317,9 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .task { showsDeveloperTools = await DeveloperTools.isAvailable() }
+            .sheet(isPresented: $showEraseAllData, onDismiss: reload) {
+                EraseAllDataView()
+            }
             .onAppear {
                 reload()
                 consumeIncomingBackupIfNeeded()

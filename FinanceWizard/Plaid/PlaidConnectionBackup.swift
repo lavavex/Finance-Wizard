@@ -88,6 +88,15 @@ enum PlaidConnectionBackup {
         AskStore.wipe()
     }
 
+    /// Everything on this device, for Settings → Erase All Data. Unlike a wipe before a restore,
+    /// this also covers cloud AI keys and consent, which backups don't carry.
+    @MainActor
+    static func eraseEverything(modelContext: ModelContext) throws {
+        try wipeLocalAppData(modelContext: modelContext)
+        for provider in AskProvider.allCases { provider.removeKeyAndConsent() }
+        AskModel.selected = .onDevice
+    }
+
     /// Everything a backup can bring back. Ask chats are not backed up, so they stay out.
     @MainActor
     private static func wipeBackedUpData(modelContext: ModelContext) throws {

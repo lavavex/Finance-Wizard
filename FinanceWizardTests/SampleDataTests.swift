@@ -51,6 +51,20 @@ final class SampleDataTests: XCTestCase {
         XCTAssertTrue(AskStore.container === saved)
     }
 
+    func testEraseNeedsTheExactWord() {
+        XCTAssertTrue(EraseAllDataView.isConfirmed("DELETE"))
+        for text in ["", "delete", "Delete", "DELETE ", " DELETE", "DELET", "DELETE!"] {
+            XCTAssertFalse(EraseAllDataView.isConfirmed(text), text)
+        }
+    }
+
+    func testEraseIsBlockedInSampleData() throws {
+        DemoMode.isSampleActive = true
+        let context = ModelContext(try DemoMode.makeSeededContainer())
+        XCTAssertThrowsError(try PlaidConnectionBackup.eraseEverything(modelContext: context))
+        XCTAssertFalse(try context.fetch(FetchDescriptor<FinanceWizard.Transaction>()).isEmpty)
+    }
+
     func testDeveloperToolsAreHiddenInAppStoreBuilds() {
         XCTAssertFalse(DeveloperTools.isAvailable(in: .production))
         XCTAssertFalse(DeveloperTools.isAvailable(in: nil))
