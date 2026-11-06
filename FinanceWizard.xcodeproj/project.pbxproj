@@ -543,7 +543,6 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Budget Magi";
 				INFOPLIST_KEY_CFBundleIconName = Mika;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Budget Magi may use the local network only if you import data from another device on your LAN.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -595,7 +594,6 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Budget Magi";
 				INFOPLIST_KEY_CFBundleIconName = Mika;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Budget Magi may use the local network only if you import data from another device on your LAN.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

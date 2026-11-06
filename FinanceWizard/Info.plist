@@ -14,14 +14,6 @@
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
 	</dict>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<!-- Plaid is HTTPS; local networking kept permissive for optional offline import tools -->
-		<key>NSAllowsArbitraryLoads</key>
-		<false/>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 
 	<!-- Hosted Link completion (ASWebAuthenticationSession callback) -->
 	<key>CFBundleURLTypes</key>

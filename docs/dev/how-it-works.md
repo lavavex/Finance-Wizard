@@ -173,6 +173,8 @@ The model is unreliable at math and has a small context window, so `AskLedger` c
 
 Balance and search tools return `CardLabelStore` display names (`account.displayName` / `cardLabel`), not Plaid’s raw `Credit Card` label; search uses `TransactionSearch.filter` (same matcher as the Transactions search bar). `getSpending` matches merchants on letters and digits only.
 
+`MoneyInsights` computes the "Why?" screens and monthly recap from the rows, and the on-device model only rewords those facts, with `AskAnswerCheck` rejecting any amount it adds. AI search reads a sentence into `TransactionSearchFilter`, then `supported(by:)` drops any filter the user's words don't support.
+
 The model menu on the Ask screen also offers Claude and Grok through `AskCloudChat`, using the user's own API keys. `AskCloudTool` wraps the same tools and instructions, so answers can be compared, and **Try with** asks the last question again on another model. `AskProviderSetupView` collects the key and consent first. Tool results, the question, and recent chat are all that leave the device. Answers go through `AskAnswerCheck` too, though a cloud model's own correct arithmetic can trigger its warning.
 
 `AskEval` (Debug only) scores Ask through `AskConversation`, one question at a time and then all in one chat, with questions and answers computed from the data it runs on. It needs Apple Intelligence: run `AskEvalTests` on a device with `TEST_RUNNER_FW_ASK_EVAL=1`. Transaction detail can **Suggest with Apple Intelligence**. App icon source: `FinanceWizard/Mika.icon/` (Icon Composer).
