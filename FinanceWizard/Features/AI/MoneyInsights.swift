@@ -307,7 +307,8 @@ extension MoneyInsights {
         }
 
         let spend = TransactionAnalytics.spendOnly(all)
-        let recurring = SubscriptionAnalytics.detect(in: all, now: now)
+        let detected = SubscriptionAnalytics.detect(in: all, now: now)
+        let recurring = detected.filter { !SubscriptionAnalytics.isOverdue($0, now: now) }
         let categoryOf = Dictionary(spend.map { ($0.transactionId, $0.category) }, uniquingKeysWith: { first, _ in first })
         let isSubscription = { (item: SubscriptionCandidate) -> Bool in
             let category = item.sampleTransactionIds.last.flatMap { categoryOf[$0] } ?? ""
@@ -321,7 +322,13 @@ extension MoneyInsights {
         let subscriptions = recurring.filter(isSubscription).map(describe)
         if !subscriptions.isEmpty { sections.append(.init(title: "Subscriptions", lines: subscriptions)) }
 
-        let known = Set(recurring.flatMap(\.sampleTransactionIds))
+        // Kept apart so a model asks about them instead of budgeting for a bill that may be gone.
+        let lapsed = detected.filter { SubscriptionAnalytics.isOverdue($0, now: now) }.map(describe)
+        if !lapsed.isEmpty {
+            sections.append(.init(title: "Bills that stopped charging, so they may have ended or moved to another account", lines: lapsed))
+        }
+
+        let known = Set(detected.flatMap(\.sampleTransactionIds))
         let vagueSince = calendar.date(byAdding: .day, value: -60, to: now) ?? now
         let vague = spend
             .filter { $0.date >= vagueSince && !known.contains($0.transactionId) && looksLikeVaguePayment($0.title) }
@@ -359,7 +366,7 @@ extension MoneyInsights {
         )
     }
 
-    private static func shortDay(_ date: Date) -> String {
+    static func shortDay(_ date: Date) -> String {
         date.formatted(.dateTime.month(.abbreviated).day().locale(Locale(identifier: "en_US")))
     }
 

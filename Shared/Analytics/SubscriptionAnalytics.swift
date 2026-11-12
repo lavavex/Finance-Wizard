@@ -294,6 +294,22 @@ enum SubscriptionAnalytics {
         return candidate.lastDate >= cutoff
     }
 
+    /// Past its usual date by about half a cycle, so it may have ended or moved to another
+    /// account. Still listed until `isActive` gives up on it.
+    nonisolated static func isOverdue(_ candidate: SubscriptionCandidate, now: Date = Date()) -> Bool {
+        let days: Int = {
+            switch candidate.cadence {
+            case .weekly: return 14
+            case .monthly: return 46
+            case .yearly: return 395
+            }
+        }()
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: now) else {
+            return false
+        }
+        return candidate.lastDate < cutoff
+    }
+
     // MARK: - User declarations
 
     /// Build candidates from transactions the user marked as weekly/monthly/yearly.

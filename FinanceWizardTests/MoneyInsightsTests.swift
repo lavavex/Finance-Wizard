@@ -169,6 +169,20 @@ final class MoneyInsightsTests: XCTestCase {
         ]).isEmpty)
     }
 
+    func testBillThatSkippedItsDateIsSetApartInTheMoneyPlan() {
+        let rows = [
+            row("Example Power", 80, month: 7, category: "Utilities"),
+            row("Example Power", 80, month: 8, category: "Utilities"),
+            row("Example Phone", 50, month: 9, category: "Home Internet"),
+            row("Example Phone", 50, month: 10, category: "Home Internet"),
+        ]
+        let plan = MoneyInsights.moneyPlan(rows, income: [], accounts: [], plans: [], now: date(11, 6))
+
+        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Recurring bills: Example Phone") }, "\(plan.facts)")
+        XCTAssertFalse(plan.facts.contains { $0.hasPrefix("Recurring bills: Example Power") }, "\(plan.facts)")
+        XCTAssertTrue(plan.facts.contains { $0.contains("stopped charging") && $0.contains("Example Power: $80.00") }, "\(plan.facts)")
+    }
+
     func testMoneyPlanShowsDebtBillsAndUnidentifiedPayments() {
         let card = BankAccount(
             accountId: "card", itemId: "item", name: "Example Card", mask: "1111", type: "credit",

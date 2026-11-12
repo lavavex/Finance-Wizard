@@ -83,6 +83,14 @@ The bank lists the payment on checking **and** on the card. Accounts → Total p
 
 Those are card credits, not paychecks. Sync files them as **Refund** (not Total Income). A loan disbursement into checking is **Loan**, not earnings. Payroll and other deposits to checking stay income.
 
+### My paycheck shows a code instead of my employer
+
+Some banks show a paycheck only as a payroll code, like PAYROLLXYZ. If another linked bank has paychecks from the same employer by name, Sync uses that name for the coded ones too. Run **Sync → Full re-sync** once so older paychecks are read again. With only the coded bank linked, the code stays.
+
+### A payment to my card counted as spending
+
+A bank line that says only **PAYMENT** or **ACH PMT** becomes a card payment when a linked card received the same amount within a few days. If the card isn't linked, or the amounts differ, open the row and set the category to **Credit Card Payment**.
+
 ### A phone, insurance, or utility bill is missing from Total Spend
 
 Words like **autopay** in a merchant description (VERIZON \*AUTOPAY, T‑MOBILE AUTOPAY, GEICO AUTOPAY) count as a card payment only on money **coming in** to a credit card, or when the description also names a card issuer. A utility autopay is still spend. Pull down to **Sync**.

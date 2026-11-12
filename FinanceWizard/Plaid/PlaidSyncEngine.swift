@@ -37,6 +37,7 @@ struct PlaidSyncReport: Sendable {
     var pendingMerged: Int = 0
     var skippedTransfers: Int = 0
     var cleanedLegacy: Int = 0
+    var pairedCardPayments: Int = 0
     var accountsUpdated: Int = 0
     var liabilitiesUpdated: Int = 0
     var refreshedItems: Int = 0
@@ -52,6 +53,7 @@ struct PlaidSyncReport: Sendable {
         if pendingMerged > 0 { lines.append("Pending→posted merged: \(pendingMerged)") }
         if skippedTransfers > 0 { lines.append("Skipped transfers: \(skippedTransfers)") }
         if cleanedLegacy > 0 { lines.append("Removed mis-filed transfers: \(cleanedLegacy)") }
+        if pairedCardPayments > 0 { lines.append("Bank payments matched to cards: \(pairedCardPayments)") }
         if accountsUpdated > 0 { lines.append("Accounts refreshed: \(accountsUpdated)") }
         if liabilitiesUpdated > 0 { lines.append("Credit details refreshed: \(liabilitiesUpdated)") }
         if refreshedItems > 0 { lines.append("Forced bank refresh: \(refreshedItems)") }
@@ -188,7 +190,9 @@ enum PlaidSyncEngine {
             }
         }
 
+        nameIncomeByPayrollCode(modelContext: modelContext)
         relabelPayrollDeposits(modelContext: modelContext)
+        report.pairedCardPayments = pairVaguePaymentsWithCards(modelContext: modelContext)
         // Every Item synced without a failure, so a re-linked bank's rows are all back.
         if PlaidItemStore.needsIncomeDedupe, !report.itemLines.contains(where: { $0.hasSuffix(": failed") }) {
             dedupeIncome(modelContext: modelContext)
@@ -897,6 +901,8 @@ enum PlaidSyncEngine {
         )
         let amount = abs(tx.amount)
         let pending = tx.pending ?? false
+        // The full bank line, which can carry a payroll code that the short name drops.
+        let rawName = tx.original_description?.isEmpty == false ? tx.original_description : tx.name
         let parts = paymentMethod.components(separatedBy: " ···")
         let accountName = parts.first
         let accountMask = parts.count > 1 ? parts[1] : nil
@@ -909,7 +915,7 @@ enum PlaidSyncEngine {
             existing.accountName = accountName
             existing.accountMask = accountMask
             existing.sourceInstitution = accountName
-            existing.rawName = tx.name
+            existing.rawName = rawName
             existing.pfc = pfcDetailed
             existing.pending = pending
             existing.kind = "income"
@@ -924,7 +930,7 @@ enum PlaidSyncEngine {
                     accountName: accountName,
                     accountMask: accountMask,
                     sourceInstitution: accountName,
-                    rawName: tx.name,
+                    rawName: rawName,
                     pfc: pfcDetailed,
                     pending: pending,
                     kind: "income"
@@ -1697,7 +1703,7 @@ enum PlaidSyncEngine {
     /// Delete one CreditCardPayment by Plaid transaction_id if it exists.
     @MainActor
     @discardableResult
-    private static func deleteCreditPaymentOnly(transactionID: String, modelContext: ModelContext) -> Bool {
+    static func deleteCreditPaymentOnly(transactionID: String, modelContext: ModelContext) -> Bool {
         let targetId = transactionID
         var desc = FetchDescriptor<CreditCardPayment>(
             predicate: #Predicate<CreditCardPayment> { row in

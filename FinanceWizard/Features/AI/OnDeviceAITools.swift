@@ -213,7 +213,10 @@ struct RecurringChargesTool: Tool {
             // Uncapped: detection looks back 400 days, and a yearly charge can be that old.
             let rows = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
             let snaps = SubscriptionAnalytics.snapshots(from: rows)
-            let groups = SubscriptionAnalytics.detect(snapshots: snaps)
+            let detected = SubscriptionAnalytics.detect(snapshots: snaps)
+            // A bill that skipped its date isn't an upcoming cost until it charges again.
+            let groups = detected.filter { !SubscriptionAnalytics.isOverdue($0) }
+            let lapsed = detected.filter { SubscriptionAnalytics.isOverdue($0) }
             let monthlyTotal = groups.reduce(0.0) { $0 + $1.estimatedMonthly }
             var items = groups.prefix(8).map {
                 RecurringChargeRow(
@@ -239,8 +242,15 @@ struct RecurringChargesTool: Tool {
                 )
             }
             let total = AskLedger.rounded(monthlyTotal + extraPrincipal)
+            var headline = "Recurring charges cost about \(AskLedger.money(total)) a month across \(groups.count) charges."
+            if !lapsed.isEmpty {
+                let names = lapsed.prefix(4).map {
+                    "\($0.displayVendor) (\(AskLedger.money($0.typicalAmount)), last \(MoneyInsights.shortDay($0.lastDate)))"
+                }
+                headline += " Not counted, because they haven't charged lately: \(names.joined(separator: ", "))."
+            }
             return RecurringChargeList(
-                headline: "Recurring charges cost about \(AskLedger.money(total)) a month across \(groups.count) charges.",
+                headline: headline,
                 estimatedMonthlyUSD: total,
                 charges: Array(items)
             )

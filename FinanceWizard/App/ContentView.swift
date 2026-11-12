@@ -293,7 +293,7 @@ struct AllTransactionsView: View {
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(periodNet >= 0 ? .green : .primary)
                     }
-                    Text("\(periodTransactions.count) expenses · \(periodIncome.count) income in \(periodLabel.lowercased())")
+                    Text("\(TransactionAnalytics.spendOnly(periodTransactions).count) expenses · \(periodIncome.count) income in \(periodLabel.lowercased())")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

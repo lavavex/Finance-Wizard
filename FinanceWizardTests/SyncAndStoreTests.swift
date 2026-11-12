@@ -147,6 +147,122 @@ final class SyncAndStoreTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Income>()), 2)
     }
 
+    // MARK: - Card payments from a bank that hides the payee
+
+    private func bankAndCardRows(_ rows: [(title: String, amount: Double, day: Int, account: String, category: String)]) -> [Transaction] {
+        rows.enumerated().map { index, row in
+            Transaction(
+                transactionId: "row-\(index)",
+                title: row.title,
+                amount: -row.amount,
+                date: Date(timeIntervalSince1970: 1_790_000_000 + Double(row.day) * 86_400),
+                category: row.category,
+                paymentMethod: row.account,
+                plaidAccountId: row.account
+            )
+        }
+    }
+
+    private func paired(_ rows: [Transaction]) -> [String] {
+        PlaidSyncEngine.vaguePaymentsMatchingCardPayments(in: rows, creditAccountIds: ["card"]).map(\.transactionId)
+    }
+
+    func testVaguePaymentMatchingACardPaymentIsThatPayment() {
+        let payment = KnownCategory.creditCardPayment.rawValue
+        let rows = bankAndCardRows([
+            ("MOBILE PAYMENT - THANK YOU", 100, 6, "card", payment),
+            ("ACH PMT", 100, 10, "checking", "Miscellaneous"),
+            ("PAYMENT", 177.09, 10, "checking", "Miscellaneous"),
+            ("Corner Cafe", 100, 7, "checking", "Dining"),
+        ])
+        XCTAssertEqual(paired(rows), ["row-1"])
+    }
+
+    func testOneCardPaymentExplainsOnlyOneBankRow() {
+        let payment = KnownCategory.creditCardPayment.rawValue
+        // The card payment already has its bank row, so the vague one is something else.
+        let alreadyKnown = bankAndCardRows([
+            ("Payment Thank You-Mobile", 100, 6, "card", payment),
+            ("EXAMPLE CARD ACH PMT", 100, 6, "checking", payment),
+            ("ACH PMT", 100, 8, "checking", "Miscellaneous"),
+        ])
+        XCTAssertEqual(paired(alreadyKnown), [])
+
+        let twoVague = bankAndCardRows([
+            ("Payment Thank You-Mobile", 100, 6, "card", payment),
+            ("ACH PMT", 100, 7, "checking", "Miscellaneous"),
+            ("ACH PMT", 100, 8, "checking", "Miscellaneous"),
+        ])
+        XCTAssertEqual(paired(twoVague), ["row-1"])
+    }
+
+    func testVaguePaymentFarFromTheCardPaymentOrLockedByTheUserStaysSpending() {
+        let payment = KnownCategory.creditCardPayment.rawValue
+        let rows = bankAndCardRows([
+            ("Payment Thank You-Mobile", 100, 1, "card", payment),
+            ("ACH PMT", 100, 20, "checking", "Miscellaneous"),
+            ("Payment Thank You-Mobile", 60, 20, "card", payment),
+            ("PAYMENT", 60, 21, "checking", "Utilities"),
+        ])
+        rows[3].categoryLocked = true
+        XCTAssertEqual(paired(rows), [])
+    }
+
+    func testPairingRefilesTheBankRowWithoutASecondPaymentRecord() throws {
+        context.insert(BankAccount(
+            accountId: "card", itemId: "item", name: "Example Card", mask: "1111", type: "credit",
+            institutionName: "Example Bank", currentBalance: 500
+        ))
+        for row in bankAndCardRows([
+            ("MOBILE PAYMENT - THANK YOU", 100, 6, "card", KnownCategory.creditCardPayment.rawValue),
+            ("ACH PMT", 100, 10, "checking", "Miscellaneous"),
+        ]) {
+            context.insert(row)
+        }
+        try context.save()
+
+        XCTAssertEqual(PlaidSyncEngine.pairVaguePaymentsWithCards(modelContext: context), 1)
+        XCTAssertEqual(PlaidSyncEngine.pairVaguePaymentsWithCards(modelContext: context), 0)
+
+        let bank = try XCTUnwrap(context.fetch(FetchDescriptor<Transaction>()).first { $0.title == "ACH PMT" })
+        XCTAssertEqual(bank.category, KnownCategory.creditCardPayment.rawValue)
+        XCTAssertTrue(bank.isCategoryLocked)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<CreditCardPayment>()), 0)
+    }
+
+    // MARK: - Paychecks known only by a payroll code
+
+    private func paycheck(_ source: String, raw: String?, pfc: String? = "INCOME_SALARY") -> Income {
+        Income(
+            transactionId: UUID().uuidString, source: source, amount: 600,
+            date: Date(timeIntervalSince1970: 1_790_000_000), category: "Payroll", rawName: raw, pfc: pfc
+        )
+    }
+
+    func testPaycheckTakesTheEmployerNamedOnAnotherBanksLine() throws {
+        context.insert(paycheck("Example Market", raw: "EXAMPLE MARKET CORP PAYROLLEXM PPD ID: 1234567890"))
+        context.insert(paycheck("PAYROLLEXM", raw: "PAYROLLEXM"))
+        context.insert(paycheck("EXM CORPORATION PAYROLLEXM PPD ID: 1234567890", raw: "EXM CORPORATION PAYROLLEXM PPD ID: 1234567890"))
+        context.insert(paycheck("OTHERCODE99", raw: "OTHERCODE99"))
+        context.insert(paycheck("PAYROLLEXM", raw: "PAYROLLEXM", pfc: "TRANSFER_IN_DEPOSIT"))
+        try context.save()
+
+        XCTAssertEqual(PlaidSyncEngine.nameIncomeByPayrollCode(modelContext: context), 2)
+
+        let sources = try context.fetch(FetchDescriptor<Income>()).map(\.source).sorted()
+        XCTAssertEqual(sources, ["Example Market", "Example Market", "Example Market", "OTHERCODE99", "PAYROLLEXM"])
+    }
+
+    func testCodeSharedByTwoEmployersNamesNobody() {
+        let employers = PlaidSyncEngine.employersByPayrollCode([
+            ("Example Market", "EXAMPLE MARKET SHAREDCODE"),
+            ("Example Diner", "EXAMPLE DINER SHAREDCODE DIRECTDEP"),
+        ])
+        XCTAssertNil(employers["SHAREDCODE"])
+        XCTAssertNil(employers["DIRECTDEP"])
+        XCTAssertEqual(employers["EXAMPLE"], nil)
+    }
+
     // MARK: - Unreadable store
 
     func testMoveStoreAsideKeepsFilesAndReplacesOlderCopy() throws {
