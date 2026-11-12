@@ -291,21 +291,6 @@ struct SettingsView: View {
                     Text("On-device AI")
                 }
 
-                Section {
-                    ForEach(AskProvider.allCases) { provider in
-                        NavigationLink(provider.name) {
-                            AskProviderSetupView(provider: provider)
-                        }
-                    }
-                    NavigationLink("What Ask Remembers") {
-                        AskNotesView()
-                    }
-                } header: {
-                    Text("Cloud AI")
-                } footer: {
-                    Text("Optional models for Ask, using your own API keys. Choosing one sends your financial data to that company.")
-                }
-
                 if showsDeveloperTools, !sampleData.isActive {
                     Section {
                         NavigationLink {

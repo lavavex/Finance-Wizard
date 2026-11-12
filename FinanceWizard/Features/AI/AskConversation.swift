@@ -20,8 +20,6 @@ struct AskReply: Equatable {
     var followUps: [String]
     /// Shown under the answer when an amount couldn't be matched to the user's data.
     var warning: String?
-    /// Facts a cloud model saved while answering.
-    var remembered: [String] = []
 }
 
 @MainActor
@@ -186,12 +184,6 @@ final class AskConversation {
 
     /// What to show instead of a framework error.
     static func message(for error: Error) -> String {
-        if let cloud = error as? AskCloudError {
-            return cloud.errorDescription ?? fallbackMessage
-        }
-        if error is URLError {
-            return "Couldn't reach the service. Check your connection and try again."
-        }
         if isContextOverflow(error) {
             return "This chat got too long for the on-device model. Ask again and it will start fresh."
         }

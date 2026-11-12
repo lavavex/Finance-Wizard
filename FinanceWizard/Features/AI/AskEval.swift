@@ -200,7 +200,8 @@ enum AskEval {
             questions.append(Question(name: "next-payment", prompt: "What's the minimum payment due on \(next.displayName)?",
                                       expected: money(next.minimumPaymentAmount ?? 0)))
         }
-        let recurring = SubscriptionAnalytics.detect(in: rows).reduce(0) { $0 + $1.estimatedMonthly }
+        let recurring = SubscriptionAnalytics.detect(in: rows).filter { !SubscriptionAnalytics.isOverdue($0) }
+            .reduce(0) { $0 + $1.estimatedMonthly }
         if recurring > 0 {
             questions.append(Question(name: "recurring-total", prompt: "How much do my recurring charges cost per month?",
                                       expected: money(recurring)))

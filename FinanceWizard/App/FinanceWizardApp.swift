@@ -17,6 +17,7 @@ struct FinanceWizardApp: App {
 
     init() {
         PlaidConnectionBackup.purgeTemporaryFiles()
+        PlaidConnectionBackup.removeCloudAskLeftovers()
         DebugDataExporter.discardTemporaryFiles()
         do {
             #if DEBUG

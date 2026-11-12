@@ -38,10 +38,6 @@ Plaid keys and banks are required to pull transactions. See [Getting started](ge
 
 **Settings → Erase All Data** deletes everything on this device, including banks and keys, after you type `DELETE`. It can't be undone. Backup files you saved elsewhere aren't touched, and your bank stays connected in your Plaid account until you remove it there.
 
-## Cloud AI
-
-**Settings → Cloud AI** adds or removes your Anthropic and xAI API keys for Ask. Removing a key also withdraws your consent to send data to that company.
-
 ## On-device AI
 
 **Settings → On-device AI** shows whether Apple Intelligence can run on this iPhone (checks when you open Settings).

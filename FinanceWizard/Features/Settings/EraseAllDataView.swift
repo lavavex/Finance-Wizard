@@ -25,8 +25,8 @@ struct EraseAllDataView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("This deletes all of Budget Magi's data on this device: transactions, income, accounts, budgets, payoff plans, your Ask chat, linked banks, and your Plaid, Anthropic, and xAI keys.")
-                    Text("It can't be undone. Backup files you saved elsewhere aren't touched, and neither are your accounts with Plaid, Anthropic, or xAI. To stop Plaid's access to a bank, remove the bank in your Plaid account too.")
+                    Text("This deletes all of Budget Magi's data on this device: transactions, income, accounts, budgets, payoff plans, your Ask chat, linked banks, and your Plaid keys.")
+                    Text("It can't be undone. Backup files you saved elsewhere aren't touched, and neither is your Plaid account. To stop Plaid's access to a bank, remove the bank in your Plaid account too.")
                 }
 
                 Section {

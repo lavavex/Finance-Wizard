@@ -73,7 +73,7 @@ docs/                          GitHub Pages documentation
 | **Where data stays** | Inference is on-device (Apple Intelligence); still prefer minimal transaction context in prompts |
 | **Capability / entitlement** | None beyond what the system already requires for Apple Intelligence |
 
-`Features/AI/` — availability on Settings. **Ask** tab bar accessory on `ContentView` (sheet, not a sixth tab). `AskLedger` computes every total, tools hand short results to the model, and `AskConversation` manages on-device sessions, the recap of earlier questions, and answer checks. `AskCloudChat` runs Claude and Grok with the same tools. Persisted thread (separate store). `suggestCategory` on transaction detail.
+`Features/AI/` — availability on Settings. **Ask** tab bar accessory on `ContentView` (sheet, not a sixth tab). `AskLedger` computes every total, tools hand short results to the model, and `AskConversation` manages on-device sessions, the recap of earlier questions, and answer checks. Persisted thread (separate store). `suggestCategory` on transaction detail.
 
 ### Cost of the hot paths
 

@@ -88,14 +88,22 @@ enum PlaidConnectionBackup {
         AskStore.wipe()
     }
 
-    /// Everything on this device, for Settings → Erase All Data. Unlike a wipe before a restore,
-    /// this also covers cloud AI keys and consent, which backups don't carry.
+    /// Everything on this device, for Settings → Erase All Data.
     @MainActor
     static func eraseEverything(modelContext: ModelContext) throws {
         try wipeLocalAppData(modelContext: modelContext)
-        for provider in AskProvider.allCases { provider.removeKeyAndConsent() }
-        AskNotes.clear()
-        AskModel.selected = .onDevice
+        removeCloudAskLeftovers()
+    }
+
+    /// Ask once offered Claude and Grok with the user's own API keys. This deletes those keys,
+    /// the consent flags, and the facts those models saved, which nothing uses any more.
+    static func removeCloudAskLeftovers() {
+        for provider in ["anthropic", "xai"] {
+            PlaidKeychain.delete(account: "ask.apiKey.\(provider)")
+            UserDefaults.standard.removeObject(forKey: "ask.cloudConsent.\(provider)")
+        }
+        UserDefaults.standard.removeObject(forKey: "ask.notes")
+        UserDefaults.standard.removeObject(forKey: "ask.selectedModel")
     }
 
     /// Everything a backup can bring back. Ask chats are not backed up, so they stay out.
