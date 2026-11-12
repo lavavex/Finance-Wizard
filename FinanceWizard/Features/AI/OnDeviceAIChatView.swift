@@ -6,6 +6,7 @@
 //  model and AskCloudChat runs Claude and Grok.
 //
 
+import GameController
 import SwiftData
 import SwiftUI
 
@@ -151,8 +152,10 @@ struct OnDeviceAIChatView: View {
                             withAnimation { proxy.scrollTo(last, anchor: .bottom) }
                         }
                     }
-                    // A reopened chat starts at its latest message.
-                    .onAppear {
+                    // A reopened chat starts at its latest message. The list has no rows to scroll
+                    // to until its first layout, so this waits a moment.
+                    .task {
+                        try? await Task.sleep(for: .milliseconds(150))
                         if let last = messages.last?.id { proxy.scrollTo(last, anchor: .bottom) }
                     }
                 }
@@ -195,6 +198,15 @@ struct OnDeviceAIChatView: View {
                     .lineLimit(1...4)
                     .writingToolsBehavior(.complete)
                     .focused($composerFocused)
+                    // A multi-line field takes Return as a new line and never reports the key, so
+                    // a typed line break is the only sign of it. Pasted text keeps its lines.
+                    .onChange(of: draft) { old, new in
+                        guard GCKeyboard.coalesced != nil, new.count == old.count + 1,
+                              new.filter(\.isNewline).count > old.filter(\.isNewline).count
+                        else { return }
+                        draft = old
+                        send(old)
+                    }
             }
             Button {
                 send(draft)

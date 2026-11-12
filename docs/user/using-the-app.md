@@ -71,7 +71,7 @@ Open a card from Accounts to see **all** activity grouped by **statement** (clos
 
 ## Ask
 
-**Ask** sits above the tab bar (not a sixth tab — that would open iOS **More**). On-device chat (Apple Intelligence). The app works out the numbers itself: spending by merchant, category, or month, plus your budget, card due dates, balances, recurring charges, and individual charges. If an answer has an amount that doesn’t match your data, Ask tries again, then warns you. Card names match the nicknames you set in Accounts (not the bank’s “Credit Card” label). Replies stream in; you can tap a suggested follow-up. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
+**Ask** sits above the tab bar (not a sixth tab — that would open iOS **More**). On-device chat (Apple Intelligence). The app works out the numbers itself: spending by merchant, category, or month, plus your budget, card due dates, balances, recurring charges, and individual charges. If an answer has an amount that doesn’t match your data, Ask tries again, then warns you. Card names match the nicknames you set in Accounts (not the bank’s “Credit Card” label). Replies stream in; you can tap a suggested follow-up. With a keyboard attached, Return sends. The conversation is saved on this device. Simulator cannot run the model; use a real iPhone or **My Mac (Designed for iPhone)**.
 
 The menu at the top of Ask picks the AI. **On-device** stays on your iPhone. **Claude** and **Grok** use your own API keys and send your question, recent chat, and the financial details needed to answer to Anthropic or xAI, after you agree the first time. **Try with** under an answer asks the same question on another AI, so you can compare them. Each answer shows which AI wrote it and how long it took.
 
@@ -83,7 +83,7 @@ Claude and Grok can plan with you, using your whole picture: cash, cards, payoff
 
 **Search with AI** appears when you type a sentence into search, like "Amazon over $50 in August". You get the real matching rows, with the filters it used shown on top.
 
-**Needs review** can suggest categories for merchants it's unsure about. Nothing changes until you tap Apply.
+**Needs review** can suggest categories for merchants it's unsure about. Nothing changes until you tap Apply. Bank lines that name no merchant, like PAYMENT or ACH PMT, get no suggestion; set those yourself.
 
 Cash back and rewards count as income, under **Rewards**. Check, cash, and ATM deposits count as income, under **Deposit**. To bring in older deposits, use **Sync → Full re-sync** once.
 

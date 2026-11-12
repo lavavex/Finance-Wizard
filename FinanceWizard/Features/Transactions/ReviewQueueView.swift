@@ -24,12 +24,14 @@ struct ReviewQueueView: View {
 
     private static let suggestionLimit = 20
 
-    /// One row per merchant whose category is a guess.
+    /// One row per merchant whose category is a guess. A bank line like "PAYMENT" names no
+    /// merchant, so a category for it would be made up and then applied to unrelated payments.
     private var merchantsToSuggest: [Transaction] {
         var seen = Set<String>()
         return ReviewQueueAnalytics.items(in: transactions)
             .filter { $0.reasons.contains(.weakCategory) && !$0.transaction.isCategoryLocked }
             .map(\.transaction)
+            .filter { !MoneyInsights.looksLikeVaguePayment($0.title) }
             .filter { seen.insert($0.title).inserted }
     }
 
