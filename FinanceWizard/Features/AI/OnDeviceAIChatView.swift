@@ -36,6 +36,9 @@ struct OnDeviceAIChatView: View {
     @State private var thread: AskThread?
     @State private var askContext = ModelContext(AskStore.container)
     @State private var confirmClear = false
+    /// A category change the last answer offered, until the user applies or cancels it.
+    @State private var proposal: AskEditProposal?
+    @State private var unnamedCount = 0
 
     private let promptHints = [
         "What's my biggest category?",
@@ -61,6 +64,8 @@ struct OnDeviceAIChatView: View {
         .task {
             loadThread()
             prepareSession()
+            refreshUnnamedCount()
+            if followUps.isEmpty { followUps = startingTips }
             if let initialQuestion { send(initialQuestion) }
             await cyclePrompts()
         }
@@ -104,7 +109,19 @@ struct OnDeviceAIChatView: View {
                 }
             }
 
-            if !isSending, !followUps.isEmpty {
+            if !isSending, let proposal {
+                HStack(spacing: 8) {
+                    Button("Apply") { finish(proposal, applied: true) }
+                        .buttonStyle(.borderedProminent)
+                        // AccentColor is ink, light in Dark, and the default label vanishes on it.
+                        .foregroundStyle(Color(.systemBackground))
+                    Button("Cancel") { finish(proposal, applied: false) }
+                        .buttonStyle(.bordered)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+            } else if !isSending, !followUps.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(followUps, id: \.self) { tip in
@@ -195,6 +212,7 @@ struct OnDeviceAIChatView: View {
         guard !text.isEmpty, !isSending else { return }
         composerFocused = false
         draft = ""
+        proposal = nil
         let history = chatHistory(messages)
         messages.append(AskBubble(id: UUID(), isUser: true, text: text))
         persist(text: text, isUser: true)
@@ -223,6 +241,7 @@ struct OnDeviceAIChatView: View {
                 }
                 persist(text: reply.text, isUser: false, seconds: seconds)
                 followUps = reply.followUps
+                proposal = reply.proposal
             } catch {
                 setText(AskConversation.message(for: error))
                 if let index = messages.firstIndex(where: { $0.id == assistantID }) {
@@ -243,6 +262,38 @@ struct OnDeviceAIChatView: View {
         case .unavailable(let reason), .notEnabled(let reason):
             throw OnDeviceAIError.modelUnavailable(reason)
         }
+    }
+
+    /// Writes or drops an offered change, then lets the conversation carry on, such as asking
+    /// about the next unnamed payment.
+    private func finish(_ offered: AskEditProposal, applied: Bool) {
+        proposal = nil
+        let outcome = applied ? AskEdit.apply(offered, modelContext: financeContext) : "Okay, nothing changed."
+        messages.append(AskBubble(id: UUID(), isUser: false, text: outcome))
+        persist(text: outcome, isUser: false)
+        refreshUnnamedCount()
+        isSending = true
+        Task {
+            defer { isSending = false }
+            guard let next = await activeConversation().afterProposal(offered, applied: applied) else {
+                followUps = startingTips
+                return
+            }
+            messages.append(AskBubble(id: UUID(), isUser: false, text: next.text))
+            persist(text: next.text, isUser: false)
+            followUps = next.followUps
+            proposal = next.proposal
+        }
+    }
+
+    /// Offered before any answer has suggested something, so Ask raises unnamed payments itself.
+    private var startingTips: [String] {
+        unnamedCount > 0 ? [AskEdit.labelPrompt] : []
+    }
+
+    private func refreshUnnamedCount() {
+        let rows = (try? financeContext.fetch(FetchDescriptor<Transaction>())) ?? []
+        unnamedCount = AskEdit.unnamedPayments(in: rows).count
     }
 
     private func chatHistory(_ bubbles: [AskBubble]) -> [AskChatTurn] {

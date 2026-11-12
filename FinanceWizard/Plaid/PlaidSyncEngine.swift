@@ -721,7 +721,7 @@ enum PlaidSyncEngine {
         )
         let isMyLoan = PayoffPlanRecognition.looksLikeLoanDisbursement(title: title)
         // Vendor learn-rule may override the category.
-        let rule = isMyLoan ? nil : VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod)
+        let rule = isMyLoan ? nil : VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod, amount: tx.amount)
         let mappedCategory = isMyLoan ? KnownCategory.loan.rawValue : (rule?.category ?? defaultCategory)
         let channel = tx.payment_channel
         let inferredRail = PaymentRail.infer(plaidChannel: channel, title: title)

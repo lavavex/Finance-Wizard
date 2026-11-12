@@ -19,6 +19,9 @@ struct VendorRule: Codable, Equatable, Sendable {
     var paymentMethodKey: String
     /// App category name to apply (e.g. "Dining").
     var category: String
+    /// Set when the rule covers one exact amount, for a bank line like "PAYMENT" that hides
+    /// several payees. Nil covers every amount.
+    var amountCents: Int?
 }
 
 /// Persist and look up vendor learn-rules in UserDefaults.
@@ -46,12 +49,14 @@ enum VendorRulesStore {
     ///   - vendor: Merchant name (will be normalized).
     ///   - paymentMethod: Card/account label, or nil for “any card.”
     ///   - category: Category to apply on future syncs.
-    static func upsert(vendor: String, paymentMethod: String?, category: String) {
+    ///   - amount: Only charges of exactly this amount, or nil for any amount.
+    static func upsert(vendor: String, paymentMethod: String?, category: String, amount: Double? = nil) {
         let vKey = normalize(vendor)
         let pKey = paymentMethod.map { normalize($0) } ?? ""
+        let cents = amount.map(Self.cents)
         var rules = load()
         if let idx = rules.firstIndex(where: {
-            $0.vendorKey == vKey && $0.paymentMethodKey == pKey
+            $0.vendorKey == vKey && $0.paymentMethodKey == pKey && $0.amountCents == cents
         }) {
             rules[idx].category = category
         } else {
@@ -59,21 +64,28 @@ enum VendorRulesStore {
                 VendorRule(
                     vendorKey: vKey,
                     paymentMethodKey: pKey,
-                    category: category
+                    category: category,
+                    amountCents: cents
                 )
             )
         }
         save(rules)
     }
 
-    /// Prefer card-scoped rule, then any-card rule.
+    private static func cents(_ amount: Double) -> Int { Int((abs(amount) * 100).rounded()) }
+
+    /// Prefer a rule for this exact amount, then a card-scoped rule, then an any-card rule.
     /// Returns nil if no rule matches (or vendor looks like a bill-pay code).
-    static func match(vendor: String, paymentMethod: String) -> VendorRule? {
+    static func match(vendor: String, paymentMethod: String, amount: Double? = nil) -> VendorRule? {
         let vKey = normalize(vendor)
         // Never apply learn-rules to ACH bill-pay codes (e.g. EPAY → Chase card)
         if isBillPayVendorKey(vKey) { return nil }
         let pKey = normalize(paymentMethod)
-        let rules = load()
+        let all = load()
+        if let amount, let exact = all.first(where: { $0.vendorKey == vKey && $0.amountCents == cents(amount) }) {
+            return exact
+        }
+        let rules = all.filter { $0.amountCents == nil }
         if let exact = rules.first(where: { $0.vendorKey == vKey && $0.paymentMethodKey == pKey }) {
             return exact
         }

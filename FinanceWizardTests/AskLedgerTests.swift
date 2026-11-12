@@ -195,6 +195,89 @@ final class AskLedgerTests: XCTestCase {
         }
     }
 
+    // MARK: - Changing categories from Ask
+
+    private func charge(_ title: String, _ amount: Double, category: String = "Miscellaneous", id: String = UUID().uuidString) -> Transaction {
+        Transaction(
+            transactionId: id, title: title, amount: -amount, date: date(day: 4),
+            category: category, paymentMethod: "Checking ···1111"
+        )
+    }
+
+    func testRequestIsCheckedAgainstTheUsersWords() {
+        let rows = [
+            charge("PAYMENT", 177.09), charge("PAYMENT", 152.07), charge("Example Shop", 20, category: "Shopping"),
+            charge("Example Shop Plus", 30, category: "Shopping"),
+        ]
+        // The model named the payee, and the amount finds the bank line.
+        let byAmount = AskEdit.charges(asked: "The 177.09 PAYMENT is my Example Phone bill", merchant: "Example Phone", amount: 177.09, in: rows)
+        XCTAssertEqual(byAmount.rows.map(\.amount), [-177.09])
+        XCTAssertEqual(byAmount.amount, 177.09)
+        // An amount the user never typed is ignored, and an exact name beats a partial one.
+        let invented = AskEdit.charges(asked: "Example Shop is groceries", merchant: "Example Shop", amount: 0, in: rows)
+        XCTAssertEqual(invented.rows.map(\.title), ["Example Shop"])
+        XCTAssertNil(invented.amount)
+        // The model reworded the merchant, and the question still has it.
+        let reworded = AskEdit.charges(asked: "example shop plus is groceries", merchant: "the store", amount: nil, in: rows)
+        XCTAssertEqual(reworded.rows.map(\.title), ["Example Shop Plus"])
+        XCTAssertTrue(AskEdit.charges(asked: "Fix my categories", merchant: "categories", amount: nil, in: rows).rows.isEmpty)
+    }
+
+    func testProposalSaysWhatWillChangeAndWhatIsRemembered() throws {
+        let shop = try XCTUnwrap(AskEdit.proposal(for: [charge("Example Shop", 20, category: "Pets"), charge("Example Shop", 5, category: "Pets")], category: "entertainment"))
+        XCTAssertEqual(shop.summary, "File 2 Example Shop charges ($25.00 in all) under Entertainment instead of Pets? Later charges from it will go there too.")
+
+        let vague = try XCTUnwrap(AskEdit.proposal(for: [charge("PAYMENT", 177.09)], category: "Home Internet", amount: 177.09))
+        XCTAssertEqual(vague.amount, 177.09)
+        XCTAssertTrue(vague.summary.hasSuffix("Later PAYMENT charges of exactly $177.09 will go there too."), vague.summary)
+
+        let mixed = try XCTUnwrap(AskEdit.proposal(for: [charge("PAYMENT", 10), charge("PAYMENT", 20)], category: "Utilities"))
+        XCTAssertNil(mixed.amount)
+        XCTAssertFalse(mixed.summary.contains("Later"), mixed.summary)
+
+        XCTAssertNil(AskEdit.proposal(for: [charge("Example Shop", 20, category: "Dining")], category: "Dining"))
+        XCTAssertNil(AskEdit.proposal(for: [charge("Example Shop", 20)], category: "Not A Category"))
+    }
+
+    func testApplyLocksTheCategoryAndKeepsTotalPaidInStep() throws {
+        context.insert(charge("PAYMENT", 300, id: "to-card"))
+        context.insert(charge("Example Shop", 20, category: "Pets", id: "shop"))
+        try context.save()
+        let rows = try context.fetch(FetchDescriptor<Transaction>())
+
+        let payment = try XCTUnwrap(AskEdit.proposal(for: rows.filter { $0.transactionId == "to-card" }, category: "Credit Card Payment"))
+        XCTAssertTrue(AskEdit.apply(payment, modelContext: context).contains("1 charge is now under Credit Card Payment"))
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CreditCardPayment>()).map(\.transactionId), ["to-card"])
+
+        let back = try XCTUnwrap(AskEdit.proposal(for: rows.filter { $0.transactionId == "to-card" }, category: "Utilities"))
+        AskEdit.apply(back, modelContext: context)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<CreditCardPayment>()), 0)
+
+        let shop = try XCTUnwrap(rows.first { $0.transactionId == "shop" })
+        AskEdit.apply(try XCTUnwrap(AskEdit.proposal(for: [shop], category: "Entertainment")), modelContext: context)
+        XCTAssertEqual(shop.category, "Entertainment")
+        XCTAssertTrue(shop.isCategoryLocked)
+        XCTAssertEqual(shop.overrideSource, "user")
+    }
+
+    func testUnnamedPaymentsAreRecentVagueAndStillUncategorized() {
+        let old = charge("PAYMENT", 50)
+        old.date = date(day: 4, month: 6)
+        let rows = [charge("PAYMENT", 177.09), charge("WEB PMTS", 900, category: "Housing"), charge("Example Shop", 20), old]
+        XCTAssertEqual(AskEdit.unnamedPayments(in: rows, now: date(day: 12)).map(\.amount), [-177.09])
+    }
+
+    func testRuleForOneAmountLeavesOtherAmountsAlone() {
+        let saved = UserDefaults.standard.data(forKey: "plaid.vendorRules")
+        defer { UserDefaults.standard.set(saved, forKey: "plaid.vendorRules") }
+        VendorRulesStore.save([])
+        VendorRulesStore.upsert(vendor: "PAYMENT", paymentMethod: nil, category: "Home Internet", amount: 177.09)
+
+        XCTAssertEqual(VendorRulesStore.match(vendor: "payment", paymentMethod: "Checking", amount: 177.09)?.category, "Home Internet")
+        XCTAssertNil(VendorRulesStore.match(vendor: "PAYMENT", paymentMethod: "Checking", amount: 152.07))
+        XCTAssertNil(VendorRulesStore.match(vendor: "PAYMENT", paymentMethod: "Checking"))
+    }
+
     func testEveryToolIsRegisteredAndNamedInTheInstructions() {
         let instructions = OnDeviceAI.askInstructions()
         for tool in OnDeviceAI.askTools(modelContext: context) {

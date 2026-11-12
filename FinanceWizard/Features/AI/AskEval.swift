@@ -251,6 +251,11 @@ enum AskEval {
                                   expected: [AskPlan.payoffTitle, "None of your linked cards"]))
         questions.append(Question(name: "afford", prompt: "Where can I cut back on spending?",
                                   expected: [AskPlan.budgetTitle, "can't build a budget"]))
+        // Nothing is written here: a change waits for Apply, which the eval never taps.
+        if let row = TransactionAnalytics.spendOnly(lastMonth).first(where: { !MoneyInsights.looksLikeVaguePayment($0.title) && $0.category != "Travel" }) {
+            questions.append(Question(name: "recategorize", prompt: "\(row.title) should be under Travel",
+                                      expected: ["under Travel instead of"]))
+        }
         questions.append(Question(name: "cant-do-that", prompt: "Move $100 into my savings account.",
                                   expected: ["can't", "cannot", "unable", "not able", "don't have"]))
         return questions

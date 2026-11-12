@@ -114,26 +114,106 @@ enum OnDeviceAI {
 
     /// What kind of answer a question wants. The app writes budgets and payoff plans itself,
     /// so the model only has to recognize a request for one.
-    @Generable
     enum AskIntent: String {
+        case lookup
+        case budget
+        case payoff
+        case recategorize
+    }
+
+    /// A change to how charges are filed, read from the user's words.
+    @Generable
+    struct EditRequest {
+        @Guide(description: "The store, business, or bank line whose charges should change, exactly as the user wrote it")
+        var merchant: String
+        @Guide(description: "The dollar amount of the charge, only if the user gave one")
+        var amount: Double?
+        @Guide(description: "The category that fits what the user said it is")
+        var category: String
+    }
+
+    private static func categoryList() async -> String {
+        await MainActor.run { AskEdit.categories.joined(separator: ", ") }
+    }
+
+    /// Which charges to move and where. Nil if the model can't say or isn't available.
+    static func editRequest(for question: String) async -> EditRequest? {
+        guard case .available = availabilityStatus() else { return nil }
+        let session = LanguageModelSession(instructions: """
+            The user wants charges from a merchant filed under a different category. Read out the merchant, the amount if they gave one, and the category.
+            The category must be exactly one of: \(await categoryList()).
+            Phone and internet bills are Home Internet. Rent and mortgage are Housing. Electric, gas, and water bills are Utilities. A payment to a credit card is Credit Card Payment.
+            """)
+        let options = GenerationOptions(sampling: .greedy)
+        return try? await session.respond(to: question, generating: EditRequest.self, options: options).content
+    }
+
+    @Generable
+    struct PaymentAnswer {
+        @Guide(description: "The category that fits what the user said the payment was for")
+        var category: String
+    }
+
+    /// The category for a payment the user just explained, such as "that's my rent".
+    static func category(forPaymentExplainedAs answer: String) async -> String? {
+        guard case .available = availabilityStatus() else { return nil }
+        let session = LanguageModelSession(instructions: """
+            The user is saying what a bank payment was for. Pick the category that fits.
+            The category must be exactly one of: \(await categoryList()).
+            Phone and internet bills are Home Internet. Rent and mortgage are Housing. Electric, gas, and water bills are Utilities. A payment to a credit card is Credit Card Payment.
+            """)
+        let options = GenerationOptions(sampling: .greedy)
+        return try? await session.respond(to: answer, generating: PaymentAnswer.self, options: options).content.category
+    }
+
+    @Generable
+    enum AskRequestKind: String {
         case lookup
         case budget
         case payoff
     }
 
-    /// Sorting is a separate, short session. Offering the plans as tools in the chat session
-    /// made the model pick worse tools for ordinary lookups.
+    @Generable
+    enum AskMessageKind: String {
+        case question
+        case correction
+    }
+
+    /// Sorting happens in short sessions of its own, in two steps. Offering the plans as tools
+    /// in the chat session made the model pick worse tools for lookups, and one four-way choice
+    /// sorted worse than a two-way choice followed by a three-way one.
     static func askIntent(for question: String) async -> AskIntent {
         guard case .available = availabilityStatus() else { return .lookup }
-        let session = LanguageModelSession(instructions: """
+        // Greedy, so the same question always gets the same kind of answer.
+        let options = GenerationOptions(sampling: .greedy)
+        let corrections = LanguageModelSession(instructions: """
+            The user keeps a list of charges, each filed under a category such as Dining, Housing, or Entertainment.
+            Decide whether their message is a correction or a question.
+            correction: it says a merchant or payment belongs under a different category, or says what a payment was for.
+            "Corner Cafe is dining, not shopping" is a correction.
+            "That 50.00 payment was my water bill" is a correction.
+            "Put Example Gym under health" is a correction.
+            question: anything else.
+            "How much did I spend at Corner Cafe?" is a question.
+            "What is my water bill?" is a question.
+            "Move 50 dollars to savings" is a question.
+            """)
+        if let kind = try? await corrections.respond(to: question, generating: AskMessageKind.self, options: options).content,
+           kind == .correction {
+            return .recategorize
+        }
+        let requests = LanguageModelSession(instructions: """
             Sort a question about the user's own money into one kind.
             budget: they want a budget made for them, ask what they can afford, or ask where to cut back or save.
             payoff: they want to pay off or pay down credit cards or debt, or ask which card to pay first.
             lookup: everything else, such as how much they spent, a balance, what is due, how much they owe, or how their budget is doing.
             """)
-        // Greedy, so the same question always gets the same kind of answer.
-        let options = GenerationOptions(sampling: .greedy)
-        return (try? await session.respond(to: question, generating: AskIntent.self, options: options).content) ?? .lookup
+        let kind = try? await requests.respond(to: question, generating: AskRequestKind.self, options: options).content
+        switch kind {
+        case .budget: return .budget
+        case .payoff: return .payoff
+        default: return .lookup
+        }
     }
 
     /// Rewords computed facts. Returns nil if the model added an amount of its own, since the

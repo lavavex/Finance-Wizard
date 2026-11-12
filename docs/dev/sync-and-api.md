@@ -117,6 +117,7 @@ Plaid amount convention:
 - **Person to Person** rows (Zelle, Venmo, Cash App, Square Cash, PayPal, Apple Cash) are kept. Money sent counts as spend in the **Person to Person** category. Money received is listed under Income but isn't part of Total Income.  
 - **Balance transfers** on a card are filed as **Balance Transfer**, excluded from spend. Their fees stay in **Fees**.  
 - **Payroll:** after each Sync, a paycheck-sized deposit from a source Plaid has tagged as salary or wages elsewhere is labeled **Payroll**, because Plaid can tag an employer that's also a merchant as a purchase.  
+- **Learned rules** (`VendorRulesStore`) map a vendor, and optionally a card, to a category. A rule can also cover one exact amount of a vendor, which is how a bare PAYMENT line keeps separate categories for separate bills. An amount rule wins over a general one.  
 - **Payroll codes:** `Income.rawName` keeps Plaid's `original_description`. `nameIncomeByPayrollCode` gives a paycheck known only by its bank line the employer name from another paycheck whose bank line shares a long token with it, when that token belongs to one employer.  
 - Expense categories follow Plaid’s published names, and `ClassifierTaxonomyTests` checks every spend category in that list. A category fix reaches existing rows on **Full re-sync**, which keeps categories you locked.  
 - **Credit card bill payments** → `CreditCardPayment` (Accounts → Total paid) **and** a `Transaction` with category **Credit Card Payment** (list-visible, excluded from Total Spend).  

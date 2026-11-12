@@ -20,6 +20,8 @@ struct AskReply: Equatable {
     var followUps: [String]
     /// Shown under the answer when an amount couldn't be matched to the user's data.
     var warning: String?
+    /// A change the answer offers, written only when the user taps Apply.
+    var proposal: AskEditProposal?
 }
 
 @MainActor
@@ -47,10 +49,25 @@ final class AskConversation {
         history: [AskChatTurn],
         onText: @escaping (String) -> Void
     ) async throws -> AskReply {
-        if !Self.isFollowUp(text), let plan = await plan(for: text) {
-            // The next question shouldn't lean on a session that never saw this one.
+        if let reply = await typedDecision(text) {
             session = nil
-            return AskReply(text: AskPlan.chatText(plan.insight), followUps: plan.followUps)
+            return reply
+        }
+        if let reply = await labelingReply(to: text) {
+            session = nil
+            return reply
+        }
+        if !Self.isFollowUp(text) {
+            let intent = await OnDeviceAI.askIntent(for: text)
+            if intent == .recategorize {
+                session = nil
+                return await editReply(to: text)
+            }
+            if let plan = plan(intent, for: text) {
+                // The next question shouldn't lean on a session that never saw this one.
+                session = nil
+                return AskReply(text: AskPlan.chatText(plan.insight), followUps: plan.followUps)
+            }
         }
         // A new session per question, carrying the earlier questions. In one long session the model
         // picks worse tools as it fills, and it answers from old results instead of asking again.
@@ -91,9 +108,8 @@ final class AskConversation {
 
     /// A budget or payoff order when the question asks for one. The app's text is the whole
     /// answer, because a model rewording it can pair a real number with the wrong card.
-    private func plan(for question: String) async -> (insight: MoneyInsight, followUps: [String])? {
-        let intent = await OnDeviceAI.askIntent(for: question)
-        guard intent != .lookup else { return nil }
+    private func plan(_ intent: OnDeviceAI.AskIntent, for question: String) -> (insight: MoneyInsight, followUps: [String])? {
+        guard intent == .budget || intent == .payoff else { return nil }
         let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         let plans = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
         if intent == .payoff {
@@ -107,7 +123,104 @@ final class AskConversation {
             plans: plans,
             incomeSource: AskPlan.incomeSource(namedIn: question, among: income)
         )
-        return (budget, ["How do I pay off my cards?", "How's my budget?"])
+        let tips = AskEdit.unnamedPayments(in: transactions()).isEmpty ? [] : [AskEdit.labelPrompt]
+        return (budget, tips + ["How do I pay off my cards?", "How's my budget?"])
+    }
+
+    // MARK: - Changing categories
+
+    /// The unnamed payment Ask last asked about, until the user explains or skips it.
+    private var asking: String?
+    private var skipped = Set<String>()
+    private var labeling = false
+
+    private func transactions() -> [Transaction] {
+        (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
+    }
+
+    /// "Anilist is entertainment, not pets" or "the $177.09 payment is my phone bill".
+    private func editReply(to text: String) async -> AskReply {
+        let help = "Tell me the merchant and the category, like \"Corner Cafe is Dining\"."
+        let labelTip = AskEdit.unnamedPayments(in: transactions()).isEmpty ? [] : [AskEdit.labelPrompt]
+        guard let request = await OnDeviceAI.editRequest(for: text) else {
+            return AskReply(text: "I couldn't work out which charges you mean. \(help)", followUps: labelTip)
+        }
+        let (rows, amount) = AskEdit.charges(asked: text, merchant: request.merchant, amount: request.amount, in: transactions())
+        guard !rows.isEmpty else {
+            return AskReply(text: "I couldn't find the charges you mean. \(help)", followUps: labelTip)
+        }
+        guard AskEdit.categories.contains(where: { $0.caseInsensitiveCompare(request.category) == .orderedSame }) else {
+            return AskReply(
+                text: "I don't have a category called \(request.category). The choices are \(AskEdit.categories.joined(separator: ", ")).",
+                followUps: []
+            )
+        }
+        guard let proposal = AskEdit.proposal(for: rows, category: request.category, amount: amount) else {
+            return AskReply(text: "Those charges are already under \(request.category).", followUps: [])
+        }
+        offered = proposal
+        return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+    }
+
+    /// The change on offer, so a typed "yes" or "no" works as well as the buttons.
+    private var offered: AskEditProposal?
+
+    private func typedDecision(_ text: String) async -> AskReply? {
+        guard let proposal = offered else { return nil }
+        offered = nil
+        let word = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .trimmingCharacters(in: .punctuationCharacters)
+        let yes = ["yes", "y", "yeah", "yep", "ok", "okay", "sure", "apply", "do it", "go ahead", "correct"]
+        let no = ["no", "n", "nope", "cancel", "skip", "don't", "dont", "stop", "never mind"]
+        guard yes.contains(word) || no.contains(word) else { return nil }
+        let applied = yes.contains(word)
+        let outcome = applied ? AskEdit.apply(proposal, modelContext: modelContext) : "Okay, nothing changed."
+        guard let next = await afterProposal(proposal, applied: applied) else {
+            return AskReply(text: outcome, followUps: [])
+        }
+        return AskReply(text: outcome + "\n\n" + next.text, followUps: next.followUps, proposal: next.proposal)
+    }
+
+    /// Walks through payments the bank didn't name, one question at a time.
+    private func labelingReply(to text: String) async -> AskReply? {
+        let unnamed = { AskEdit.unnamedPayments(in: self.transactions()).filter { !self.skipped.contains($0.transactionId) } }
+        if text == AskEdit.labelPrompt {
+            labeling = true
+            guard let first = unnamed().first else {
+                asking = nil
+                labeling = false
+                return AskReply(text: "Every recent payment has a name or a category. Nothing to label.", followUps: [])
+            }
+            asking = first.transactionId
+            return AskReply(text: AskEdit.question(about: first), followUps: ["Skip"])
+        }
+        guard let id = asking, let row = transactions().first(where: { $0.transactionId == id }) else { return nil }
+        asking = nil
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("skip") {
+            skipped.insert(id)
+            return await labelingReply(to: AskEdit.labelPrompt)
+        }
+        // The same line for the same amount is the same bill, so those change together.
+        let same = AskEdit.charges(named: row.title, amount: row.amount, in: transactions())
+        guard let category = await OnDeviceAI.category(forPaymentExplainedAs: text),
+              let proposal = AskEdit.proposal(for: same, category: category, amount: abs(row.amount)) else {
+            asking = id
+            return AskReply(
+                text: "I couldn't match that to a category. Try one of these: \(AskEdit.categories.joined(separator: ", ")). Or say skip.",
+                followUps: ["Skip"]
+            )
+        }
+        offered = proposal
+        return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+    }
+
+    /// What comes after an Apply or Cancel: the next unnamed payment, if the user was labeling
+    /// them. A cancelled one isn't asked about again in this chat.
+    func afterProposal(_ proposal: AskEditProposal, applied: Bool) async -> AskReply? {
+        offered = nil
+        if !applied { skipped.formUnion(proposal.transactionIds) }
+        guard labeling else { return nil }
+        return await labelingReply(to: AskEdit.labelPrompt)
     }
 
     // MARK: - Session
@@ -211,6 +324,8 @@ final class AskConversation {
            case .exceededContextWindowSize = generation {
             return true
         }
+        // Some overflows arrive as a general inference failure that only says so in its text.
+        if String(describing: error).contains("context window") { return true }
         return false
     }
 
