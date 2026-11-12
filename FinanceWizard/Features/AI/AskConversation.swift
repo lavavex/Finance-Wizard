@@ -27,6 +27,7 @@ final class AskConversation {
     private let modelContext: ModelContext
     private var session: LanguageModelSession?
     private var recap = ""
+    private let asked = AskQuestionBox()
     private var hasAnswered = false
 
     init(modelContext: ModelContext) {
@@ -46,11 +47,18 @@ final class AskConversation {
         history: [AskChatTurn],
         onText: @escaping (String) -> Void
     ) async throws -> AskReply {
+        if !Self.isFollowUp(text), let plan = await plan(for: text) {
+            // The next question shouldn't lean on a session that never saw this one.
+            session = nil
+            return AskReply(text: AskPlan.chatText(plan.insight), followUps: plan.followUps)
+        }
         // A new session per question, carrying the earlier questions. In one long session the model
         // picks worse tools as it fills, and it answers from old results instead of asking again.
         // A follow-up stays in the session, since it only makes sense with the last answer.
         if session == nil || (hasAnswered && !Self.isFollowUp(text)) { startSession(history: history) }
         hasAnswered = true
+        // A follow-up like "Compare to last month" leans on the earlier question's months.
+        asked.question = Self.isFollowUp(text) ? "compare " + text : text
 
         var answer: String
         do {
@@ -79,19 +87,43 @@ final class AskConversation {
         )
     }
 
+    // MARK: - Plans
+
+    /// A budget or payoff order when the question asks for one. The app's text is the whole
+    /// answer, because a model rewording it can pair a real number with the wrong card.
+    private func plan(for question: String) async -> (insight: MoneyInsight, followUps: [String])? {
+        let intent = await OnDeviceAI.askIntent(for: question)
+        guard intent != .lookup else { return nil }
+        let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        let plans = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
+        if intent == .payoff {
+            return (AskPlan.payoff(accounts: accounts, plans: plans), ["What's due next?", "Help me make a budget"])
+        }
+        let income = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
+        let budget = AskPlan.budget(
+            (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? [],
+            income: income,
+            accounts: accounts,
+            plans: plans,
+            incomeSource: AskPlan.incomeSource(namedIn: question, among: income)
+        )
+        return (budget, ["How do I pay off my cards?", "How's my budget?"])
+    }
+
     // MARK: - Session
 
     var transcript: Transcript? { session?.transcript }
 
     private func startSession(history: [AskChatTurn]) {
         recap = Self.recap(of: history)
-        session = try? OnDeviceAI.makeAskSession(modelContext: modelContext, earlierChat: recap)
+        session = try? OnDeviceAI.makeAskSession(modelContext: modelContext, earlierChat: recap, asked: asked)
     }
 
     private func stream(_ text: String, onText: (String) -> Void) async throws -> String {
         guard let session else { throw OnDeviceAIError.modelUnavailable("The model isn't ready.") }
         var answer = ""
-        for try await snapshot in session.streamResponse(to: text) {
+        // Greedy, so a question gets the same tool and the same answer every time it's asked.
+        for try await snapshot in session.streamResponse(to: text, options: GenerationOptions(sampling: .greedy)) {
             answer = snapshot.content
             onText(answer)
         }

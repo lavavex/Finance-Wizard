@@ -245,6 +245,12 @@ enum AskEval {
             questions.append(Question(name: "total-owed", prompt: "How much do I owe across all my credit cards?",
                                       expected: money(cards.reduce(0) { $0 + $1.currentBalance })))
         }
+        questions.append(Question(name: "make-budget", prompt: "Can you help me make a budget?",
+                                  expected: [AskPlan.budgetTitle, "can't build a budget"]))
+        questions.append(Question(name: "pay-off-cards", prompt: "How should I pay off my credit cards?",
+                                  expected: [AskPlan.payoffTitle, "None of your linked cards"]))
+        questions.append(Question(name: "afford", prompt: "Where can I cut back on spending?",
+                                  expected: [AskPlan.budgetTitle, "can't build a budget"]))
         questions.append(Question(name: "cant-do-that", prompt: "Move $100 into my savings account.",
                                   expected: ["can't", "cannot", "unable", "not able", "don't have"]))
         return questions

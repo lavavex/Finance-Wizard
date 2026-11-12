@@ -169,56 +169,131 @@ final class MoneyInsightsTests: XCTestCase {
         ]).isEmpty)
     }
 
-    func testBillThatSkippedItsDateIsSetApartInTheMoneyPlan() {
+    // MARK: - Plans the app works out for Ask
+
+    private func paycheck(_ source: String, _ amount: Double, month: Int) -> Income {
+        Income(
+            transactionId: UUID().uuidString, source: source, amount: amount, date: date(month),
+            category: "Payroll", accountName: nil, accountMask: nil, sourceInstitution: nil,
+            rawName: nil, pfc: nil, pending: false, kind: "income"
+        )
+    }
+
+    private func card(_ name: String, owes: Double, apr: Double?, minimum: Double? = nil, dueDay: Int? = nil) -> BankAccount {
+        BankAccount(
+            accountId: name, itemId: "item", name: name, type: "credit",
+            subtype: "credit card", institutionName: "Example Bank", currentBalance: owes,
+            minimumPaymentAmount: minimum, nextPaymentDueDate: dueDay.map { date(11, $0) }, purchaseApr: apr
+        )
+    }
+
+    private func lines(_ plan: MoneyInsight, under title: String) -> [String] {
+        plan.sections.first { $0.title.hasPrefix(title) }?.lines ?? []
+    }
+
+    func testBudgetScalesSpendingToWhatIsLeftAfterBills() {
+        var rows: [Transaction] = []
+        var pay: [Income] = []
+        for month in 8...10 {
+            rows.append(row("Example Power", 100, month: month, category: "Utilities"))
+            // Amounts that vary, so neither reads as a fixed bill.
+            rows.append(row("Corner Cafe", 600 + Double(month - 9) * 50, month: month, day: 3))
+            rows.append(row("Example Shop", 400 + Double(month - 9) * 50, month: month, day: 5, category: "Shopping"))
+            pay.append(paycheck("Example Employer", 1000, month: month))
+        }
+        let plan = AskPlan.budget(
+            rows, income: pay, accounts: [card("Example Card", owes: 500, apr: 20, minimum: 100)], plans: [], now: date(11, 6)
+        )
+
+        XCTAssertTrue(plan.headline.contains("about $1,000.00 a month"), plan.headline)
+        XCTAssertTrue(plan.headline.contains("take $200.00, leaving $800.00"), plan.headline)
+        XCTAssertTrue(plan.headline.contains("come down by $200.00"), plan.headline)
+        XCTAssertEqual(lines(plan, under: AskPlan.budgetTitle), [
+            "Dining: $480.00, down from $600.00",
+            "Shopping: $320.00, down from $400.00",
+        ])
+        XCTAssertTrue(lines(plan, under: "Bills and card minimums, $200.00").contains("Example Card minimum: $100.00"), "\(plan.facts)")
+    }
+
+    func testBudgetCanUseOneEmployersIncome() {
+        let pay = (8...10).flatMap { [paycheck("Example Employer", 900, month: $0), paycheck("Side Work", 300, month: $0)] }
+
+        let one = AskPlan.budget([], income: pay, accounts: [], plans: [], incomeSource: "example employer", now: date(11, 6))
+        XCTAssertTrue(one.headline.contains("$900.00 a month from Example Employer"), one.headline)
+
+        XCTAssertEqual(AskPlan.incomeSource(namedIn: "Make a budget on what I bring in from example employer?", among: pay), "Example Employer")
+        XCTAssertEqual(AskPlan.incomeSource(namedIn: "Help me make a budget", among: pay), "")
+    }
+
+    func testBudgetLeavesOutLapsedBillsAndAsksAboutUnnamedPayments() {
         let rows = [
             row("Example Power", 80, month: 7, category: "Utilities"),
             row("Example Power", 80, month: 8, category: "Utilities"),
             row("Example Phone", 50, month: 9, category: "Home Internet"),
             row("Example Phone", 50, month: 10, category: "Home Internet"),
-        ]
-        let plan = MoneyInsights.moneyPlan(rows, income: [], accounts: [], plans: [], now: date(11, 6))
-
-        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Recurring bills: Example Phone") }, "\(plan.facts)")
-        XCTAssertFalse(plan.facts.contains { $0.hasPrefix("Recurring bills: Example Power") }, "\(plan.facts)")
-        XCTAssertTrue(plan.facts.contains { $0.contains("stopped charging") && $0.contains("Example Power: $80.00") }, "\(plan.facts)")
-    }
-
-    func testMoneyPlanShowsDebtBillsAndUnidentifiedPayments() {
-        let card = BankAccount(
-            accountId: "card", itemId: "item", name: "Example Card", mask: "1111", type: "credit",
-            subtype: "credit card", institutionName: "Example Bank", currentBalance: 500
-        )
-        let rows = [
-            row("Example Power", 80, month: 9, category: "Utilities"),
-            row("Example Power", 95, month: 10, category: "Utilities"),
             row("PAYMENT", 177, month: 11, day: 4, category: "Miscellaneous"),
-            row("Corner Cafe", 60, month: 10),
         ]
-        let plan = MoneyInsights.moneyPlan(rows, income: [], accounts: [card], plans: [], now: date(11, 6))
+        let plan = AskPlan.budget(rows, income: [paycheck("Example Employer", 900, month: 10)], accounts: [], plans: [], now: date(11, 6))
 
-        XCTAssertTrue(plan.headline.contains("$500.00"), plan.headline)
-        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Recurring bills: Example Power: $95.00") }, "\(plan.facts)")
-        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Unidentified bank payments: PAYMENT: $177.00") }, "\(plan.facts)")
-        XCTAssertTrue(plan.facts.contains("Other spending, monthly average: Dining: $20.00"), "\(plan.facts)")
+        XCTAssertEqual(lines(plan, under: "Bills and card minimums"), ["Example Phone: $50.00"])
+        XCTAssertTrue(lines(plan, under: "Not counted").contains { $0.hasPrefix("Example Power: $80.00") }, "\(plan.facts)")
+        XCTAssertEqual(lines(plan, under: "Payments the bank didn't name"), ["PAYMENT: $177.00 on Nov 4"])
     }
 
-    func testMoneyPlanListsIncomeBySource() {
-        func paycheck(_ source: String, _ amount: Double, month: Int) -> Income {
-            Income(
-                transactionId: UUID().uuidString, source: source, amount: amount, date: date(month),
-                category: "Payroll", accountName: nil, accountMask: nil, sourceInstitution: nil,
-                rawName: nil, pfc: nil, pending: false, kind: "income"
-            )
+    func testBudgetKeepsNeedsWholeAndLeavesOutOneTimeDeposits() {
+        var rows: [Transaction] = []
+        var pay: [Income] = []
+        for month in 8...10 {
+            rows.append(row("Example Grocer", 300 + Double(month - 9) * 30, month: month, category: "Groceries"))
+            rows.append(row("Example Shop", 600 + Double(month - 9) * 30, month: month, day: 5, category: "Shopping"))
+            pay.append(paycheck("Example Employer", 500, month: month))
         }
-        let plan = MoneyInsights.moneyPlan(
-            [],
-            income: [paycheck("Example Employer", 600, month: 8), paycheck("Example Employer", 620, month: 9), paycheck("PAYROLLXYZ", 590, month: 10)],
-            accounts: [],
-            plans: [],
-            now: date(11, 6)
+        pay.append(paycheck("Loan Payout", 3000, month: 10))
+        let plan = AskPlan.budget(rows, income: pay, accounts: [], plans: [], now: date(11, 6))
+
+        XCTAssertTrue(plan.headline.contains("about $500.00 a month."), plan.headline)
+        XCTAssertEqual(lines(plan, under: AskPlan.budgetTitle), [
+            "Groceries: $300.00, your usual",
+            "Shopping: $200.00, down from $600.00",
+        ])
+        XCTAssertEqual(lines(plan, under: "One-time deposits"), ["Loan Payout: $3,000.00 on Oct 10"])
+    }
+
+    func testBudgetSaysSoWhenThereIsNoIncomeOrNothingLeft() {
+        let none = AskPlan.budget([], income: [], accounts: [], plans: [], now: date(11, 6))
+        XCTAssertTrue(none.headline.contains("can't build a budget"), none.headline)
+
+        let short = AskPlan.budget(
+            [], income: [paycheck("Example Employer", 100, month: 10)],
+            accounts: [card("Example Card", owes: 500, apr: 20, minimum: 150)], plans: [], now: date(11, 6)
         )
-        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Income: Example Employer (Payroll): 2 deposits, about $610.00 each") }, "\(plan.facts)")
-        XCTAssertTrue(plan.facts.contains { $0.hasPrefix("Income: PAYROLLXYZ") }, "\(plan.facts)")
+        XCTAssertTrue(short.headline.contains("$50.00 more than that"), short.headline)
+    }
+
+    func testPayoffPutsTheHighestRateFirstAndFlagsAPassedDueDate() {
+        let plan = AskPlan.payoff(accounts: [
+            card("Low Rate", owes: 2000, apr: 10, minimum: 40, dueDay: 20),
+            card("No Interest", owes: 300, apr: 0, minimum: 25, dueDay: 2),
+            card("High Rate", owes: 1200, apr: 24, minimum: 35, dueDay: 15),
+        ], plans: [], now: date(11, 6))
+
+        XCTAssertEqual(lines(plan, under: AskPlan.payoffTitle).map { String($0.prefix(12)) }, ["1. High Rate", "2. Low Rate:", "3. No Intere"])
+        XCTAssertTrue(plan.headline.contains("owe $3,500.00 and cost about $40.67 a month"), plan.headline)
+        XCTAssertTrue(plan.headline.contains("$100.00 in total, then put anything extra on High Rate"), plan.headline)
+        XCTAssertEqual(lines(plan, under: "Minimums coming due").first, "High Rate: minimum $35.00, due Nov 15")
+        XCTAssertTrue(lines(plan, under: "Check these").contains { $0.hasPrefix("No Interest: its due date of Nov 2 has passed") })
+    }
+
+    func testPayoffWithoutRatesStartsWithTheSmallestBalance() {
+        let plan = AskPlan.payoff(accounts: [card("Big", owes: 900, apr: nil), card("Small", owes: 100, apr: nil)], plans: [])
+        XCTAssertTrue(plan.headline.contains("on Small, the smallest balance"), plan.headline)
+
+        XCTAssertTrue(AskPlan.payoff(accounts: [], plans: []).headline.contains("None of your linked cards"))
+    }
+
+    func testPlanGoesIntoTheChatAsHeadlineThenSections() {
+        let plan = MoneyInsight(headline: "Headline.", sections: [.init(title: "Title", lines: ["one", "two"])])
+        XCTAssertEqual(AskPlan.chatText(plan), "Headline.\n\nTitle\n- one\n- two")
     }
 
     func testPayerNameNeedsAConfidentCounterparty() throws {

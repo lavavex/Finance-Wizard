@@ -27,6 +27,20 @@ enum AskLedger {
         var label: String
     }
 
+    /// Whether a question's wording covers more than one month, like "since August" or "the last
+    /// three months". Without that, a second month in the model's arguments is a mistake.
+    static func asksForSeveralMonths(_ question: String) -> Bool {
+        let lower = " " + question.lowercased() + " "
+        let rangeWords = [
+            " through ", " thru ", " since ", " between ", " until ", " to ", " months", " year", " quarter",
+            " compare", " vs ", " versus ", " total from ", " so far this year", " ytd", " all time", " ever ",
+        ]
+        if rangeWords.contains(where: lower.contains) { return true }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US")
+        return calendar.monthSymbols.filter { lower.contains(" " + $0.lowercased()) }.count > 1
+    }
+
     /// Whole months from `from` through `to`. Takes "2026-03" or a month name. A blank or unknown
     /// value means this month. A month name means its most recent occurrence.
     static func monthRange(

@@ -88,16 +88,18 @@ struct OnDeviceAIChatView: View {
                     .simultaneousGesture(TapGesture().onEnded {
                         composerFocused = false
                     })
+                    // Top, so a long answer starts at its first line. A short one still ends up
+                    // at the bottom, since the list can't scroll past its end.
                     .onChange(of: messages.last?.text) { _, _ in
                         if let last = messages.last?.id {
-                            withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                            withAnimation { proxy.scrollTo(last, anchor: .top) }
                         }
                     }
                     // A reopened chat starts at its latest message. The list has no rows to scroll
                     // to until its first layout, so this waits a moment.
                     .task {
                         try? await Task.sleep(for: .milliseconds(150))
-                        if let last = messages.last?.id { proxy.scrollTo(last, anchor: .bottom) }
+                        if let last = messages.last?.id { proxy.scrollTo(last, anchor: .top) }
                     }
                 }
             }

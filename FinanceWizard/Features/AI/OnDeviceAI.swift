@@ -77,9 +77,9 @@ enum OnDeviceAI {
         }
     }
 
-    static func askTools(modelContext: ModelContext) -> [any Tool] {
+    static func askTools(modelContext: ModelContext, asked: AskQuestionBox? = nil) -> [any Tool] {
         [
-            SpendingQueryTool(modelContext: modelContext),
+            SpendingQueryTool(modelContext: modelContext, asked: asked),
             MoneySnapshotTool(modelContext: modelContext),
             BudgetStatusTool(modelContext: modelContext),
             UpcomingPaymentsTool(modelContext: modelContext),
@@ -91,7 +91,12 @@ enum OnDeviceAI {
 
     /// Chat session: developer instructions + ledger tools (Apple's tool-calling path).
     /// - Parameter earlierChat: Recap of the conversation so far, for a new session.
-    static func makeAskSession(modelContext: ModelContext, earlierChat: String? = nil) throws -> LanguageModelSession {
+    /// - Parameter asked: Kept up to date with the question, for tools that check arguments against it.
+    static func makeAskSession(
+        modelContext: ModelContext,
+        earlierChat: String? = nil,
+        asked: AskQuestionBox? = nil
+    ) throws -> LanguageModelSession {
         switch availabilityStatus() {
         case .available:
             var instructions = askInstructions()
@@ -99,12 +104,36 @@ enum OnDeviceAI {
                 instructions += "\nEarlier questions in this chat. A follow-up keeps the same merchant or category:\n\(earlierChat)"
             }
             return LanguageModelSession(
-                tools: askTools(modelContext: modelContext),
+                tools: askTools(modelContext: modelContext, asked: asked),
                 instructions: instructions
             )
         case .unavailable(let reason), .notEnabled(let reason):
             throw OnDeviceAIError.modelUnavailable(reason)
         }
+    }
+
+    /// What kind of answer a question wants. The app writes budgets and payoff plans itself,
+    /// so the model only has to recognize a request for one.
+    @Generable
+    enum AskIntent: String {
+        case lookup
+        case budget
+        case payoff
+    }
+
+    /// Sorting is a separate, short session. Offering the plans as tools in the chat session
+    /// made the model pick worse tools for ordinary lookups.
+    static func askIntent(for question: String) async -> AskIntent {
+        guard case .available = availabilityStatus() else { return .lookup }
+        let session = LanguageModelSession(instructions: """
+            Sort a question about the user's own money into one kind.
+            budget: they want a budget made for them, ask what they can afford, or ask where to cut back or save.
+            payoff: they want to pay off or pay down credit cards or debt, or ask which card to pay first.
+            lookup: everything else, such as how much they spent, a balance, what is due, how much they owe, or how their budget is doing.
+            """)
+        // Greedy, so the same question always gets the same kind of answer.
+        let options = GenerationOptions(sampling: .greedy)
+        return (try? await session.respond(to: question, generating: AskIntent.self, options: options).content) ?? .lookup
     }
 
     /// Rewords computed facts. Returns nil if the model added an amount of its own, since the

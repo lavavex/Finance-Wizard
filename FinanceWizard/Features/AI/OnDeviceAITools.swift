@@ -273,16 +273,10 @@ struct RecurringChargeList {
     var charges: [RecurringChargeRow]
 }
 
-@Generable
-struct MoneyPlanSection {
-    var title: String
-    var lines: [String]
-}
-
-@Generable
-struct MoneyPlanResult {
-    var headline: String
-    var sections: [MoneyPlanSection]
+/// The question being answered, for tools that check the model's arguments against it.
+@MainActor
+final class AskQuestionBox {
+    var question = ""
 }
 
 /// Totals for a merchant, category, or date range. The app does the math, not the model.
@@ -291,8 +285,12 @@ struct SpendingQueryTool: Tool {
     let description = "Exact spending total. Leave out merchant and category for all spending. Set toMonth only when the user asks about several months."
 
     let container: ModelContainer
+    let asked: AskQuestionBox?
 
-    init(modelContext: ModelContext) { container = modelContext.container }
+    init(modelContext: ModelContext, asked: AskQuestionBox? = nil) {
+        container = modelContext.container
+        self.asked = asked
+    }
 
     @Generable
     struct Arguments {
@@ -309,7 +307,10 @@ struct SpendingQueryTool: Tool {
     func call(arguments: Arguments) async throws -> SpendingResult {
         await MainActor.run {
             let modelContext = container.mainContext
-            let range = AskLedger.monthRange(from: arguments.fromMonth, to: arguments.toMonth ?? "")
+            // For "last month" the model often ends the range at this month, which adds a
+            // month nobody asked about. A question with no range wording gets one month.
+            let wantsRange = asked.map { AskLedger.asksForSeveralMonths($0.question) } ?? true
+            let range = AskLedger.monthRange(from: arguments.fromMonth, to: wantsRange ? arguments.toMonth ?? "" : "")
             let result = AskLedger.spending(
                 merchant: arguments.merchant ?? "",
                 category: arguments.category ?? "",

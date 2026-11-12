@@ -183,6 +183,18 @@ final class AskLedgerTests: XCTestCase {
         XCTAssertEqual(result.chargeCount, 1)
     }
 
+    func testOnlyRangeWordingAsksForSeveralMonths() {
+        for single in ["How much did I spend on Dining last month?", "dining total this month?", "What did Example Fuel cost me in October"] {
+            XCTAssertFalse(AskLedger.asksForSeveralMonths(single), single)
+        }
+        for range in [
+            "What did I spend in total from August through October?", "Spending since August", "Dining in the last 3 months",
+            "How much this year?", "August and September spending", "Compare to last month",
+        ] {
+            XCTAssertTrue(AskLedger.asksForSeveralMonths(range), range)
+        }
+    }
+
     func testEveryToolIsRegisteredAndNamedInTheInstructions() {
         let instructions = OnDeviceAI.askInstructions()
         for tool in OnDeviceAI.askTools(modelContext: context) {
