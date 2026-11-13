@@ -15,7 +15,7 @@ Defined in `Shared/Models/Transaction.swift`.
 | `title` | `String` | Merchant / vendor |
 | `amount` | `Double` | **Expenses stored negative** in the app |
 | `date` | `Date` | Parsed from `YYYY-MM-DD` |
-| `category` | `String` | Budget category (e.g. Dining, Gas (Car)). **Loan** / **Refund** / **Installment** / **Credit Card Payment** are excluded from Total Spend. |
+| `category` | `String` | Budget category (e.g. Dining, Gas (Car)). **Loan** / **Installment** / **Balance Transfer** / **Credit Card Payment** are excluded from Total Spend. **Refund** rows are subtracted from it, but not from category totals. |
 | `paymentMethod` | `String` | Card / account name |
 | `subscriptionCadenceOverride` | `String?` | Recurring: `nil` = auto; `"yearly"` / `"monthly"` / `"weekly"` = treat that vendor as recurring (amount may vary); `"cancelled"` / `"none"` (Not Recurring); cleared in Debug |
 

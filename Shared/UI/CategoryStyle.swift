@@ -101,8 +101,16 @@ enum CategoryStyle {
             return "bolt.fill"
         case let c where matches(c, ["home internet", "internet", "cable", "phone", "telecom"]):
             return "wifi"
-        case let c where matches(c, ["car insurance", "insurance", "auto insurance"]):
+        case let c where matches(c, ["car insurance", "auto insurance"]):
             return "car.fill"
+        case let c where matches(c, ["insurance"]):
+            return "shield.fill"
+        case let c where matches(c, ["home improvement", "hardware", "furniture"]):
+            return "hammer.fill"
+        case let c where matches(c, ["person to person"]):
+            return "person.2.fill"
+        case let c where matches(c, ["balance transfer", "balance transfers"]):
+            return "arrow.left.arrow.right"
         case let c where matches(c, ["gas (car)", "gas", "fuel", "ev charging"]):
             return "fuelpump.fill"
         case let c where matches(c, ["transit", "transportation", "rideshare", "parking", "tolls"]):
@@ -235,7 +243,7 @@ enum CategoryStyle {
         if matches(c, [
             "subscriptions", "subscription", "services", "service",
             "home internet", "internet", "utilities", "utility",
-            "car insurance", "insurance", "phone", "telecom",
+            "car insurance", "insurance", "home improvement", "phone", "telecom",
             "housing", "rent", "mortgage", "education", "fees", "bank fees", "loan"
         ]) { return .services }
 

@@ -1,16 +1,8 @@
-# Plaid webhook receiver — free Cloudflare Workers tier.
+# Plaid webhook endpoint: acknowledges and discards. Stores nothing.
 #
 # Plaid Dashboard webhook URL:
 #   https://plaid-webhooks.<subdomain>.workers.dev/plaid/webhook
-#
-# Optional: wrangler secret put WEBHOOK_INGEST_KEY
-# Protects GET /pending only (Plaid POSTs have no custom header).
 
 name = "plaid-webhooks"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
-
-[[kv_namespaces]]
-binding = "WEBHOOKS"
-id = "d572bfb4e66a4038bc94071553b9e381"
-preview_id = "76e08027201044059476166b9d78977d"

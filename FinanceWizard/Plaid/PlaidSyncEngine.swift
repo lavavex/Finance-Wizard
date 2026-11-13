@@ -37,6 +37,7 @@ struct PlaidSyncReport: Sendable {
     var pendingMerged: Int = 0
     var skippedTransfers: Int = 0
     var cleanedLegacy: Int = 0
+    var pairedCardPayments: Int = 0
     var accountsUpdated: Int = 0
     var liabilitiesUpdated: Int = 0
     var refreshedItems: Int = 0
@@ -52,6 +53,7 @@ struct PlaidSyncReport: Sendable {
         if pendingMerged > 0 { lines.append("Pending→posted merged: \(pendingMerged)") }
         if skippedTransfers > 0 { lines.append("Skipped transfers: \(skippedTransfers)") }
         if cleanedLegacy > 0 { lines.append("Removed mis-filed transfers: \(cleanedLegacy)") }
+        if pairedCardPayments > 0 { lines.append("Bank payments matched to cards: \(pairedCardPayments)") }
         if accountsUpdated > 0 { lines.append("Accounts refreshed: \(accountsUpdated)") }
         if liabilitiesUpdated > 0 { lines.append("Credit details refreshed: \(liabilitiesUpdated)") }
         if refreshedItems > 0 { lines.append("Forced bank refresh: \(refreshedItems)") }
@@ -78,6 +80,9 @@ private struct AccountMeta {
 
 /// Orchestrates Plaid → local SwiftData sync for all linked banks.
 enum PlaidSyncEngine {
+    /// Each tab has its own syncing flag, so the guard against overlapping syncs lives here.
+    @MainActor private static var isSyncRunning = false
+
     /// Soft-fail Plaid product codes (add-on not enabled / not ready / unsupported).
     /// When these appear, we log a warning and continue instead of aborting the whole sync.
     private static let softProductCodes: Set<String> = [
@@ -107,7 +112,13 @@ enum PlaidSyncEngine {
         forceRefresh: Bool = false,
         progress: ((String) -> Void)? = nil
     ) async throws -> PlaidSyncReport {
+        guard !DemoMode.isActive else { throw DemoMode.blockedError }
         try PlaidCredentialsStore.requireConfigured()
+        guard !isSyncRunning else {
+            throw PlaidAPIError.http(status: 0, code: nil, message: "A sync is already running.")
+        }
+        isSyncRunning = true
+        defer { isSyncRunning = false }
         var items = PlaidItemStore.loadItems()
         guard !items.isEmpty else {
             throw PlaidAPIError.http(
@@ -119,10 +130,7 @@ enum PlaidSyncEngine {
 
         // Empty cursors → next /transactions/sync returns full history for each Item.
         if resetCursors {
-            for i in items.indices {
-                items[i].transactionsCursor = ""
-            }
-            PlaidItemStore.saveItems(items)
+            PlaidItemStore.resetAllCursors()
             items = PlaidItemStore.loadItems()
         }
 
@@ -136,10 +144,12 @@ enum PlaidSyncEngine {
         // Rows stored before day strings were parsed locally sit at UTC midnight — a day early.
         if UserDefaults.standard.integer(forKey: dayAnchorVersionKey) < dayAnchorVersion {
             _ = reanchorStoredDays(modelContext: modelContext)
+            try modelContext.save()
             UserDefaults.standard.set(dayAnchorVersion, forKey: dayAnchorVersionKey)
         }
         if UserDefaults.standard.integer(forKey: legacyCleanupVersionKey) < legacyCleanupVersion {
             report.cleanedLegacy = cleanLegacyMisclassifiedRows(modelContext: modelContext)
+            try modelContext.save()
             UserDefaults.standard.set(legacyCleanupVersion, forKey: legacyCleanupVersionKey)
         }
         // Stale BankAccounts from unlinked/replaced Items (e.g. duped X Money after Relink)
@@ -178,6 +188,15 @@ enum PlaidSyncEngine {
                 report.warnings.append("\(item.institutionName): \(error.localizedDescription)")
                 report.itemLines.append("\(item.institutionName): failed")
             }
+        }
+
+        nameIncomeByPayrollCode(modelContext: modelContext)
+        relabelPayrollDeposits(modelContext: modelContext)
+        report.pairedCardPayments = pairVaguePaymentsWithCards(modelContext: modelContext)
+        // Every Item synced without a failure, so a re-linked bank's rows are all back.
+        if PlaidItemStore.needsIncomeDedupe, !report.itemLines.contains(where: { $0.hasSuffix(": failed") }) {
+            dedupeIncome(modelContext: modelContext)
+            PlaidItemStore.needsIncomeDedupe = false
         }
 
         let plans = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
@@ -363,6 +382,10 @@ enum PlaidSyncEngine {
             }
         }
 
+        // Rows first: Plaid won’t resend anything before a saved cursor, so a cursor that
+        // outlives unsaved rows would lose them for good.
+        try modelContext.save()
+
         // Persist opaque cursor so the next sync only gets deltas.
         if let cursor, !cursor.isEmpty {
             PlaidItemStore.updateCursor(itemID: item.id, cursor: cursor)
@@ -470,9 +493,13 @@ enum PlaidSyncEngine {
         report: inout PlaidSyncReport
     ) {
         // Posted row supersedes its pending twin (different transaction_id).
+        var pendingEdits: PendingRowEdits?
+        var replacedPendingId: String?
         if let pendingId = tx.pending_transaction_id,
            !pendingId.isEmpty,
            pendingId != tx.transaction_id {
+            pendingEdits = pendingRowEdits(transactionID: pendingId, modelContext: modelContext)
+            replacedPendingId = pendingId
             if deleteLocal(transactionID: pendingId, modelContext: modelContext) {
                 report.pendingMerged += 1
             }
@@ -558,6 +585,9 @@ enum PlaidSyncEngine {
                 accountId: tx.account_id,
                 modelContext: modelContext
             )
+            if let pendingEdits {
+                applyPendingEdits(pendingEdits, toTransactionID: tx.transaction_id, modelContext: modelContext)
+            }
             report.expensesUpserted += 1
 
         case .income:
@@ -565,7 +595,7 @@ enum PlaidSyncEngine {
             deleteCreditPaymentOnly(transactionID: tx.transaction_id, modelContext: modelContext)
             upsertIncome(
                 tx: tx,
-                title: title,
+                title: tx.payerName ?? title,
                 date: date,
                 paymentMethod: paymentMethod,
                 pfcDetailed: tx.personal_finance_category?.detailed,
@@ -591,6 +621,75 @@ enum PlaidSyncEngine {
             )
             report.expensesUpserted += 1
         }
+
+        if let replacedPendingId {
+            relinkPayoffPlans(from: replacedPendingId, to: tx.transaction_id, modelContext: modelContext)
+        }
+    }
+
+    // MARK: - Pending → posted
+
+    /// What the user changed on a pending row. Its posted twin arrives under a new id.
+    struct PendingRowEdits {
+        var category: String?
+        var overrideSource: String?
+        var paymentRail: String?
+        var subscriptionCadenceOverride: String?
+    }
+
+    /// - Returns: The row’s user edits, or nil when it has none.
+    @MainActor
+    static func pendingRowEdits(transactionID: String, modelContext: ModelContext) -> PendingRowEdits? {
+        guard let row = fetchTransaction(id: transactionID, modelContext: modelContext) else { return nil }
+        let cadence = row.subscriptionCadenceOverride.flatMap { $0.isEmpty ? nil : $0 }
+        guard row.isCategoryLocked || row.isPaymentRailLocked || cadence != nil else { return nil }
+        return PendingRowEdits(
+            category: row.isCategoryLocked ? row.category : nil,
+            overrideSource: row.overrideSource,
+            paymentRail: row.isPaymentRailLocked ? row.paymentRail : nil,
+            subscriptionCadenceOverride: cadence
+        )
+    }
+
+    @MainActor
+    static func applyPendingEdits(
+        _ edits: PendingRowEdits,
+        toTransactionID transactionID: String,
+        modelContext: ModelContext
+    ) {
+        guard let row = fetchTransaction(id: transactionID, modelContext: modelContext) else { return }
+        if let category = edits.category {
+            row.category = category
+            row.categoryLocked = true
+        }
+        if let rail = edits.paymentRail {
+            row.paymentRail = rail
+            row.paymentRailLocked = true
+        }
+        if let cadence = edits.subscriptionCadenceOverride {
+            row.subscriptionCadenceOverride = cadence
+        }
+        row.overrideSource = edits.overrideSource ?? row.overrideSource
+    }
+
+    /// Payoff plans point at a transaction id, which changes when a pending row posts.
+    @MainActor
+    static func relinkPayoffPlans(from oldID: String, to newID: String, modelContext: ModelContext) {
+        let plans = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
+        for plan in plans where plan.linkedTransactionId == oldID {
+            plan.linkedTransactionId = newID
+        }
+    }
+
+    @MainActor
+    private static func fetchTransaction(id: String, modelContext: ModelContext) -> Transaction? {
+        var descriptor = FetchDescriptor<Transaction>(
+            predicate: #Predicate<Transaction> { row in
+                row.transactionId == id
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 
     // MARK: - Upserts (expense / income / credit payment)
@@ -622,7 +721,7 @@ enum PlaidSyncEngine {
         )
         let isMyLoan = PayoffPlanRecognition.looksLikeLoanDisbursement(title: title)
         // Vendor learn-rule may override the category.
-        let rule = isMyLoan ? nil : VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod)
+        let rule = isMyLoan ? nil : VendorRulesStore.match(vendor: title, paymentMethod: paymentMethod, amount: tx.amount)
         let mappedCategory = isMyLoan ? KnownCategory.loan.rawValue : (rule?.category ?? defaultCategory)
         let channel = tx.payment_channel
         let inferredRail = PaymentRail.infer(plaidChannel: channel, title: title)
@@ -720,9 +819,12 @@ enum PlaidSyncEngine {
             existing.amount = amount
             existing.date = date
             existing.paymentMethod = paymentMethod
-            existing.category = category
-            existing.categoryLocked = true
-            existing.overrideSource = "adjustment"
+            // A category the user picked stays.
+            if existing.overrideSource != "user" {
+                existing.category = category
+                existing.categoryLocked = true
+                existing.overrideSource = "adjustment"
+            }
             applyEnrichment(to: existing, from: tx, authorizedDate: authorizedDate, isPending: pending)
         } else {
             let row = Transaction(
@@ -799,6 +901,8 @@ enum PlaidSyncEngine {
         )
         let amount = abs(tx.amount)
         let pending = tx.pending ?? false
+        // The full bank line, which can carry a payroll code that the short name drops.
+        let rawName = tx.original_description?.isEmpty == false ? tx.original_description : tx.name
         let parts = paymentMethod.components(separatedBy: " ···")
         let accountName = parts.first
         let accountMask = parts.count > 1 ? parts[1] : nil
@@ -811,7 +915,7 @@ enum PlaidSyncEngine {
             existing.accountName = accountName
             existing.accountMask = accountMask
             existing.sourceInstitution = accountName
-            existing.rawName = tx.name
+            existing.rawName = rawName
             existing.pfc = pfcDetailed
             existing.pending = pending
             existing.kind = "income"
@@ -826,7 +930,7 @@ enum PlaidSyncEngine {
                     accountName: accountName,
                     accountMask: accountMask,
                     sourceInstitution: accountName,
-                    rawName: tx.name,
+                    rawName: rawName,
                     pfc: pfcDetailed,
                     pending: pending,
                     kind: "income"
@@ -1023,7 +1127,8 @@ enum PlaidSyncEngine {
             let accountId = detail.account_id
             let name = detail.name ?? detail.official_name ?? item.institutionName
             let type = detail.type ?? "other"
-            let current = detail.balances?.current ?? 0
+            // Plaid can omit `current`. Keep the last known balance rather than showing $0.
+            let current = detail.balances?.current
             let available = detail.balances?.available
             let limit = detail.balances?.limit
 
@@ -1042,7 +1147,9 @@ enum PlaidSyncEngine {
                 existing.type = type
                 existing.subtype = detail.subtype
                 existing.institutionName = item.institutionName
-                existing.currentBalance = current
+                if let current {
+                    existing.currentBalance = current
+                }
                 existing.availableBalance = available
                 existing.creditLimit = limit
                 if let institutionId {
@@ -1059,7 +1166,7 @@ enum PlaidSyncEngine {
                     type: type,
                     subtype: detail.subtype,
                     institutionName: item.institutionName,
-                    currentBalance: current,
+                    currentBalance: current ?? available ?? 0,
                     availableBalance: available,
                     creditLimit: limit,
                     institutionId: institutionId,
@@ -1150,8 +1257,36 @@ enum PlaidSyncEngine {
     /// v3: stop the purchase-rescue branch deleting payment rows for transfer-worded bill pays.
     /// v4: drop payment rows mirrored for Loan / Refund / Installment edits.
     /// v5: merchant refunds / reimbursements out of Income; recategorise Payroll / Direct Deposit.
-    static let legacyCleanupVersion = 5
+    /// v6: balance transfers out of spend; rewards and person-to-person out of earnings.
+    /// v7: cash rewards into earnings. Newly counted deposits need a Full re-sync.
+    static let legacyCleanupVersion = 7
     static let legacyCleanupVersionKey = "plaid.legacyCleanup.v"
+
+    /// Reward rows from before v7 sit in the Refund bucket and lower Total Spend.
+    @MainActor
+    static func moveRewardToIncome(_ row: Transaction, modelContext: ModelContext) {
+        let targetId = row.transactionId
+        var descriptor = FetchDescriptor<Income>(predicate: #Predicate { $0.transactionId == targetId })
+        descriptor.fetchLimit = 1
+        if (try? modelContext.fetch(descriptor).first) == nil {
+            let parts = row.paymentMethod.components(separatedBy: " ···")
+            modelContext.insert(Income(
+                transactionId: targetId,
+                source: row.title,
+                amount: abs(row.amount),
+                date: row.date,
+                category: "Rewards",
+                accountName: parts.first,
+                accountMask: parts.count > 1 ? parts[1] : nil,
+                sourceInstitution: parts.first,
+                rawName: row.title,
+                pfc: nil,
+                pending: false,
+                kind: "income"
+            ))
+        }
+        modelContext.delete(row)
+    }
 
     /// Re-home mis-filed spend/income that look like transfers or card payments.
     /// Runs at the start of syncAll so older imports get corrected before new pages apply.
@@ -1166,7 +1301,19 @@ enum PlaidSyncEngine {
                     fixed += 1
                     continue
                 }
+                if !row.isCategoryLocked,
+                   row.category == KnownCategory.refund.rawValue,
+                   PlaidCategoryMapper.looksLikeCashRewards(row.title) {
+                    moveRewardToIncome(row, modelContext: modelContext)
+                    fixed += 1
+                    continue
+                }
                 let lower = row.title.lowercased()
+                if PlaidCategoryMapper.looksLikeBalanceTransfer(row.title), !row.isCategoryLocked {
+                    row.category = TransactionAnalytics.balanceTransferCategory
+                    fixed += 1
+                    continue
+                }
                 if PayoffPlanRecognition.looksLikeInstallmentBillingTitle(row.title),
                    !TransactionAnalytics.isExcludedFromSpendCategory(row.category)
                     || row.category.caseInsensitiveCompare(TransactionAnalytics.installmentCategory) != .orderedSame {
@@ -1246,7 +1393,7 @@ enum PlaidSyncEngine {
                     ensureCreditPaymentFromTransaction(row, modelContext: modelContext)
                     continue
                 }
-                if PlaidCategoryMapper.looksLikeNonSpendTitle(row.title) {
+                if PlaidCategoryMapper.looksLikeNonSpendTitle(row.title), !row.isCategoryLocked {
                     modelContext.delete(row)
                     fixed += 1
                 }
@@ -1556,7 +1703,7 @@ enum PlaidSyncEngine {
     /// Delete one CreditCardPayment by Plaid transaction_id if it exists.
     @MainActor
     @discardableResult
-    private static func deleteCreditPaymentOnly(transactionID: String, modelContext: ModelContext) -> Bool {
+    static func deleteCreditPaymentOnly(transactionID: String, modelContext: ModelContext) -> Bool {
         let targetId = transactionID
         var desc = FetchDescriptor<CreditCardPayment>(
             predicate: #Predicate<CreditCardPayment> { row in

@@ -142,6 +142,16 @@ struct TransactionDetailView: View {
                 .padding(.vertical, 4)
             }
 
+            if !TransactionAnalytics.isExcludedFromSpend(transaction) {
+                Section {
+                    NavigationLink {
+                        ExplainChargeView(transaction: transaction)
+                    } label: {
+                        Label("Why this charge?", systemImage: "apple.intelligence")
+                    }
+                }
+            }
+
             Section("Details") {
                 LabeledContent("Date") {
                     Text(transaction.date, style: .date)
@@ -440,7 +450,7 @@ struct TransactionDetailView: View {
             // merely opening a Miscellaneous row and tapping Save wrote a permanent
             // vendor+card → Miscellaneous rule that then beat Plaid's PFC on every future
             // row, with no UI to remove it.
-            if learn, categoryChanged, !TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
+            if learn, !DemoMode.isActive, categoryChanged, !TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
                 VendorRulesStore.upsert(
                     vendor: transaction.title,
                     paymentMethod: cardScoped ? transaction.paymentMethod : nil,
@@ -470,7 +480,9 @@ struct TransactionDetailView: View {
                 saveStatusMessage = "Saved as Credit Card Payment (excluded from Total Spend)."
             } else if TransactionAnalytics.isExcludedFromSpendCategory(trimmedCategory) {
                 // Loan / Refund / Installment are excluded too, but they are not payments.
-                saveStatusMessage = "Saved as \(trimmedCategory) (excluded from Total Spend)."
+                saveStatusMessage = TransactionAnalytics.isRefundCategory(trimmedCategory)
+                    ? "Saved as \(trimmedCategory) (reduces Total Spend)."
+                    : "Saved as \(trimmedCategory) (excluded from Total Spend)."
             } else if localExtra > 0 {
                 saveStatusMessage = "Saved. Updated \(localExtra + 1) transactions on this card."
             } else {

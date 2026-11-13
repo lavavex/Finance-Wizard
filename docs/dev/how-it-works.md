@@ -5,7 +5,7 @@ title: How it works
 
 # How it works
 
-End-to-end map of Finance Wizard: launch, data, Plaid, tabs, widgets. File names are the ones in the repo today.
+End-to-end map of Budget Magi: launch, data, Plaid, tabs, widgets. File names are the ones in the repo today.
 
 Related: [Architecture](architecture.md) (folders), [Data model](data-model.md) (fields), [Sync & API](sync-and-api.md) (Plaid endpoints).
 
@@ -20,7 +20,7 @@ They do **not** share memory. They share one SwiftData file via App Group `group
 
 ```text
 iPhone
-├── Finance Wizard.app
+├── Budget Magi.app
 │     FinanceWizardApp
 │       ModelContainer (App Group)
 │       RootWithSplash → OnboardingGate → Welcome or tabs
@@ -97,7 +97,7 @@ Analytics that both app and widgets use (pure functions on arrays):
 
 ## Plaid path
 
-Credentials and tokens never go to a Finance Wizard server.
+Credentials and tokens never go to a Budget Magi server.
 
 ```text
 Settings: client_id + env  → UserDefaults     PlaidCredentialsStore.swift
@@ -120,7 +120,7 @@ Sync (toolbar or pull-to-refresh)
     WidgetCenter.reloadAllTimelines()
 ```
 
-Webhook worker (`workers/plaid-webhooks/`) records Plaid events; the **app does not auto-sync** from them. User still taps Sync. Relink when `/item/get` says login expired.
+Webhook worker (`workers/plaid-webhooks/`) acknowledges Plaid events and discards them; the **app does not auto-sync**. User still taps Sync. Relink when `/item/get` says login expired.
 
 ## How each tab uses that data
 
@@ -167,4 +167,16 @@ Config intents: `Widget/AppIntent.swift`. Widgets never call Plaid; they only re
 
 ## Ask
 
-`FinanceWizard/Features/AI/` — availability on **Settings → On-device AI**. **Ask** is a circular overlay on `ContentView` (not a tab — six tabs trigger iOS **More**). Sheet presents `OnDeviceAIChatView`: `makeAskSession` + ledger tools (structured `@Generable` results), `streamResponse` into bubbles, `prewarm` on appear, follow-up chips, Writing Tools on the composer, thread persisted in a **separate** `AskChat` SwiftData store. New session after a long transcript. Balance and search tools return `CardLabelStore` display names (`account.displayName` / `cardLabel`), not Plaid’s raw `Credit Card` label; search uses `TransactionSearch.filter` (same matcher as the Transactions search bar). Transaction detail can **Suggest with Apple Intelligence**. App icon source: `FinanceWizard/Mika.icon/` (Icon Composer).
+`FinanceWizard/Features/AI/` — availability on **Settings → On-device AI**. **Ask** is a tab bar accessory on `ContentView` (not a tab — six tabs trigger iOS **More**). Sheet presents `OnDeviceAIChatView`, with `AskConversation` running the model: `streamResponse` into bubbles, `prewarm` on appear, follow-up chips based on the tools used, Writing Tools on the composer, thread persisted in a **separate** `AskChat` SwiftData store.
+
+The model is unreliable at math and has a small context window, so `AskLedger` computes every total and tools return short `@Generable` results led by a ready-made `headline`. `AskConversation` starts a new session for each question, with the last few questions in its instructions, because answers got worse as one session filled. Follow-ups like "And last month?" stay in the session. `AskLedger.spendingFilters` ignores the filler words the model puts in unused tool fields. `AskAnswerCheck` compares each dollar amount in an answer with the tool results and the question. A mismatch gets one retry, then a warning under the answer. Framework errors become plain messages.
+
+Balance and search tools return `CardLabelStore` display names (`account.displayName` / `cardLabel`), not Plaid’s raw `Credit Card` label; search uses `TransactionSearch.filter` (same matcher as the Transactions search bar). `getSpending` matches merchants on letters and digits only.
+
+`MoneyInsights` computes the "Why?" screens and monthly recap from the rows, and the on-device model only rewords those facts, with `AskAnswerCheck` rejecting any amount it adds. AI search reads a sentence into `TransactionSearchFilter`, then `supported(by:)` drops any filter the user's words don't support.
+
+Budgets and payoff plans don't go through the chat session. `OnDeviceAI.askIntent` sorts each question into lookup, budget, or payoff in its own short session with guided generation, and `AskConversation` answers the last two with `AskPlan.budget` or `AskPlan.payoff`, written into the chat by `AskPlan.chatText` with no model wording. Offering the plans as tools made the model choose worse tools for lookups, and letting it reword a plan let it attach a real rate to the wrong card. Both sessions sample greedily, so a question always gets the same answer. `SpendingQueryTool` drops the model's `toMonth` unless `AskLedger.asksForSeveralMonths` finds range wording in the question, because the model often ends "last month" at this month. Ask's recurring total leaves out charges `SubscriptionAnalytics.isOverdue` says have skipped their date, and names them.
+
+Ask can also write. `OnDeviceAI.askIntent` first checks whether a message is a correction ("Corner Cafe is dining"), then `editRequest` reads the merchant, amount, and category with guided generation. `AskEdit.charges(asked:merchant:amount:in:)` checks that reading against the user's own words, since the model can name the payee instead of the bank line or invent an amount, and `AskEdit.proposal` words the change. `AskReply.proposal` puts **Apply** and **Cancel** in the chat, and only `AskEdit.apply` writes: category, lock, `overrideSource = "user"`, the `CreditCardPayment` mirror, and a vendor rule. A line `MoneyInsights.looksLikeVaguePayment` matches gets a rule for one exact amount (`VendorRule.amountCents`) and never a rule for the whole line. `AskEditProposal.Action` also covers the Budget tab's limits (`.budget` from `AskPlan.budgetLimits`, `.limit` for one category) and the Recurring tab's markers (`.recurring`, writing `subscriptionCadenceOverride` on every charge from the vendor). Those requests are recognized by wording in `AskEdit.looksLikeLimitRequest` and `looksLikeRecurringRequest` before any sorting, then read by `OnDeviceAI.limitRequest` and `recurringRequest`; an amount must be one the user typed. `SubscriptionAnalytics.cancelledVendors` keeps cancelled bills out of Ask's recurring total and budget. `AskEdit.categoryNamed` makes a category the user names outrank the model's choice. `AskEdit.unnamedPayments` drives the "label my unnamed payments" walk-through, where `category(forPaymentExplainedAs:)` reads each answer.
+
+`AskEval` (Debug only) scores Ask through `AskConversation`, one question at a time and then all in one chat, with questions and answers computed from the data it runs on. It needs Apple Intelligence: run `AskEvalTests` on a device with `TEST_RUNNER_FW_ASK_EVAL=1`. Transaction detail can **Suggest with Apple Intelligence**. App icon source: `FinanceWizard/Mika.icon/` (Icon Composer).

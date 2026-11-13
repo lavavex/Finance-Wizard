@@ -14,14 +14,6 @@
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
 	</dict>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<!-- Plaid is HTTPS; local networking kept permissive for optional offline import tools -->
-		<key>NSAllowsArbitraryLoads</key>
-		<false/>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 
 	<!-- Hosted Link completion (ASWebAuthenticationSession callback) -->
 	<key>CFBundleURLTypes</key>
@@ -45,7 +37,7 @@
 			<key>UTTypeIdentifier</key>
 			<string>net.roberth.FinanceWizard.backup</string>
 			<key>UTTypeDescription</key>
-			<string>Finance Wizard Backup</string>
+			<string>Budget Magi Backup</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>
@@ -63,7 +55,7 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Finance Wizard Backup</string>
+			<string>Budget Magi Backup</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>

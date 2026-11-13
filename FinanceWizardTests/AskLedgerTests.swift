@@ -1,0 +1,444 @@
+//
+//  AskLedgerTests.swift
+//  Finance Wizard
+//
+//  The numbers Ask gives the model, the check on what the model says back, and its session recap.
+//  None of this needs Apple Intelligence.
+//
+
+import XCTest
+import SwiftData
+import FoundationModels
+@testable import FinanceWizard
+
+@MainActor
+final class AskLedgerTests: XCTestCase {
+    private var container: ModelContainer!
+    private var context: ModelContext!
+    private let calendar = Calendar.current
+    private let now = DateComponents(calendar: .current, year: 2026, month: 11, day: 15, hour: 12).date!
+
+    override func setUpWithError() throws {
+        container = try SharedStore.makeContainer(inMemory: true)
+        context = ModelContext(container)
+    }
+
+    // MARK: - Date ranges
+
+    func testMonthRangeParsesNumbersNamesAndBlanks() {
+        let thisMonth = AskLedger.monthRange(from: "", to: "", now: now, calendar: calendar)
+        XCTAssertEqual(thisMonth.label, "November 2026")
+
+        let march = AskLedger.monthRange(from: "2026-03", to: "", now: now, calendar: calendar)
+        XCTAssertEqual(march.label, "March 2026")
+        XCTAssertEqual(calendar.component(.month, from: march.end), 4)
+
+        XCTAssertEqual(AskLedger.monthRange(from: "March", to: "", now: now, calendar: calendar).label, "March 2026")
+        XCTAssertEqual(AskLedger.monthRange(from: "December", to: "", now: now, calendar: calendar).label, "December 2025")
+        XCTAssertEqual(AskLedger.monthRange(from: "gibberish", to: "", now: now, calendar: calendar).label, "November 2026")
+    }
+
+    func testMonthRangeCoversSeveralMonthsInEitherOrder() {
+        let range = AskLedger.monthRange(from: "2026-06", to: "2026-03", now: now, calendar: calendar)
+        XCTAssertEqual(range.label, "March 2026 through June 2026")
+        XCTAssertEqual(calendar.component(.month, from: range.end), 7)
+    }
+
+    // MARK: - Spending
+
+    func testMerchantTotalIsExactAndNetOfItsRefunds() throws {
+        insert("Example Market", -60.10, "Groceries", day: 3)
+        insert("EXAMPLE-MARKET #12", -39.90, "Groceries", day: 5)
+        insert("Example Market", 10, "Refund", day: 6)
+        insert("Other Store", -500, "Shopping", day: 7)
+        insert("Example Market", -999, "Groceries", day: 3, month: 10)
+
+        let result = AskLedger.spending(merchant: "example market", category: "", range: november, in: context)
+
+        XCTAssertEqual(result.total, 90)
+        XCTAssertEqual(result.refunds, 10)
+        XCTAssertEqual(result.chargeCount, 2)
+        XCTAssertEqual(result.largest.first?.amount, 60.10)
+        XCTAssertTrue(result.headline.contains("$90.00"), result.headline)
+    }
+
+    func testBillPaysAndOtherExcludedRowsAreNotSpending() throws {
+        insert("Example Market", -50, "Groceries", day: 3)
+        insert("Payment Thank You", -900, "Credit Card Payment", day: 4)
+        insert("Example Plan", -100, "Installment", day: 4)
+
+        let result = AskLedger.spending(merchant: "", category: "", range: november, in: context)
+
+        XCTAssertEqual(result.total, 50)
+        XCTAssertEqual(result.topMerchants.map(\.name), ["Example Market"])
+    }
+
+    func testCategoryUsesCanonicalNamesAndStaysBeforeRefunds() throws {
+        insert("Example Bistro", -40, "Dining", day: 3)
+        insert("Example Store", -70, "Shopping", day: 3)
+        insert("Example Store", 20, "Refund", day: 4)
+
+        let result = AskLedger.spending(merchant: "", category: "restaurants", range: november, in: context)
+
+        XCTAssertEqual(result.total, 40)
+        XCTAssertEqual(result.refunds, 0)
+    }
+
+    func testNoMatchSaysSoInsteadOfZeroDollars() {
+        let result = AskLedger.spending(merchant: "Nowhere", category: "", range: november, in: context)
+
+        XCTAssertEqual(result.chargeCount, 0)
+        XCTAssertEqual(result.headline, "No charges at Nowhere in November 2026.")
+    }
+
+    // MARK: - Budget and payments
+
+    func testBudgetHeadlineComputesWhatIsLeft() throws {
+        insert("Example Store", -700, "Shopping", day: 3)
+        insert("Example Bistro", -40, "Dining", day: 3)
+        context.insert(BudgetPlan(monthlyLimit: 1000, categoryLimits: ["Shopping": 500, "Dining": 100]))
+        try context.save()
+
+        let status = AskLedger.budgetStatus(now: now, in: context)
+
+        XCTAssertEqual(status.remaining, 260)
+        XCTAssertTrue(status.headline.contains("$260.00 left"), status.headline)
+        XCTAssertEqual(status.overLimit.map(\.name), ["Shopping"])
+        XCTAssertEqual(status.closestToLimit.map(\.name), ["Dining"])
+    }
+
+    func testNoBudgetIsStatedPlainly() {
+        XCTAssertTrue(AskLedger.budgetStatus(now: now, in: context).headline.hasPrefix("No budget is set"))
+    }
+
+    func testUpcomingPaymentsSortByDueDateAndSkipPastOnes() throws {
+        for (id, day, minimum) in [("later", 25, 40.0), ("sooner", 20, 25.0), ("past", 2, 99.0)] {
+            context.insert(BankAccount(
+                accountId: id,
+                itemId: "item",
+                name: id,
+                type: "credit",
+                institutionName: "Example",
+                currentBalance: 500,
+                minimumPaymentAmount: minimum,
+                nextPaymentDueDate: date(day: day)
+            ))
+        }
+        try context.save()
+
+        let upcoming = AskLedger.upcomingPayments(now: now, in: context)
+
+        XCTAssertEqual(upcoming.cards.map(\.name), ["sooner", "later"])
+        XCTAssertEqual(upcoming.totalMinimum, 65)
+    }
+
+    // MARK: - Tools
+
+    // The on-device model fills unused fields with words like these instead of leaving them out.
+    func testFillerWordsDoNotFilterSpending() {
+        for filler in ["all", "ANY", " merchant ", "category", "none", "n/a"] {
+            let filters = AskLedger.spendingFilters(merchant: filler, category: filler)
+            XCTAssertEqual(filters.merchant, "", filler)
+            XCTAssertEqual(filters.category, "", filler)
+        }
+        let named = AskLedger.spendingFilters(merchant: "Example Market", category: "merchant")
+        XCTAssertEqual(named.merchant, "Example Market")
+        XCTAssertEqual(named.category, "")
+    }
+
+    func testCategoryInTheWrongFieldStillFiltersByCategory() {
+        let doubled = AskLedger.spendingFilters(merchant: "Dining", category: "Dining")
+        XCTAssertEqual(doubled.merchant, "")
+        XCTAssertEqual(doubled.category, "Dining")
+
+        let swapped = AskLedger.spendingFilters(merchant: "dining", category: "")
+        XCTAssertEqual(swapped.merchant, "")
+        XCTAssertEqual(swapped.category, "Dining")
+
+        let custom = AskLedger.spendingFilters(merchant: "pet stuff", category: "", categoriesInUse: ["Pet Stuff"])
+        XCTAssertEqual(custom.merchant, "")
+        XCTAssertEqual(custom.category, "Pet Stuff")
+
+        let merchantInCategory = AskLedger.spendingFilters(merchant: "", category: "Example Market")
+        XCTAssertEqual(merchantInCategory.merchant, "Example Market")
+        XCTAssertEqual(merchantInCategory.category, "")
+    }
+
+    func testInstructionsNameThisMonthAndLastMonth() {
+        let january = DateComponents(calendar: .current, year: 2027, month: 1, day: 15, hour: 12).date!
+        let instructions = OnDeviceAI.askInstructions(today: january)
+        XCTAssertTrue(instructions.contains("This month is 2027-01."))
+        XCTAssertTrue(instructions.contains("Last month is 2026-12."))
+    }
+
+    func testToolAnswersWithoutTheModel() async throws {
+        insert("Example Market", -25, "Groceries", day: Calendar.current.component(.day, from: Date()), month: nil)
+        try context.save()
+
+        let result = try await SpendingQueryTool(modelContext: context).call(
+            arguments: .init(merchant: "Example Market", category: "", fromMonth: "", toMonth: "")
+        )
+
+        XCTAssertEqual(result.totalUSD, 25)
+        XCTAssertEqual(result.chargeCount, 1)
+    }
+
+    func testOnlyRangeWordingAsksForSeveralMonths() {
+        for single in ["How much did I spend on Dining last month?", "dining total this month?", "What did Example Fuel cost me in October"] {
+            XCTAssertFalse(AskLedger.asksForSeveralMonths(single), single)
+        }
+        for range in [
+            "What did I spend in total from August through October?", "Spending since August", "Dining in the last 3 months",
+            "How much this year?", "August and September spending", "Compare to last month",
+        ] {
+            XCTAssertTrue(AskLedger.asksForSeveralMonths(range), range)
+        }
+    }
+
+    // MARK: - Changing categories from Ask
+
+    private func charge(_ title: String, _ amount: Double, category: String = "Miscellaneous", id: String = UUID().uuidString) -> Transaction {
+        Transaction(
+            transactionId: id, title: title, amount: -amount, date: date(day: 4),
+            category: category, paymentMethod: "Checking ···1111"
+        )
+    }
+
+    func testRequestIsCheckedAgainstTheUsersWords() {
+        let rows = [
+            charge("PAYMENT", 177.09), charge("PAYMENT", 152.07), charge("Example Shop", 20, category: "Shopping"),
+            charge("Example Shop Plus", 30, category: "Shopping"),
+        ]
+        // The model named the payee, and the amount finds the bank line.
+        let byAmount = AskEdit.charges(asked: "The 177.09 PAYMENT is my Example Phone bill", merchant: "Example Phone", amount: 177.09, in: rows)
+        XCTAssertEqual(byAmount.rows.map(\.amount), [-177.09])
+        XCTAssertEqual(byAmount.amount, 177.09)
+        // An amount the user never typed is ignored, and an exact name beats a partial one.
+        let invented = AskEdit.charges(asked: "Example Shop is groceries", merchant: "Example Shop", amount: 0, in: rows)
+        XCTAssertEqual(invented.rows.map(\.title), ["Example Shop"])
+        XCTAssertNil(invented.amount)
+        // The model reworded the merchant, and the question still has it.
+        let reworded = AskEdit.charges(asked: "example shop plus is groceries", merchant: "the store", amount: nil, in: rows)
+        XCTAssertEqual(reworded.rows.map(\.title), ["Example Shop Plus"])
+        XCTAssertTrue(AskEdit.charges(asked: "Fix my categories", merchant: "categories", amount: nil, in: rows).rows.isEmpty)
+    }
+
+    func testACategoryTheUserNamedOutranksTheModels() {
+        XCTAssertEqual(AskEdit.categoryNamed(in: "Example Apartments should be under Travel", current: ["Housing"]), "Travel")
+        XCTAssertEqual(AskEdit.categoryNamed(in: "Example Site is entertainment, not pets", current: ["Pets"]), "Entertainment")
+        XCTAssertEqual(AskEdit.categoryNamed(in: "It's not shopping, it's dining", current: ["Miscellaneous"]), "Dining")
+        // Nothing named, or no way to tell which of two is meant, leaves it to the model.
+        XCTAssertNil(AskEdit.categoryNamed(in: "the 177.09 payment is my phone bill", current: ["Miscellaneous"]))
+        XCTAssertNil(AskEdit.categoryNamed(in: "Example Cafe is dining or groceries", current: ["Shopping"]))
+        XCTAssertNil(AskEdit.categoryNamed(in: "Example Gym keeps me healthy", current: ["Shopping"]))
+    }
+
+    func testProposalSaysWhatWillChangeAndWhatIsRemembered() throws {
+        let shop = try XCTUnwrap(AskEdit.proposal(for: [charge("Example Shop", 20, category: "Pets"), charge("Example Shop", 5, category: "Pets")], category: "entertainment"))
+        XCTAssertEqual(shop.summary, "File 2 Example Shop charges ($25.00 in all) under Entertainment instead of Pets? Later charges from it will go there too.")
+
+        let vague = try XCTUnwrap(AskEdit.proposal(for: [charge("PAYMENT", 177.09)], category: "Home Internet", amount: 177.09))
+        XCTAssertEqual(vague.action, .category(transactionIds: vague.transactionIds, titles: ["PAYMENT"], category: "Home Internet", amount: 177.09))
+        XCTAssertTrue(vague.summary.hasSuffix("Later PAYMENT charges of exactly $177.09 will go there too."), vague.summary)
+
+        let mixed = try XCTUnwrap(AskEdit.proposal(for: [charge("PAYMENT", 10), charge("PAYMENT", 20)], category: "Utilities"))
+        XCTAssertEqual(mixed.action, .category(transactionIds: mixed.transactionIds, titles: ["PAYMENT"], category: "Utilities", amount: nil))
+        XCTAssertFalse(mixed.summary.contains("Later"), mixed.summary)
+
+        XCTAssertNil(AskEdit.proposal(for: [charge("Example Shop", 20, category: "Dining")], category: "Dining"))
+        XCTAssertNil(AskEdit.proposal(for: [charge("Example Shop", 20)], category: "Not A Category"))
+    }
+
+    func testApplyLocksTheCategoryAndKeepsTotalPaidInStep() throws {
+        context.insert(charge("PAYMENT", 300, id: "to-card"))
+        context.insert(charge("Example Shop", 20, category: "Pets", id: "shop"))
+        try context.save()
+        let rows = try context.fetch(FetchDescriptor<Transaction>())
+
+        let payment = try XCTUnwrap(AskEdit.proposal(for: rows.filter { $0.transactionId == "to-card" }, category: "Credit Card Payment"))
+        XCTAssertTrue(AskEdit.apply(payment, modelContext: context).contains("1 charge is now under Credit Card Payment"))
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CreditCardPayment>()).map(\.transactionId), ["to-card"])
+
+        let back = try XCTUnwrap(AskEdit.proposal(for: rows.filter { $0.transactionId == "to-card" }, category: "Utilities"))
+        AskEdit.apply(back, modelContext: context)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<CreditCardPayment>()), 0)
+
+        let shop = try XCTUnwrap(rows.first { $0.transactionId == "shop" })
+        AskEdit.apply(try XCTUnwrap(AskEdit.proposal(for: [shop], category: "Entertainment")), modelContext: context)
+        XCTAssertEqual(shop.category, "Entertainment")
+        XCTAssertTrue(shop.isCategoryLocked)
+        XCTAssertEqual(shop.overrideSource, "user")
+    }
+
+    func testUnnamedPaymentsAreRecentVagueAndStillUncategorized() {
+        let old = charge("PAYMENT", 50)
+        old.date = date(day: 4, month: 6)
+        let rows = [charge("PAYMENT", 177.09), charge("WEB PMTS", 900, category: "Housing"), charge("Example Shop", 20), old]
+        XCTAssertEqual(AskEdit.unnamedPayments(in: rows, now: date(day: 12)).map(\.amount), [-177.09])
+    }
+
+    func testRuleForOneAmountLeavesOtherAmountsAlone() {
+        let saved = UserDefaults.standard.data(forKey: "plaid.vendorRules")
+        defer { UserDefaults.standard.set(saved, forKey: "plaid.vendorRules") }
+        VendorRulesStore.save([])
+        VendorRulesStore.upsert(vendor: "PAYMENT", paymentMethod: nil, category: "Home Internet", amount: 177.09)
+
+        XCTAssertEqual(VendorRulesStore.match(vendor: "payment", paymentMethod: "Checking", amount: 177.09)?.category, "Home Internet")
+        XCTAssertNil(VendorRulesStore.match(vendor: "PAYMENT", paymentMethod: "Checking", amount: 152.07))
+        XCTAssertNil(VendorRulesStore.match(vendor: "PAYMENT", paymentMethod: "Checking"))
+    }
+
+    // MARK: - Budget limits and recurring bills from Ask
+
+    func testWordingDecidesWhatIsASettingRequest() {
+        for limit in ["Set my dining budget to 200", "Cap shopping at $150 a month", "Raise my grocery limit to 400"] {
+            XCTAssertTrue(AskEdit.looksLikeLimitRequest(limit), limit)
+        }
+        for other in ["How's my budget?", "Help me make a budget", "How much of my budget do I have left this month?", "What is my dining limit of 200 for?"] {
+            XCTAssertFalse(AskEdit.looksLikeLimitRequest(other), other)
+        }
+        for bill in ["I cancelled Example Stream", "Example Stream is a monthly bill", "Example Stream is not a subscription", "Example Power bills me every month"] {
+            XCTAssertTrue(AskEdit.looksLikeRecurringRequest(bill), bill)
+        }
+        for other in ["What recurring charges are coming up?", "How much do my recurring charges cost per month?", "Example Stream monthly cost", "dining total this month?"] {
+            XCTAssertFalse(AskEdit.looksLikeRecurringRequest(other), other)
+        }
+    }
+
+    func testLimitNeedsARealCategoryAndAnAmountTheUserTyped() throws {
+        let plan = BudgetPlan(categoryLimits: ["Dining": 150])
+        let change = try XCTUnwrap(AskEdit.limitProposal(asked: "Set my dining budget to 200", category: "dining", amount: 200, current: plan))
+        XCTAssertEqual(change.summary, "Change your Dining limit from $150.00 to $200.00 a month?")
+        XCTAssertEqual(change.action, .limit(category: "Dining", amount: 200))
+        // The model's amount is ignored when the user typed a different one.
+        let typed = try XCTUnwrap(AskEdit.limitProposal(asked: "Cap shopping at 80", category: "Shopping", amount: 800, current: nil))
+        XCTAssertEqual(typed.action, .limit(category: "Shopping", amount: 80))
+        XCTAssertNil(AskEdit.limitProposal(asked: "Set my dining budget to 150", category: "Dining", amount: 150, current: plan))
+        XCTAssertNil(AskEdit.limitProposal(asked: "Set my fun budget to 50", category: "Fun", amount: 50, current: nil))
+    }
+
+    func testUsingABudgetReplacesTheLimits() throws {
+        context.insert(BudgetPlan(monthlyLimit: 900, categoryLimits: ["Dining": 150, "Travel": 300]))
+        try context.save()
+        let plan = try XCTUnwrap(context.fetch(FetchDescriptor<BudgetPlan>()).first)
+
+        let proposal = try XCTUnwrap(AskEdit.budgetProposal(limits: ["Dining": 100, "Housing": 1200], current: plan))
+        XCTAssertEqual(proposal.summary, "Set 2 category limits on the Budget tab, $1,300.00 a month in all? This replaces the 2 you have now.\n\n- Housing: $1,200.00\n- Dining: $100.00")
+        AskEdit.apply(proposal, modelContext: context)
+
+        XCTAssertEqual(plan.categoryLimits, ["Dining": 100, "Housing": 1200])
+        XCTAssertEqual(plan.monthlyLimit, 1300)
+        XCTAssertNil(AskEdit.budgetProposal(limits: [:], current: plan))
+    }
+
+    func testMarkingABillCoversEveryChargeFromThatVendor() throws {
+        for (index, amount) in [15.99, 15.99, 17.99].enumerated() {
+            context.insert(charge("Example Stream", amount, category: "Subscriptions", id: "stream-\(index)"))
+        }
+        context.insert(charge("Example Shop", 20, category: "Shopping", id: "shop"))
+        try context.save()
+        let rows = try context.fetch(FetchDescriptor<Transaction>())
+
+        let proposal = try XCTUnwrap(AskEdit.recurringProposal(named: "example stream", asked: "I cancelled Example Stream", marker: "cancelled", in: rows))
+        XCTAssertTrue(proposal.summary.hasPrefix("Mark Example Stream as cancelled?"), proposal.summary)
+        XCTAssertEqual(AskEdit.apply(proposal, modelContext: context), "Done. Example Stream is marked cancelled.")
+
+        XCTAssertEqual(rows.filter { $0.subscriptionCadenceOverride == "cancelled" }.map(\.title), ["Example Stream", "Example Stream", "Example Stream"])
+        XCTAssertEqual(SubscriptionAnalytics.cancelledVendors(in: rows), [SubscriptionAnalytics.normalizeVendor("Example Stream")])
+        XCTAssertNil(AskEdit.recurringProposal(named: "Example Stream", asked: "I cancelled Example Stream", marker: "cancelled", in: rows))
+        XCTAssertNil(AskEdit.recurringProposal(named: "Nobody", asked: "I cancelled Nobody", marker: "cancelled", in: rows))
+    }
+
+    func testCancellingPrefersTheBillTheAppTracksOverAOneOffWithAShorterName() throws {
+        var rows = [charge("Stream", 40, category: "Shopping", id: "one-off")]
+        for month in 8...10 {
+            let row = charge("Example Stream", 15.99, category: "Subscriptions", id: "bill-\(month)")
+            row.date = date(day: 2, month: month)
+            rows.append(row)
+        }
+        let proposal = try XCTUnwrap(AskEdit.recurringProposal(named: "Stream", asked: "I cancelled Stream", marker: "cancelled", in: rows))
+        guard case .recurring(let ids, let vendor, _) = proposal.action else { return XCTFail("\(proposal.action)") }
+        XCTAssertEqual(vendor, "Example Stream")
+        XCTAssertEqual(Set(ids), ["bill-8", "bill-9", "bill-10"])
+    }
+
+    func testEveryToolIsRegisteredAndNamedInTheInstructions() {
+        let instructions = OnDeviceAI.askInstructions()
+        for tool in OnDeviceAI.askTools(modelContext: context) {
+            XCTAssertTrue(instructions.contains(tool.name), tool.name)
+        }
+    }
+
+    // MARK: - Checking answers
+
+    func testAmountsFromToolsPassAndInventedOnesFail() {
+        let facts = [#"{"totalUSD":1770.76,"note":"after 3.23 in refunds"}"#]
+
+        XCTAssertEqual(AskAnswerCheck.unverifiedAmounts(in: "You spent $1,770.76.", facts: facts), [])
+        XCTAssertEqual(AskAnswerCheck.unverifiedAmounts(in: "About $1,771 so far.", facts: facts), [])
+        XCTAssertEqual(AskAnswerCheck.unverifiedAmounts(in: "Refunds were $3.23.", facts: facts), [])
+        XCTAssertEqual(AskAnswerCheck.unverifiedAmounts(in: "You spent $2,000.50.", facts: facts), [2000.50])
+        XCTAssertEqual(AskAnswerCheck.unverifiedAmounts(in: "You spent $45.", facts: []), [45])
+    }
+
+    func testAnswersWithoutAmountsAndAmountsTheUserTypedPass() {
+        XCTAssertEqual(AskAnswerCheck.unverifiedAmounts(in: "Dining is your biggest category.", facts: []), [])
+        XCTAssertEqual(AskAnswerCheck.unverifiedAmounts(in: "Yes, $50 is a lot.", facts: ["Is $50 a lot?"]), [])
+    }
+
+    // MARK: - Conversation
+
+    func testRecapKeepsRecentQuestionsAndLeavesOutAnswers() {
+        let long = String(repeating: "x", count: 1000)
+        let history = (0..<8).map { AskChatTurn(isUser: $0 % 2 == 0, text: "turn \($0) \(long)") }
+
+        let recap = AskConversation.recap(of: history)
+
+        XCTAssertFalse(recap.contains("turn 0 "))
+        XCTAssertTrue(recap.contains("turn 2 "))
+        XCTAssertFalse(recap.contains("turn 3 "), "An old amount in the recap gets repeated as if it were new.")
+        XCTAssertLessThan(recap.count, 600)
+    }
+
+    func testFollowUpWordingIsRecognized() {
+        XCTAssertTrue(AskConversation.isFollowUp("And last month?"))
+        XCTAssertTrue(AskConversation.isFollowUp("  what about groceries?"))
+        XCTAssertFalse(AskConversation.isFollowUp("How much did I spend this month?"))
+        XCTAssertFalse(AskConversation.isFollowUp("Android subscriptions?"))
+    }
+
+    func testFollowUpsMatchWhatWasAnswered() {
+        XCTAssertEqual(
+            AskConversation.followUps(afterTools: ["getSpending"]),
+            ["Compare to last month", "Show the largest charges"]
+        )
+        XCTAssertEqual(AskConversation.followUps(afterTools: []).count, 3)
+    }
+
+    func testFailuresBecomePlainMessages() {
+        struct Unknown: Error {}
+        XCTAssertTrue(AskConversation.message(for: Unknown()).contains("Apple Intelligence"))
+    }
+
+    // MARK: - Helpers
+
+    private var november: AskLedger.MonthRange {
+        AskLedger.monthRange(from: "2026-11", to: "", now: now, calendar: calendar)
+    }
+
+    private func date(day: Int, month: Int = 11) -> Date {
+        DateComponents(calendar: calendar, year: 2026, month: month, day: day, hour: 12).date!
+    }
+
+    private func insert(_ title: String, _ amount: Double, _ category: String, day: Int, month: Int? = 11) {
+        let when = month.map { date(day: day, month: $0) } ?? Date()
+        context.insert(Transaction(
+            transactionId: UUID().uuidString,
+            title: title,
+            amount: amount,
+            date: when,
+            category: category,
+            paymentMethod: "Card"
+        ))
+    }
+}

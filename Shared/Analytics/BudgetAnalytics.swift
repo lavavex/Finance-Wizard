@@ -52,6 +52,9 @@ struct BudgetSnapshot {
     let nextPayday: Date?
     let categories: [BudgetCategoryProgress]
     let unbudgetedSpend: Double
+    /// Refunds taken off `totalSpent`. Category rows stay before refunds, because a refund row
+    /// doesn't say which category the purchase was in.
+    let refunds: Double
     let transactionCount: Int
 
     /// Total budget remaining (monthly plan minus all spend).
@@ -136,7 +139,7 @@ enum BudgetAnalytics {
         }
 
         let totalSpent = spendIndex.totalSpend
-        let unbudgeted = max(0, totalSpent - budgetedSpend)
+        let unbudgeted = max(0, spendIndex.grossSpend - budgetedSpend)
         let income = IncomeAnalytics.totalEarned(
             in: IncomeAnalytics.inPeriod(incomeRows, period: period, referenceDate: referenceDate)
         )
@@ -165,6 +168,7 @@ enum BudgetAnalytics {
             nextPayday: nextPayday,
             categories: categories,
             unbudgetedSpend: unbudgeted,
+            refunds: spendIndex.refundTotal,
             transactionCount: spendIndex.spendTransactions.count
         )
     }

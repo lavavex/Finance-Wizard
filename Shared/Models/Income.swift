@@ -20,7 +20,7 @@ final class Income {
     /// Always positive — money received (never mixed into spend).
     var amount: Double
     var date: Date
-    /// Canonical: Payroll, Direct Deposit, Interest, Other Income.
+    /// Canonical: Payroll, Direct Deposit, Interest, Rewards, Deposit, Other Income.
     var category: String
     /// e.g. "CHASE COLLEGE" (API `account_name`)
     var accountName: String?
@@ -102,15 +102,20 @@ enum IncomeAnalytics {
         "Direct Deposit",
         "Interest",
         "Refund",
+        "Person to Person",
+        "Rewards",
+        "Deposit",
         "Other Income"
     ]
 
-    /// Categories that are money-in but not earnings (merchant returns). Excluded from Total Income.
+    /// Categories that are money-in but not earnings. Excluded from Total Income.
     static let nonEarningsCategories: Set<String> = [
-        "Refund"
+        "Refund",
+        "Person to Person"
     ]
 
-    /// True for paychecks, deposits, interest, and uncategorised money-in. False for Refund.
+    /// True for paychecks, deposits, interest, and uncategorised money-in.
+    /// False for refunds and money from people.
     static func isEarnings(_ category: String) -> Bool {
         let c = category.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !c.isEmpty else { return true }

@@ -417,14 +417,7 @@ struct SubscriptionsView: View {
         }.value
         await logWork("Detector returned \(found.count) group(s)")
         await logWork("Building cancelled-vendor set")
-        let cancelledVendors = Set(
-            transactions.compactMap { tx -> String? in
-                guard (tx.subscriptionCadenceOverride ?? "").lowercased() == "cancelled" else {
-                    return nil
-                }
-                return SubscriptionAnalytics.normalizeVendor(tx.title)
-            }
-        )
+        let cancelledVendors = SubscriptionAnalytics.cancelledVendors(in: transactions)
         await logWork("\(cancelledVendors.count) cancelled vendor(s)")
         let active = found.filter { SubscriptionAnalytics.isActive($0) && !cancelledVendors.contains($0.normalizedVendor) }
         let endedGroups = found.filter { !SubscriptionAnalytics.isActive($0) || cancelledVendors.contains($0.normalizedVendor) }

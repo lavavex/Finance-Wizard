@@ -59,6 +59,25 @@ struct CategorySpendView: View {
                 Text("\(snapshot.transactionCount) transactions · \(snapshot.categories.count) categories")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if snapshot.refunds > 0.005 {
+                    HStack(spacing: 4) {
+                        Text("After refunds of")
+                        MoneyText(snapshot.refunds)
+                        Text("· categories show spending before refunds")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            if period == .month, !snapshot.categories.isEmpty {
+                Section {
+                    NavigationLink {
+                        SpendingInsightScreen(month: referenceDate, category: nil)
+                    } label: {
+                        Label("Why this total?", systemImage: "apple.intelligence")
+                    }
+                }
             }
 
             Section("Chart type") {
@@ -92,20 +111,7 @@ struct CategorySpendView: View {
             if !snapshot.categories.isEmpty {
                 Section("Breakdown") {
                     ForEach(snapshot.categories) { item in
-                        HStack(spacing: 12) {
-                            Image(systemName: CategoryStyle.symbolName(for: item.category))
-                                .foregroundStyle(CategoryStyle.color(for: item.category))
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.category)
-                                Text("\(item.transactionCount) transactions")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            MoneyText(item.spent)
-                                .fontWeight(.semibold)
-                        }
+                        categoryRow(item)
                     }
                 }
             }
@@ -125,6 +131,36 @@ struct CategorySpendView: View {
     }
 
     // Taller chart for horizontal bars (many categories need vertical space)
+    @ViewBuilder
+    private func categoryRow(_ item: CategorySpendSummary) -> some View {
+        if period == .month {
+            NavigationLink {
+                SpendingInsightScreen(month: referenceDate, category: item.category)
+            } label: {
+                categoryLabel(item)
+            }
+        } else {
+            categoryLabel(item)
+        }
+    }
+
+    private func categoryLabel(_ item: CategorySpendSummary) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: CategoryStyle.symbolName(for: item.category))
+                .foregroundStyle(CategoryStyle.color(for: item.category))
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.category)
+                Text("\(item.transactionCount) transactions")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            MoneyText(item.spent)
+                .fontWeight(.semibold)
+        }
+    }
+
     private var chartHeight: CGFloat {
         switch chartFormat {
         case .horizontalBar:

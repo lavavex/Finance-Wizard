@@ -13,14 +13,13 @@ build/
 **/AuthKey_*.p8
 # Local Instruments captures
 .perf-traces/
+# scripts/sim-shot.sh output
+.sim-shots/
 
 # Cloudflare Workers local
 node_modules/
 .wrangler/
 workers/**/dist/
-
-# Local/CI build stamp from set-build-number.sh
-ci_scripts/.last_build_number
 
 # Maintainer-only notes (machine paths, Gitea remotes, SSH). Tracked: docs/local/README.md
 docs/local/*

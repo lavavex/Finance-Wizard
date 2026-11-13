@@ -120,6 +120,9 @@ enum CreditAnalytics {
     /// empty. A pair must straddle the two sides; mask/issuer then only confirm it.
     static func isSamePayment(_ a: CreditCardPayment, _ b: CreditCardPayment) -> Bool {
         guard isCardSide(a) != isCardSide(b) else { return false }
+        if let accountA = a.creditAccountId, let accountB = b.creditAccountId {
+            return accountA == accountB
+        }
         let ia = paymentIdentities(a)
         let ib = paymentIdentities(b)
         // Set order is undefined — sort so the chosen mask is deterministic across runs.
@@ -127,13 +130,24 @@ enum CreditAnalytics {
         let mb = ib.filter { $0.hasPrefix("mask:") }.sorted().first
         // Last-four of the *card* is the strongest match; different fours are different cards.
         if let ma, let mb { return ma == mb }
-        let issuersA = ia.filter { $0.hasPrefix("issuer:") }
-        let issuersB = ib.filter { $0.hasPrefix("issuer:") }
-        if !issuersA.isEmpty, !issuersB.isEmpty {
-            return !issuersA.isDisjoint(with: issuersB)
+        let card = isCardSide(a) ? a : b
+        let checking = isCardSide(a) ? b : a
+        let cardIssuers = CardIssuerCatalog.issuerIds(
+            in: [card.title, card.cardName, card.institutionName ?? ""].joined(separator: " ")
+        )
+        let namedIssuers = checkingRowIssuers(checking)
+        if !cardIssuers.isEmpty, !namedIssuers.isEmpty {
+            return !cardIssuers.isDisjoint(with: namedIssuers)
         }
-        // Sides already differ (guarded above) and neither carries an identity — accept.
+        // Nothing names an issuer on one of the sides, so the sides and amount decide it.
         return true
+    }
+
+    /// The issuer a checking-side row pays. Its institution is the funding bank, and a repaired
+    /// row stores the funding account as the card name, so neither can identify the card.
+    private static func checkingRowIssuers(_ row: CreditCardPayment) -> Set<String> {
+        let cardName = row.cardName == row.sourceAccount ? "" : row.cardName
+        return CardIssuerCatalog.issuerIds(in: "\(row.title) \(cardName)")
     }
 
     private static func preferredPayment(in group: [CreditCardPayment]) -> CreditCardPayment {
@@ -148,8 +162,13 @@ enum CreditAnalytics {
         } ?? group[0]
     }
 
+    /// Sync records a funding account only on the checking side, and a label that differs from
+    /// the card. A checking row also carries the card's id and name once its last four match,
+    /// so those can't tell the sides apart. Repaired rows store one label in both fields, so
+    /// they fall through to the name and title checks.
     private static func isCardSide(_ row: CreditCardPayment) -> Bool {
-        if row.creditAccountId != nil { return true }
+        guard let source = row.sourceAccount else { return true }
+        if source != row.cardName { return false }
         if CardIssuerCatalog.looksLikeCreditAccountName(row.cardName) { return true }
         let t = row.title.lowercased()
         if t.contains("thank you") || t.contains("thankyou") { return true }

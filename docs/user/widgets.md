@@ -5,7 +5,7 @@ title: Widgets
 
 # Widgets
 
-Finance Wizard can sit on your Home Screen. Widgets read the **same data** as the app after a Sync.
+Budget Magi can sit on your Home Screen. Widgets read the **same data** as the app after a Sync.
 
 | Widget | What it shows | You can edit |
 |--------|----------------|--------------|
@@ -19,7 +19,7 @@ On **Total Spend**, hiding a card only changes the **breakdown**. The big total 
 
 1. Sync at least once in the app.
 2. Home Screen → long-press → **+**
-3. Search **Finance Wizard**
+3. Search **Budget Magi**
 4. Choose a widget and a size
 5. Long-press → **Edit Widget** for week vs month (where available)
 

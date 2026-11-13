@@ -42,10 +42,17 @@ struct SettingsView: View {
     @State private var restorePolicy: PlaidConnectionBackup.RestorePolicy = .safeMerge
 
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
+    @Environment(\.sampleData) private var sampleData
+    @State private var showsDeveloperTools = false
+    @State private var showEraseAllData = false
 
     var body: some View {
         NavigationStack {
             Form {
+                if sampleData.isActive {
+                    SampleDataBanner()
+                }
+
                 // MARK: Screenshot privacy
                 Section {
                     Toggle(isOn: $screenshotPrivacy) {
@@ -55,6 +62,8 @@ struct SettingsView: View {
                     Text("Privacy")
                 }
 
+                // Sample data has no keys, banks, or backups of its own.
+                if !sampleData.isActive {
                 // MARK: Credentials
                 Section {
                     TextField("client_id", text: $clientID)
@@ -111,6 +120,7 @@ struct SettingsView: View {
                     if linkedItems.isEmpty {
                         Text("No banks linked yet.")
                             .foregroundStyle(.secondary)
+                        Button("Try with Sample Data") { sampleData.start() }
                     } else {
                         ForEach(linkedItems) { item in
                             HStack(spacing: 12) {
@@ -226,6 +236,14 @@ struct SettingsView: View {
                     Text("Backup & restore")
                 }
 
+                Section {
+                    Button("Erase All Data", role: .destructive) { showEraseAllData = true }
+                } footer: {
+                    Text("Deletes everything on this device, including your banks and keys.")
+                }
+
+                }
+
                 if let statusMessage {
                     Section {
                         Text(statusMessage)
@@ -248,6 +266,7 @@ struct SettingsView: View {
                         }
                     }
 
+                    if showsDeveloperTools, !sampleData.isActive {
                     Button {
                         showDebugExportConfirm = true
                     } label: {
@@ -261,6 +280,7 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(isExportingDebug)
+                    }
                 } header: {
                     Text("About")
                 }
@@ -271,23 +291,32 @@ struct SettingsView: View {
                     Text("On-device AI")
                 }
 
-                Section {
-                    NavigationLink {
-                        DebugMenuView()
-                    } label: {
-                        Label("Debug", systemImage: "ant")
+                if showsDeveloperTools, !sampleData.isActive {
+                    Section {
+                        NavigationLink {
+                            DebugMenuView()
+                        } label: {
+                            Label("Debug", systemImage: "ant")
+                        }
+                    } header: {
+                        Text("Developer")
                     }
-                } header: {
-                    Text("Developer")
                 }
             }
             .navigationTitle("Settings")
+            .task { showsDeveloperTools = await DeveloperTools.isAvailable() }
+            .sheet(isPresented: $showEraseAllData, onDismiss: reload) {
+                EraseAllDataView()
+            }
             .onAppear {
                 reload()
                 consumeIncomingBackupIfNeeded()
             }
             .onReceive(NotificationCenter.default.publisher(for: PlaidConnectionBackup.openFileNotification)) { _ in
                 consumeIncomingBackupIfNeeded()
+            }
+            .onChange(of: pendingRestoreURL) { oldURL, _ in
+                PlaidConnectionBackup.discardTemporaryFile(oldURL)
             }
             .sheet(item: $linkSheetRequest, onDismiss: reload) { request in
                 PlaidLinkSheet(mode: request.mode) { result in
@@ -337,7 +366,7 @@ struct SettingsView: View {
                     itemPendingDelete = nil
                 }
             } message: {
-                Text("Unlinks this bank from Finance Wizard. You can also remove it from your Plaid account.")
+                Text("Unlinks this bank from Budget Magi. You can also remove it from your Plaid account.")
             }
             .confirmationDialog(
                 "Export debug data?",
@@ -365,6 +394,7 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showDebugShare, onDismiss: {
                 debugExportURL = nil
+                DebugDataExporter.discardTemporaryFiles()
             }) {
                 if let debugExportURL {
                     ShareSheet(items: [debugExportURL]) {
@@ -373,6 +403,7 @@ struct SettingsView: View {
                 }
             }
             .sheet(isPresented: $showPlaidBackupShare, onDismiss: {
+                PlaidConnectionBackup.discardTemporaryFile(plaidBackupShareURL)
                 plaidBackupShareURL = nil
             }) {
                 if let plaidBackupShareURL {
@@ -520,17 +551,16 @@ struct SettingsView: View {
             throw PlaidConnectionBackup.BackupError.invalidFile
         }
         isWorkingPlaidBackup = true
-        defer {
-            isWorkingPlaidBackup = false
-            pendingRestorePayload = nil
-            pendingRestoreURL = nil
-        }
+        defer { isWorkingPlaidBackup = false }
         await Task.yield()
         let summary = try PlaidConnectionBackup.apply(
             payload: payload,
             policy: restorePolicy,
             modelContext: modelContext
         )
+        // Kept on failure: the review sheet needs the payload to show the error.
+        pendingRestorePayload = nil
+        pendingRestoreURL = nil
         reload()
         clientID = PlaidCredentialsStore.clientID
         secret = PlaidCredentialsStore.secret
@@ -886,7 +916,11 @@ private struct PlaidRestorePlanSheet: View {
                     LabeledContent("Nicknames", value: "\(plan.cardLabelCount)")
                     LabeledContent("Vendor rules", value: "\(plan.vendorRuleCount)")
                 } header: {
-                    Text(policy.wipesLocalData ? "App data (replace)" : "App data (upsert)")
+                    Text("In this backup")
+                } footer: {
+                    if policy == .safeMerge {
+                        Text("Rows from banks already on this phone are skipped. Sync keeps those banks current.")
+                    }
                 }
 
                 if let errorMessage {
@@ -953,7 +987,7 @@ enum AppBuildInfo {
     static var displayName: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
             ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
-            ?? "Finance Wizard"
+            ?? "Budget Magi"
     }
 
     static var bundleIdentifier: String {

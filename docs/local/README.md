@@ -15,4 +15,4 @@ Create these files on your machine (names are what agents look for):
 | `machine.md` | Xcode path (`DEVELOPER_DIR`), preferred simulator |
 | `AGENTS.md` | Overrides for git push / xcodebuild on this Mac |
 
-Committed contributor workflow: [Development](../dev/development.md). Public clone: GitHub `lavavex/Finance-Wizard`.
+Committed contributor workflow: [Development](../dev/development.md). Public clone: GitHub `lavavex/Budget-Magi`.

@@ -83,6 +83,14 @@ The bank lists the payment on checking **and** on the card. Accounts → Total p
 
 Those are card credits, not paychecks. Sync files them as **Refund** (not Total Income). A loan disbursement into checking is **Loan**, not earnings. Payroll and other deposits to checking stay income.
 
+### My paycheck shows a code instead of my employer
+
+Some banks show a paycheck only as a payroll code, like PAYROLLXYZ. If another linked bank has paychecks from the same employer by name, Sync uses that name for the coded ones too. Run **Sync → Full re-sync** once so older paychecks are read again. With only the coded bank linked, the code stays.
+
+### A payment to my card counted as spending
+
+A bank line that says only **PAYMENT** or **ACH PMT** becomes a card payment when a linked card received the same amount within a few days. If the card isn't linked, or the amounts differ, open the row and set the category to **Credit Card Payment**.
+
 ### A phone, insurance, or utility bill is missing from Total Spend
 
 Words like **autopay** in a merchant description (VERIZON \*AUTOPAY, T‑MOBILE AUTOPAY, GEICO AUTOPAY) count as a card payment only on money **coming in** to a credit card, or when the description also names a card issuer. A utility autopay is still spend. Pull down to **Sync**.
@@ -97,7 +105,15 @@ Auto-detect looks for the **same amount** on a schedule, so a bill that changes 
 
 ## Total Income looks too high
 
-**Total Income** is paychecks, direct deposits, and interest — not merchant refunds, card credits, or loan proceeds. Refunds and reimbursements stay in the expense list as **Refund** (excluded from spend). A one-off bonus still counts as income.
+**Total Income** is paychecks, direct deposits, and interest — not merchant refunds, card credits, rewards, loan proceeds, or money from people. Refunds and reimbursements stay in the expense list as **Refund**, which reduces Total Spend. Money from Zelle, Venmo, and similar apps is listed as **Person to Person**. A one-off bonus still counts as income.
+
+## A category looks wrong
+
+Tap the transaction and pick the right category. Your choice sticks through future Syncs. Some bills, like rent paid by bank transfer, reach the app with a generic name, so this is the way to file them.
+
+Money you send through Zelle, Venmo, and similar apps counts as spending under **Person to Person**. Moves between your own accounts aren't counted. **Balance Transfer** isn't counted as spending because the original purchases already were, but the fee on it is.
+
+After an update improves categories, use **Sync → Full re-sync** to apply them to older transactions. Categories you picked yourself stay.
 
 ## Apple Card
 

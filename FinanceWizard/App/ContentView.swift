@@ -12,7 +12,7 @@ import SwiftData
 // MARK: - Root tabs
 
 /// Which main tab is selected.
-private enum AppTab: Hashable {
+private enum AppTab: String, Hashable {
     case transactions
     case accounts
     case budget
@@ -23,10 +23,21 @@ private enum AppTab: Hashable {
 /// Root of the main UI: a TabView with lazy-loaded secondary tabs for faster launch.
 struct ContentView: View {
     @AppStorage(ScreenshotPrivacy.storageKey) private var screenshotPrivacy = false
-    @State private var selectedTab: AppTab = .transactions
+    @State private var selectedTab: AppTab = Self.launchTab
     /// Only build heavy tabs after the user opens them (first switch is still work; launch is not).
-    @State private var loadedTabs: Set<AppTab> = [.transactions]
+    @State private var loadedTabs: Set<AppTab> = [.transactions, Self.launchTab]
     @State private var showAsk = false
+    @State private var showStoreRecovered = AppStoreRecovery.needsNotice
+
+    /// Transactions, unless a Debug build was launched with `-screen <tab>`.
+    private static var launchTab: AppTab {
+        #if DEBUG
+        if let tab = DemoMode.launchScreen.flatMap(AppTab.init(rawValue:)) {
+            return tab
+        }
+        #endif
+        return .transactions
+    }
 
     /// Custom Binding so selecting a tab also marks it “loaded” before assignment.
     private var tabSelection: Binding<AppTab> {
@@ -76,31 +87,17 @@ struct ContentView: View {
             loadedTabs.insert(.settings)
             selectedTab = .settings
         }
-        // NOTE: an earlier attempt used .safeAreaInset(edge: .bottom) here to avoid the
-        // hard-coded offset. On the iOS 26 floating tab bar that placed the button on top
-        // of the Settings tab item, so it is back to an overlay. The offset clears the
-        // floating bar; the trade-off is that the button still floats over list content.
-        .overlay(alignment: .bottomTrailing) {
-            Button {
-                showAsk = true
-            } label: {
-                Image(systemName: "apple.intelligence")
-                    .font(.title)
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.orange, .pink, .purple, .cyan],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-            .accessibilityLabel("Ask")
-            .buttonStyle(.glass)
-            .padding(.trailing, 20)
-            .padding(.bottom, 100)
+        // The system places this above the bottom tab bar, or in a small bubble beside a side tab bar.
+        .tabViewBottomAccessory {
+            AskAccessoryButton { showAsk = true }
         }
         .sheet(isPresented: $showAsk) {
             OnDeviceAIChatView()
+        }
+        .alert("Your data couldn’t be opened", isPresented: $showStoreRecovered) {
+            Button("OK", role: .cancel) { AppStoreRecovery.needsNotice = false }
+        } message: {
+            Text("A copy was kept on this iPhone and the app started empty. Sync downloads your bank history again. To get budgets, payoff plans, and edits back, restore a backup in Settings.")
         }
     }
 
@@ -196,9 +193,33 @@ struct AllTransactionsView: View {
         totalIncome - totalSpend
     }
 
+    /// A sentence rather than a keyword, which the plain search can't read.
+    @Environment(\.sampleData) private var sampleData
+
+    private var aiSearchQuery: String? {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.split(separator: " ").count >= 3,
+              case .available = OnDeviceAI.availabilityStatus() else { return nil }
+        return query
+    }
+
     var body: some View {
         NavigationStack {
             List {
+                if sampleData.isActive {
+                    SampleDataBanner()
+                }
+
+                if let aiSearchQuery {
+                    Section {
+                        NavigationLink {
+                            AITransactionSearchView(query: aiSearchQuery)
+                        } label: {
+                            Label("Search with AI", systemImage: "apple.intelligence")
+                        }
+                    }
+                }
+
                 if showSyncStatus || isSyncing {
                     Section("Sync Status") {
                         HStack(alignment: .top, spacing: 12) {
@@ -272,7 +293,7 @@ struct AllTransactionsView: View {
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(periodNet >= 0 ? .green : .primary)
                     }
-                    Text("\(periodTransactions.count) expenses · \(periodIncome.count) income in \(periodLabel.lowercased())")
+                    Text("\(TransactionAnalytics.spendOnly(periodTransactions).count) expenses · \(periodIncome.count) income in \(periodLabel.lowercased())")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -294,6 +315,11 @@ struct AllTransactionsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                    }
+                    NavigationLink {
+                        MonthlyRecapView()
+                    } label: {
+                        Label("Monthly recap", systemImage: "calendar.badge.clock")
                     }
                 } header: {
                     Text("Tools")
@@ -359,6 +385,7 @@ struct AllTransactionsView: View {
                 prompt: "Title, category, amount, last 4"
             )
             .refreshable {
+                guard !sampleData.isActive else { return }
                 await syncFromPlaid(resetCursors: false)
             }
             .task {
@@ -379,6 +406,7 @@ struct AllTransactionsView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
+                    if !sampleData.isActive {
                     if isSyncing {
                         ProgressView()
                     } else {
@@ -409,7 +437,9 @@ struct AllTransactionsView: View {
                         }
                         .disabled(isSyncing)
                     }
+                    }
                 }
+
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     PeriodFilterMenu(
                         period: $period,
@@ -509,6 +539,7 @@ struct AllTransactionsView: View {
     /// - Parameter resetCursors: if true, re-download full history for each Item.
     /// - Parameter forceRefresh: call `/transactions/refresh` first (on-demand bank pull).
     private func syncFromPlaid(resetCursors: Bool, forceRefresh: Bool = false) async {
+        guard !isSyncing else { return }
         await MainActor.run {
             isSyncing = true
             let title: String = {
@@ -572,4 +603,27 @@ struct AllTransactionsView: View {
         }
     }
 
+}
+
+private struct AskAccessoryButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "apple.intelligence")
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.orange, .pink, .purple, .cyan],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Text("Ask")
+            }
+            // Beside a side tab bar, the system's bubble is only as wide as this and has no padding
+            // of its own, so a label sized to its text overflows.
+            .frame(minWidth: 120)
+        }
+    }
 }

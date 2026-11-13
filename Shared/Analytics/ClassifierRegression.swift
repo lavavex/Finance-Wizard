@@ -217,6 +217,183 @@ enum ClassifierRegression {
             incomeCategory: "Other Income"
         ),
 
+        // Plaid's real names. These contain words other rules look for: "RENT", "GAS_".
+        ClassifierCase(
+            "gas-station-plaid-name",
+            title: "NEIGHBORHOOD FUEL",
+            amount: 40,
+            accountType: "credit",
+            primary: "TRANSPORTATION",
+            detailed: "TRANSPORTATION_GAS",
+            flow: .spending,
+            expenseCategory: KnownCategory.gas.rawValue
+        ),
+        ClassifierCase(
+            "electric-bill-is-not-fuel",
+            title: "CITY POWER AND GAS",
+            amount: 90,
+            accountType: "depository",
+            primary: "RENT_AND_UTILITIES",
+            detailed: "RENT_AND_UTILITIES_GAS_AND_ELECTRICITY",
+            flow: .spending,
+            expenseCategory: KnownCategory.utilities.rawValue
+        ),
+        ClassifierCase(
+            "water-bill-is-not-rent",
+            title: "CITY WATER DEPT",
+            amount: 60,
+            accountType: "depository",
+            primary: "RENT_AND_UTILITIES",
+            detailed: "RENT_AND_UTILITIES_WATER",
+            flow: .spending,
+            expenseCategory: KnownCategory.utilities.rawValue
+        ),
+        ClassifierCase(
+            "rental-car-is-not-rent",
+            title: "AIRPORT CAR RENTAL",
+            amount: 210,
+            accountType: "credit",
+            primary: "TRAVEL",
+            detailed: "TRAVEL_RENTAL_CARS",
+            flow: .spending,
+            expenseCategory: KnownCategory.travel.rawValue
+        ),
+
+        // Balance transfers move debt. The fee is still a real cost.
+        ClassifierCase(
+            "balance-transfer-reference",
+            title: "BT 123456789 - EXAMPLE CARD SERVICES",
+            amount: 1500,
+            accountType: "credit",
+            primary: "TRANSFER_OUT",
+            detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+            flow: .spending,
+            expenseCategory: KnownCategory.balanceTransfer.rawValue
+        ),
+        ClassifierCase(
+            "balance-transfer-fee-stays-spend",
+            title: "BALANCE TRANSFER FEE",
+            amount: 45,
+            accountType: "credit",
+            primary: "BANK_FEES",
+            detailed: "BANK_FEES_OTHER_BANK_FEES",
+            flow: .spending,
+            expenseCategory: KnownCategory.fees.rawValue
+        ),
+
+        // Person-to-person stays visible. Own-account moves stay out.
+        ClassifierCase(
+            "zelle-sent",
+            title: "ZELLE PAYMENT TO A FRIEND",
+            amount: 75,
+            accountType: "depository",
+            primary: "TRANSFER_OUT",
+            detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+            flow: .spending,
+            expenseCategory: KnownCategory.personToPerson.rawValue
+        ),
+        ClassifierCase(
+            "venmo-received",
+            title: "VENMO CASHOUT",
+            amount: -75,
+            accountType: "depository",
+            primary: "TRANSFER_IN",
+            detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+            flow: .income,
+            incomeCategory: KnownCategory.personToPerson.rawValue
+        ),
+        ClassifierCase(
+            "own-savings-transfer-stays-hidden",
+            title: "ONLINE TRANSFER TO SAVINGS",
+            amount: 200,
+            accountType: "depository",
+            primary: "TRANSFER_OUT",
+            detailed: "TRANSFER_OUT_SAVINGS",
+            flow: .transfer
+        ),
+        ClassifierCase(
+            "paypal-merchant-keeps-merchant-category",
+            title: "PAYPAL EXAMPLE STORE",
+            amount: 30,
+            accountType: "credit",
+            primary: "GENERAL_MERCHANDISE",
+            detailed: "GENERAL_MERCHANDISE_ONLINE_MARKETPLACES",
+            flow: .spending,
+            expenseCategory: KnownCategory.shopping.rawValue
+        ),
+        ClassifierCase(
+            "similar-word-is-not-zelle",
+            title: "GAZELLE SPORTS",
+            amount: 80,
+            accountType: "credit",
+            primary: "GENERAL_MERCHANDISE",
+            detailed: "GENERAL_MERCHANDISE_SPORTING_GOODS",
+            flow: .spending,
+            expenseCategory: KnownCategory.entertainment.rawValue
+        ),
+
+        // Card rewards are income.
+        ClassifierCase(
+            "cash-redemption-is-income",
+            title: "Cash Redemption",
+            amount: -25,
+            accountType: "depository",
+            primary: "OTHER",
+            detailed: "OTHER_OTHER",
+            flow: .income,
+            incomeCategory: "Rewards"
+        ),
+        ClassifierCase(
+            "card-cashback-is-income",
+            title: "Example Card Cashback Reward",
+            amount: -5,
+            accountType: "credit",
+            primary: "TRANSFER_IN",
+            detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+            flow: .income,
+            incomeCategory: "Rewards"
+        ),
+        ClassifierCase(
+            "benefit-credit-stays-a-refund",
+            title: "TRAVEL CREDIT $300/YEAR",
+            amount: -300,
+            accountType: "credit",
+            primary: "OTHER",
+            detailed: "OTHER_OTHER",
+            flow: .adjustment
+        ),
+
+        // Deposits are new money. Bank-to-bank moves aren't.
+        ClassifierCase(
+            "check-deposit-is-income",
+            title: "Mobile Check Deposit",
+            amount: -200,
+            accountType: "depository",
+            primary: "TRANSFER_IN",
+            detailed: "TRANSFER_IN_DEPOSIT",
+            flow: .income,
+            incomeCategory: "Deposit"
+        ),
+        ClassifierCase(
+            "plaid-tagged-deposit-is-income",
+            title: "Deposit",
+            amount: -60,
+            accountType: "depository",
+            primary: "TRANSFER_IN",
+            detailed: "TRANSFER_IN_DEPOSIT",
+            flow: .income,
+            incomeCategory: "Deposit"
+        ),
+        ClassifierCase(
+            "ach-deposit-transfer-stays-a-transfer",
+            title: "Ach Deposit Internet Transfer From Account",
+            amount: -500,
+            accountType: "depository",
+            primary: "TRANSFER_IN",
+            detailed: "TRANSFER_IN_DEPOSIT",
+            flow: .transfer
+        ),
+
         ClassifierCase(
             "adp-payroll",
             title: "ADP PAYROLL ACME CORP",

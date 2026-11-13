@@ -28,7 +28,7 @@ enum PlaidCredentialsStore {
     /// Settings can override (e.g. Universal Link later); leave blank to use this default.
     static let defaultRedirectURI = "https://budgetmagi.pages.dev/"
 
-    /// Cloudflare Worker that receives Plaid webhooks (free tier).
+    /// Cloudflare Worker that acknowledges Plaid webhooks and keeps nothing.
     /// Passed as `webhook` on `/link/token/create` so new/relinked Items notify this URL.
     static let plaidWebhookURL = "https://plaid-webhooks.lavavex.workers.dev/plaid/webhook"
 
@@ -61,6 +61,14 @@ enum PlaidCredentialsStore {
                 try? PlaidKeychain.set(trimmed, account: secretAccount)
             }
         }
+    }
+
+    /// Same as setting `secret`, but reports a Keychain failure.
+    static func saveSecret(_ value: String) throws {
+        try PlaidKeychain.set(
+            value.trimmingCharacters(in: .whitespacesAndNewlines),
+            account: secretAccount
+        )
     }
 
     // MARK: - Environment

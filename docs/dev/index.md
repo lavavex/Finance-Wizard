@@ -5,7 +5,7 @@ title: Developer docs
 
 # Developer / contributor docs
 
-Guides for building, debugging, and changing Finance Wizard.
+Guides for building, debugging, and changing Budget Magi.
 
 | Page | What it covers |
 |------|----------------|

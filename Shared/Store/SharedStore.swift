@@ -63,6 +63,9 @@ struct CategorySpendSnapshot {
     let period: SnapshotPeriod
     let isEmptyOrError: Bool
     let message: String?
+    /// Refunds already taken off `totalSpend`. Slices stay before refunds, because a refund
+    /// row doesn't say which category the purchase was in.
+    var refunds: Double = 0
 }
 
 /// One checking/savings (or other cash) account for the balances widget.
@@ -205,6 +208,8 @@ enum TransactionAnalytics {
     nonisolated static let refundCategory = "Refund"
     /// Monthly installment billing — original purchase already counted.
     nonisolated static let installmentCategory = "Installment"
+    /// Debt moved between cards — the original purchases were already counted.
+    nonisolated static let balanceTransferCategory = "Balance Transfer"
 
     /// Categories excluded from Total Spend, charts, and card spend rollups.
     static func isExcludedFromSpend(_ transaction: Transaction) -> Bool {
@@ -221,6 +226,7 @@ enum TransactionAnalytics {
             || c == loanCategory.lowercased()
             || c == refundCategory.lowercased()
             || c == installmentCategory.lowercased()
+            || c == balanceTransferCategory.lowercased()
     }
 
     nonisolated static func isCreditCardPaymentCategory(_ category: String) -> Bool {
@@ -229,6 +235,18 @@ enum TransactionAnalytics {
             || c == "credit card payments"
             || c == "card payment"
             || c == "card payments"
+    }
+
+    nonisolated static func isRefundCategory(_ category: String) -> Bool {
+        category.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare(refundCategory) == .orderedSame
+    }
+
+    /// Positive dollars returned by merchants and card credits.
+    static func refundTotal(in transactions: [Transaction]) -> Double {
+        transactions
+            .filter { isRefundCategory($0.category) }
+            .reduce(0) { $0 + abs($1.amount) }
     }
 
     /// Rows that count toward spend / utilization of budget categories.
@@ -334,9 +352,10 @@ enum TransactionAnalytics {
         }
     }
 
-    /// Positive dollars spent (excludes credit-card bill payments).
+    /// Positive dollars spent, after refunds (excludes credit-card bill payments). Never negative.
     static func totalSpend(in transactions: [Transaction]) -> Double {
-        spendOnly(transactions).reduce(0) { $0 + abs($1.amount) }
+        let spent = spendOnly(transactions).reduce(0) { $0 + abs($1.amount) }
+        return max(0, spent - refundTotal(in: transactions))
     }
 
     /// Signed balance of spend rows only (bill payments excluded).
@@ -458,19 +477,20 @@ enum TransactionAnalytics {
         }
 
         let categories = categorySummaries(from: spendRows, categoryLimit: categoryLimit)
-        let sliceTotal = categories.reduce(0.0) { $0 + $1.spent }
 
         return CategorySpendSnapshot(
             categories: categories,
-            totalSpend: sliceTotal,
+            totalSpend: index.totalSpend,
             transactionCount: spendRows.count,
             period: period,
             isEmptyOrError: false,
-            message: nil
+            message: nil,
+            refunds: index.refundTotal
         )
     }
 
-    /// Per-card spend (already period-filtered). `excludedCards` omits from the breakdown only.
+    /// Per-card spend after that card's refunds (already period-filtered).
+    /// `excludedCards` omits from the breakdown only.
     static func cardSummaries(
         from transactions: [Transaction],
         excludedCards: Set<String> = [],
@@ -484,6 +504,13 @@ enum TransactionAnalytics {
             let card = cardName(for: transaction)
             spent[card, default: 0] += abs(transaction.amount)
             counts[card, default: 0] += 1
+        }
+        for refund in excludingCards(transactions, excludedCards: excludedCards)
+        where isRefundCategory(refund.category) {
+            let card = cardName(for: refund)
+            if let amount = spent[card] {
+                spent[card] = max(0, amount - abs(refund.amount))
+            }
         }
 
         var list = spent.map { name, amount in
@@ -536,7 +563,7 @@ enum TransactionAnalytics {
         }
 
         let cards = cardSummaries(
-            from: index.spendTransactions,
+            from: index.periodTransactions,
             excludedCards: excludedCards,
             cardLimit: cardLimit
         )
@@ -604,50 +631,46 @@ enum SharedStore {
             groupContainer: .identifier(appGroupID)
         )
 
+        return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    /// App launch only: if the store can’t open, moves it aside and starts empty so the app
+    /// still launches. The widget stays on `makeContainer`, so it can never touch the file.
+    static func makeContainerMovingUnreadableStoreAside() throws -> (container: ModelContainer, movedAside: Bool) {
         do {
-            return try ModelContainer(for: schema, configurations: [configuration])
+            return (try makeContainer(), false)
         } catch {
-            // Schema changed (e.g. new fields) and lightweight migration failed.
-            // Delete the App Group store and create a fresh empty one so the app launches.
-            // User can Sync again to re-download transactions + income.
-            print("SwiftData open failed, resetting store: \(error)")
-            deletePersistentStoreFiles()
-            return try ModelContainer(for: schema, configurations: [configuration])
+            print("SwiftData open failed, moving store aside: \(error)")
+            guard let root = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: appGroupID
+            ) else { throw error }
+            let support = root
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("Application Support", isDirectory: true)
+            // Nothing to move means the store isn’t the problem.
+            guard try moveStoreAside(in: support) else { throw error }
+            return (try makeContainer(), true)
         }
     }
 
-    /// Remove FinanceTransactions.store (+ WAL/SHM) from the App Group container.
-    private static func deletePersistentStoreFiles() {
-        guard let root = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupID
-        ) else { return }
+    /// Moves the store and its WAL/SHM into `Recovered store/`, replacing any earlier copy.
+    /// - Returns: False when there were no store files to move.
+    @discardableResult
+    static func moveStoreAside(in directory: URL) throws -> Bool {
+        let manager = FileManager.default
+        let files = try manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix(storeName) }
+        guard !files.isEmpty else { return false }
 
-        let support = root
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Application Support", isDirectory: true)
-
-        let base = support.appendingPathComponent(storeName)
-        let candidates = [
-            base.appendingPathExtension("store"),
-            URL(fileURLWithPath: base.path + ".store"),
-            support.appendingPathComponent("\(storeName).store"),
-            support.appendingPathComponent("\(storeName).store-shm"),
-            support.appendingPathComponent("\(storeName).store-wal"),
-            support.appendingPathComponent("\(storeName).store-journal")
-        ]
-
-        if let files = try? FileManager.default.contentsOfDirectory(
-            at: support,
-            includingPropertiesForKeys: nil
-        ) {
-            for file in files where file.lastPathComponent.hasPrefix(storeName) {
-                try? FileManager.default.removeItem(at: file)
-            }
+        let recovered = directory.appendingPathComponent("Recovered store", isDirectory: true)
+        if manager.fileExists(atPath: recovered.path) {
+            try manager.removeItem(at: recovered)
         }
-
-        for url in candidates {
-            try? FileManager.default.removeItem(at: url)
+        try manager.createDirectory(at: recovered, withIntermediateDirectories: true)
+        for file in files {
+            try manager.moveItem(at: file, to: recovered.appendingPathComponent(file.lastPathComponent))
         }
+        return true
     }
 
     static func allPaymentMethods() -> [String] {

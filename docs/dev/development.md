@@ -87,6 +87,40 @@ xcodebuild -project FinanceWizard.xcodeproj -scheme FinanceWizard \
 
 Or **Settings → Developer → Debug → Run classifier cases**.
 
+### Running tests
+
+Tests are hosted in the app, so they share its Keychain, UserDefaults, and App Group on that simulator. Use a simulator with no real data on it:
+
+```bash
+xcrun simctl create "FW Tests" "iPhone 17"
+xcodebuild -project FinanceWizard.xcodeproj -scheme FinanceWizard \
+  -destination 'platform=iOS Simulator,name=FW Tests' \
+  -only-testing:FinanceWizardTests test
+```
+
+`BackupRestoreTests` covers restore merging, backup encryption, temporary files, and Keychain writes. Its wipe tests delete the simulator’s app data, so they are skipped unless you set `TEST_RUNNER_FW_DESTRUCTIVE_TESTS=1` for `xcodebuild`, and they still refuse to run if a bank is linked.
+
+## Screenshots with demo data
+
+`scripts/sim-shot.sh` needs Xcode 27.2 (release) and an iOS 27.1+ Simulator runtime (`xcodebuild -downloadPlatform iOS`). It builds the Debug app and captures each tab on iPhone 17 and iPhone Duo, creating those simulators if needed:
+
+```bash
+./scripts/sim-shot.sh                  # every tab, light mode
+./scripts/sim-shot.sh budget accounts  # only these tabs
+APPEARANCE=dark ./scripts/sim-shot.sh  # dark mode
+SKIP_BUILD=1 ./scripts/sim-shot.sh     # reuse the last build
+```
+
+Images land in `.sim-shots/<device>/` (gitignored). iPhone Duo uses its own iOS runtime and has two displays (1398×2034 and 2007×2853). Only the active one has content, so the script captures both and keeps the one that isn't black.
+
+The script uses these launch arguments, which also work from an Xcode scheme:
+
+| Argument | Effect |
+|----------|--------|
+| `-demoData YES` | Debug only. Opens an in-memory store seeded with made-up rows (`FinanceWizard/App/DemoMode.swift`). The App Group database is not touched, and the widget still reads the App Group database. |
+| `-screen <tab>` | Debug only. Opens `transactions`, `accounts`, `budget`, `subscriptions`, or `settings`. |
+| `-settings.onboardingCompleted YES` | Skips Welcome for this launch. |
+
 ## Version & build numbers (local ↔ Xcode Cloud)
 
 | Setting | Meaning |
@@ -94,51 +128,17 @@ Or **Settings → Developer → Debug → Run classifier cases**.
 | **MARKETING_VERSION** | User-facing version (e.g. `1.0`) → About **Version** |
 | **CURRENT_PROJECT_VERSION** | Integer build → About **Build** / TestFlight |
 
-**Xcode Cloud** runs `ci_scripts/ci_pre_xcodebuild.sh`, which sets:
+**Xcode Cloud** stamps each archive with its own build counter, the same number you see in App Store Connect / TestFlight. The repo has no CI scripts.
 
-```text
-CURRENT_PROJECT_VERSION = $CI_BUILD_NUMBER
-```
-
-so every Cloud archive’s build matches the Cloud build counter (same number you see in App Store Connect / TestFlight).
-
-**Local** uses whatever is in `project.pbxproj`. After a Cloud build lands, align your Mac:
-
-```bash
-./scripts/set-build-number.sh <CI_BUILD_NUMBER>
-```
-
-Then Clean + Run so **Settings → About** matches the Cloud install. Do not hand-edit a lower number than the last Cloud build (App Store Connect rejects non‑increasing builds).
+**Local** builds use the value in `project.pbxproj`, which stays at `1`. Settings → About shows build 1 on a local install, and that number never reaches App Store Connect.
 
 ## Xcode project format (Xcode Cloud)
 
-Newer local Xcodes (26/27) may rewrite `project.pbxproj` to **objectVersion 110+**. Older Xcode Cloud images then fail with:
+Newer local Xcodes may rewrite `project.pbxproj` to a newer **objectVersion**. An older Xcode Cloud image then fails with:
 
-> cannot be opened because it is in a future Xcode project file format (110)
+> cannot be opened because it is in a future Xcode project file format
 
-There is **no permanent lock inside the `.xcodeproj`** that stops Xcode from rewriting the file when you save. Use one (or both) of these:
-
-### A. Auto-downgrade on Xcode Cloud (in this repo)
-
-| Script | When |
-|--------|------|
-| `ci_scripts/ci_post_clone.sh` | After clone |
-| `ci_scripts/ci_pre_xcodebuild.sh` | Before `xcodebuild` |
-| `scripts/lock-xcode-project-format.sh` | Forces `objectVersion = 77` |
-
-Cloud runs the `ci_scripts/*` hooks automatically when present.
-
-### B. Optional local pre-commit hook
-
-```bash
-git config core.hooksPath .githooks
-```
-
-Commits then re-lock the project format before they land.
-
-### C. Or upgrade Xcode Cloud to match your Mac
-
-App Store Connect → your app → **Xcode Cloud** → workflow → **Environment** → pick an Xcode version that understands format 110 (same generation as your local Xcode 27). Then you can leave format 110 as-is.
+If you see this, go to App Store Connect → your app → **Xcode Cloud** → workflow → **Environment** and pick an Xcode version at least as new as your Mac's.
 
 **Also check the workflow project name:** it must open **`FinanceWizard.xcodeproj`**.
 
@@ -186,7 +186,7 @@ Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synce
 
 Repo root is the folder that contains `.xcodeproj`, `FinanceWizard/`, `Shared/`, `Widget/`, and `docs/`.
 
-**Public repo:** [github.com/lavavex/Finance-Wizard](https://github.com/lavavex/Finance-Wizard)
+**Public repo:** [github.com/lavavex/Budget-Magi](https://github.com/lavavex/Budget-Magi)
 
 ### Branches
 
@@ -201,12 +201,12 @@ Repo root is the folder that contains `.xcodeproj`, `FinanceWizard/`, `Shared/`,
 2. Use **your** GitHub remote as `origin`. Add `upstream` if you forked:
 
 ```bash
-git clone git@github.com:YOUR_USER/Finance-Wizard.git
-cd Finance-Wizard
-git remote add upstream git@github.com:lavavex/Finance-Wizard.git
+git clone git@github.com:YOUR_USER/Budget-Magi.git
+cd Budget-Magi
+git remote add upstream git@github.com:lavavex/Budget-Magi.git
 ```
 
-3. Branch from **`dev`**, commit, `git push origin your-branch`, open a pull request against **`lavavex/Finance-Wizard`** targeting **`dev`**.
+3. Branch from **`dev`**, commit, `git push origin your-branch`, open a pull request against **`lavavex/Budget-Magi`** targeting **`dev`**.
 4. Do not put LAN git hosts, personal SSH keys, or machine Xcode paths in committed docs. Those belong in **`docs/local/`** (gitignored except `docs/local/README.md`).
 
 Typical ignore (see `.gitignore`): `xcuserdata/`, `DerivedData/`, `.DS_Store`, `docs/local/*` (except the README), local `AGENTS.md`.
@@ -228,7 +228,7 @@ SwiftUI `#Preview` uses in-memory `modelContainer` where possible so the canvas 
 
 | Item | Status |
 |------|--------|
-| `Features/AI/` | Settings availability, Ask overlay + sheet, ledger tools. |
+| `Features/AI/` | Settings availability, Ask button + sheet, ledger tools. |
 | `SubscriptionsView.swift` | Recurring **tab** UI; filename is historical. |
 | `RecurringCalendarView.swift` | Month grid on Recurring (`UICalendarView` wrap). |
 | `PayoffPlan.swift` / `PayoffPlanEditorView.swift` | My Loan / Pay Over Time / promo APR schedules. |

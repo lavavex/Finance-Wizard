@@ -11,9 +11,9 @@ The app and widget share one Xcode project and the same App Group store. Tests h
 
 | Target | Product | Bundle ID | Responsibility |
 |--------|---------|-----------|----------------|
-| **FinanceWizard** | Finance Wizard (iOS app) | `net.roberth.FinanceWizard` | UI, Plaid Link, sync, settings |
+| **FinanceWizard** | Budget Magi (iOS app) | `net.roberth.FinanceWizard` | UI, Plaid Link, sync, settings |
 | **WidgetExtension** | Widget extension (`.appex`) | `net.roberth.FinanceWizard.Widget` | Total Spend, Category Spend, Balances widgets |
-| **FinanceWizardTests** | Unit tests (`.xctest`) | `net.roberth.FinanceWizard.tests` | Classifier descriptor table |
+| **FinanceWizardTests** | Unit tests (`.xctest`) | `net.roberth.FinanceWizard.tests` | Classifier descriptor table, backup and restore |
 
 The app embeds the widget extension (Embed Foundation Extensions build phase). They ship together but are signed and built as separate targets.
 
@@ -36,7 +36,7 @@ FinanceWizard/                 Main app (SwiftUI + Plaid client)
     Accounts/                  Accounts hub, card detail, payoff plans, accounts board model
     Budget/                    Monthly budget UI
     Settings/                  Settings, backup, debug export, Debug menu
-    AI/                        On-device Foundation Models (Ask overlay + Settings status)
+    AI/                        On-device Foundation Models (Ask sheet + Settings status)
   Services/                    App-only helpers (classify API stub, logo fetch)
   Plaid/                       Credentials, Link, /transactions/sync, backup wipe
                                (classification lives in Shared/Analytics — see below)
@@ -73,7 +73,7 @@ docs/                          GitHub Pages documentation
 | **Where data stays** | Inference is on-device (Apple Intelligence); still prefer minimal transaction context in prompts |
 | **Capability / entitlement** | None beyond what the system already requires for Apple Intelligence |
 
-`Features/AI/` — availability on Settings. **Ask** overlay button on `ContentView` (sheet, not a sixth tab): tool calling, streaming, prewarm, persisted thread (separate store). `suggestCategory` on transaction detail.
+`Features/AI/` — availability on Settings. **Ask** tab bar accessory on `ContentView` (sheet, not a sixth tab). `AskLedger` computes every total, tools hand short results to the model, and `AskConversation` manages on-device sessions, the recap of earlier questions, and answer checks. Persisted thread (separate store). `suggestCategory` on transaction detail.
 
 ### Cost of the hot paths
 

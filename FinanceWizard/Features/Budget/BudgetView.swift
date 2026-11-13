@@ -413,6 +413,19 @@ struct BudgetView: View {
                     }
                 }
             }
+
+            if snapshot.refunds > 0.005 {
+                Section {
+                    HStack {
+                        Text("Refunds")
+                        Spacer()
+                        MoneyText(snapshot.refunds)
+                            .foregroundStyle(.green)
+                    }
+                } footer: {
+                    Text("Subtracted from Spent. Categories show what you spent before refunds.")
+                }
+            }
         }
     }
 

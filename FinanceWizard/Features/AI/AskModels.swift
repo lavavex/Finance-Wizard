@@ -26,19 +26,32 @@ final class AskTurn {
     var createdAt: Date
     var isUser: Bool
     var text: String
+    /// Which model answered, and how long it took. Nil on questions and older answers.
+    var modelName: String?
+    var seconds: Double?
     var thread: AskThread?
 
-    init(createdAt: Date = .now, isUser: Bool, text: String, thread: AskThread? = nil) {
+    init(
+        createdAt: Date = .now,
+        isUser: Bool,
+        text: String,
+        modelName: String? = nil,
+        seconds: Double? = nil,
+        thread: AskThread? = nil
+    ) {
         self.createdAt = createdAt
         self.isUser = isUser
         self.text = text
+        self.modelName = modelName
+        self.seconds = seconds
         self.thread = thread
     }
 }
 
 enum AskStore {
-    static let container: ModelContainer = {
-        let schema = Schema([AskThread.self, AskTurn.self])
+    private static let schema = Schema([AskThread.self, AskTurn.self])
+
+    private static let savedChat: ModelContainer = {
         let configuration = ModelConfiguration("AskChat", schema: schema)
         do {
             return try ModelContainer(for: schema, configurations: [configuration])
@@ -46,6 +59,16 @@ enum AskStore {
             fatalError("Ask chat store failed: \(error)")
         }
     }()
+
+    private static var sampleChat: ModelContainer?
+
+    static var container: ModelContainer { sampleChat ?? savedChat }
+
+    /// Sample questions stay out of the saved chat, and clearing them can't touch it.
+    static func useSampleChat(_ on: Bool) {
+        let memory = ModelConfiguration("AskChatSample", schema: schema, isStoredInMemoryOnly: true)
+        sampleChat = on ? try? ModelContainer(for: schema, configurations: [memory]) : nil
+    }
 
     static func wipe() {
         let context = ModelContext(container)

@@ -62,7 +62,7 @@ enum PlaidAPIClient {
     ///   (and optionally pick more accounts). Do not pass products in that case.
     /// - Returns: Session with link_token and hosted URL for the browser.
     static func createHostedLinkSession(
-        clientName: String = "Finance Wizard",
+        clientName: String = "Budget Magi",
         userID: String = "finance-wizard-user",
         accessToken: String? = nil
     ) async throws -> HostedLinkSession {
@@ -87,7 +87,7 @@ enum PlaidAPIClient {
             let update: UpdateOpts?
             /// Optional OAuth app-to-app return (https Universal Link preferred in Production).
             let redirect_uri: String?
-            /// HTTPS endpoint for Item/Transactions webhooks (Cloudflare Worker).
+            /// HTTPS endpoint for Item/Transactions webhooks. The Worker acknowledges and discards them.
             let webhook: String?
             let hosted_link: HostedLink
 
@@ -271,7 +271,7 @@ enum PlaidAPIClient {
             ?? PlaidAPIError.http(
                 status: 0,
                 code: nil,
-                message: "Link closed without linking a bank (or the session timed out). Try Link again."
+                message: "This bank link timed out before it finished. Try Link again."
             )
     }
 
@@ -802,6 +802,18 @@ struct PlaidTransaction: Decodable {
     let counterparties: [PlaidCounterparty]?
 
     /// Best merchant logo: top-level, else first merchant counterparty.
+    /// Who paid, when Plaid names them only as a counterparty and the bank line is a code like
+    /// "PAYROLLXYZ". A low-confidence guess stays out of the user's income list.
+    var payerName: String? {
+        guard merchant_name?.isEmpty != false else { return nil }
+        return counterparties?.first {
+            let confidence = $0.confidence_level?.uppercased()
+            return (confidence == "HIGH" || confidence == "VERY_HIGH")
+                && $0.type != "financial_institution"
+                && $0.name?.isEmpty == false
+        }?.name
+    }
+
     var resolvedLogoURL: String? {
         if let logo_url, !logo_url.isEmpty { return logo_url }
         return counterparties?.first(where: { $0.type == "merchant" })?.logo_url

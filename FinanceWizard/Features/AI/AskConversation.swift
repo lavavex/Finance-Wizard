@@ -1,0 +1,424 @@
+//
+//  AskConversation.swift
+//  Finance Wizard
+//
+//  One Ask chat on the on-device model. Keeps the session within its context window, carries a
+//  recap across new sessions, checks answers against tool results, and explains failures.
+//
+
+import Foundation
+import FoundationModels
+import SwiftData
+
+struct AskChatTurn: Equatable {
+    var isUser: Bool
+    var text: String
+}
+
+struct AskReply: Equatable {
+    var text: String
+    var followUps: [String]
+    /// Shown under the answer when an amount couldn't be matched to the user's data.
+    var warning: String?
+    /// A change the answer offers, written only when the user taps Apply.
+    var proposal: AskEditProposal?
+}
+
+@MainActor
+final class AskConversation {
+    private let modelContext: ModelContext
+    private var session: LanguageModelSession?
+    private var recap = ""
+    private let asked = AskQuestionBox()
+    private var hasAnswered = false
+
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
+    }
+
+    /// Loads the model early. `history` is what the chat already shows, so a question asked right
+    /// after reopening the app still has its context.
+    func prepare(history: [AskChatTurn]) {
+        guard session == nil else { return }
+        startSession(history: history)
+        session?.prewarm()
+    }
+
+    func send(
+        _ text: String,
+        history: [AskChatTurn],
+        onText: @escaping (String) -> Void
+    ) async throws -> AskReply {
+        if let reply = await typedDecision(text) {
+            session = nil
+            return reply
+        }
+        if let reply = await labelingReply(to: text) {
+            session = nil
+            return reply
+        }
+        if let reply = await settingReply(to: text) {
+            session = nil
+            return reply
+        }
+        if !Self.isFollowUp(text) {
+            let intent = await OnDeviceAI.askIntent(for: text)
+            if intent == .recategorize {
+                session = nil
+                return await editReply(to: text)
+            }
+            if let plan = plan(intent, for: text) {
+                // The next question shouldn't lean on a session that never saw this one.
+                session = nil
+                return AskReply(text: AskPlan.chatText(plan.insight), followUps: plan.followUps)
+            }
+        }
+        // A new session per question, carrying the earlier questions. In one long session the model
+        // picks worse tools as it fills, and it answers from old results instead of asking again.
+        // A follow-up stays in the session, since it only makes sense with the last answer.
+        if session == nil || (hasAnswered && !Self.isFollowUp(text)) { startSession(history: history) }
+        hasAnswered = true
+        // A follow-up like "Compare to last month" leans on the earlier question's months.
+        asked.question = Self.isFollowUp(text) ? "compare " + text : text
+
+        var answer: String
+        do {
+            answer = try await stream(text, onText: onText)
+        } catch where Self.isContextOverflow(error) {
+            startSession(history: history)
+            answer = try await stream(text, onText: onText)
+        }
+
+        var unverified = unverifiedAmounts(in: answer, question: text)
+        if !unverified.isEmpty {
+            // One correction: the model usually recovers when told to use its tools.
+            let correction = "Your answer included amounts that didn't come from a tool. Call the right tool and answer again using only its numbers."
+            if let retried = try? await stream(correction, onText: onText) {
+                answer = retried
+                unverified = unverifiedAmounts(in: answer, question: text)
+            }
+        }
+
+        return AskReply(
+            text: answer,
+            followUps: Self.followUps(afterTools: toolNamesInLastTurn()),
+            warning: unverified.isEmpty
+                ? nil
+                : "This answer has amounts that don't match your data. Check them in the app."
+        )
+    }
+
+    // MARK: - Plans
+
+    /// A budget or payoff order when the question asks for one. The app's text is the whole
+    /// answer, because a model rewording it can pair a real number with the wrong card.
+    private func plan(_ intent: OnDeviceAI.AskIntent, for question: String) -> (insight: MoneyInsight, followUps: [String])? {
+        guard intent == .budget || intent == .payoff else { return nil }
+        let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        let plans = (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? []
+        if intent == .payoff {
+            return (AskPlan.payoff(accounts: accounts, plans: plans), ["What's due next?", "Help me make a budget"])
+        }
+        let income = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
+        let budget = AskPlan.budget(
+            (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? [],
+            income: income,
+            accounts: accounts,
+            plans: plans,
+            incomeSource: AskPlan.incomeSource(namedIn: question, among: income)
+        )
+        budgetQuestion = question
+        var tips = budgetLimits(for: question).isEmpty ? [] : [AskEdit.useBudgetPrompt]
+        if !AskEdit.unnamedPayments(in: transactions()).isEmpty { tips.append(AskEdit.labelPrompt) }
+        return (budget, tips + ["How do I pay off my cards?"])
+    }
+
+    /// The question behind the last budget shown, so "Use this budget" sets the same one.
+    private var budgetQuestion = ""
+
+    private func budgetLimits(for question: String) -> [String: Double] {
+        let income = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
+        return AskPlan.budgetLimits(
+            transactions(),
+            income: income,
+            accounts: (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? [],
+            plans: (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? [],
+            incomeSource: AskPlan.incomeSource(namedIn: question, among: income)
+        )
+    }
+
+    // MARK: - Budget limits and recurring bills
+
+    /// "Use this budget", "set my dining budget to $200", "I cancelled Example Stream". These are
+    /// recognized by their wording before any sorting, then read by the model.
+    private func settingReply(to text: String) async -> AskReply? {
+        let currentPlan = try? modelContext.fetch(FetchDescriptor<BudgetPlan>()).first
+        if text == AskEdit.useBudgetPrompt {
+            guard let proposal = AskEdit.budgetProposal(limits: budgetLimits(for: budgetQuestion), current: currentPlan) else {
+                return AskReply(text: "There's nothing left to budget after bills and card minimums, so I have no limits to set.", followUps: [])
+            }
+            offered = proposal
+            return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+        }
+        if AskEdit.looksLikeLimitRequest(text), let request = await OnDeviceAI.limitRequest(for: text),
+           let proposal = AskEdit.limitProposal(asked: text, category: request.category, amount: request.amount, current: currentPlan) {
+            offered = proposal
+            return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+        }
+        if AskEdit.looksLikeRecurringRequest(text), let request = await OnDeviceAI.recurringRequest(for: text),
+           request.status != .unclear {
+            let marker = request.status == .notRecurring ? "none" : request.status.rawValue
+            guard let proposal = AskEdit.recurringProposal(named: request.merchant, asked: text, marker: marker, in: transactions()) else {
+                return AskReply(text: "I couldn't find charges from \(request.merchant), or it's already marked that way.", followUps: [])
+            }
+            offered = proposal
+            return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+        }
+        return nil
+    }
+
+    // MARK: - Changing categories
+
+    /// The unnamed payment Ask last asked about, until the user explains or skips it.
+    private var asking: String?
+    private var skipped = Set<String>()
+    private var labeling = false
+
+    private func transactions() -> [Transaction] {
+        (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
+    }
+
+    /// "Anilist is entertainment, not pets" or "the $177.09 payment is my phone bill".
+    private func editReply(to text: String) async -> AskReply {
+        let help = "Tell me the merchant and the category, like \"Corner Cafe is Dining\"."
+        let labelTip = AskEdit.unnamedPayments(in: transactions()).isEmpty ? [] : [AskEdit.labelPrompt]
+        guard let request = await OnDeviceAI.editRequest(for: text) else {
+            return AskReply(text: "I couldn't work out which charges you mean. \(help)", followUps: labelTip)
+        }
+        let (rows, amount) = AskEdit.charges(asked: text, merchant: request.merchant, amount: request.amount, in: transactions())
+        guard !rows.isEmpty else {
+            return AskReply(text: "I couldn't find the charges you mean. \(help)", followUps: labelTip)
+        }
+        let category = AskEdit.categoryNamed(in: text, current: Set(rows.map(\.category))) ?? request.category
+        guard AskEdit.categories.contains(where: { $0.caseInsensitiveCompare(category) == .orderedSame }) else {
+            return AskReply(
+                text: "I don't have a category called \(category). The choices are \(AskEdit.categories.joined(separator: ", ")).",
+                followUps: []
+            )
+        }
+        guard let proposal = AskEdit.proposal(for: rows, category: category, amount: amount) else {
+            return AskReply(text: "Those charges are already under \(category).", followUps: [])
+        }
+        offered = proposal
+        return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+    }
+
+    /// The change on offer, so a typed "yes" or "no" works as well as the buttons.
+    private var offered: AskEditProposal?
+
+    private func typedDecision(_ text: String) async -> AskReply? {
+        guard let proposal = offered else { return nil }
+        offered = nil
+        let word = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .trimmingCharacters(in: .punctuationCharacters)
+        let yes = ["yes", "y", "yeah", "yep", "ok", "okay", "sure", "apply", "do it", "go ahead", "correct"]
+        let no = ["no", "n", "nope", "cancel", "skip", "don't", "dont", "stop", "never mind"]
+        guard yes.contains(word) || no.contains(word) else { return nil }
+        let applied = yes.contains(word)
+        let outcome = applied ? AskEdit.apply(proposal, modelContext: modelContext) : "Okay, nothing changed."
+        guard let next = await afterProposal(proposal, applied: applied) else {
+            return AskReply(text: outcome, followUps: [])
+        }
+        return AskReply(text: outcome + "\n\n" + next.text, followUps: next.followUps, proposal: next.proposal)
+    }
+
+    /// Walks through payments the bank didn't name, one question at a time.
+    private func labelingReply(to text: String) async -> AskReply? {
+        let unnamed = { AskEdit.unnamedPayments(in: self.transactions()).filter { !self.skipped.contains($0.transactionId) } }
+        if text == AskEdit.labelPrompt {
+            labeling = true
+            guard let first = unnamed().first else {
+                asking = nil
+                labeling = false
+                return AskReply(text: "Every recent payment has a name or a category. Nothing to label.", followUps: [])
+            }
+            asking = first.transactionId
+            return AskReply(text: AskEdit.question(about: first), followUps: ["Skip"])
+        }
+        guard let id = asking, let row = transactions().first(where: { $0.transactionId == id }) else { return nil }
+        asking = nil
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("skip") {
+            skipped.insert(id)
+            return await labelingReply(to: AskEdit.labelPrompt)
+        }
+        // The same line for the same amount is the same bill, so those change together.
+        let same = AskEdit.charges(named: row.title, amount: row.amount, in: transactions())
+        guard let category = await OnDeviceAI.category(forPaymentExplainedAs: text),
+              let proposal = AskEdit.proposal(for: same, category: category, amount: abs(row.amount)) else {
+            asking = id
+            return AskReply(
+                text: "I couldn't match that to a category. Try one of these: \(AskEdit.categories.joined(separator: ", ")). Or say skip.",
+                followUps: ["Skip"]
+            )
+        }
+        offered = proposal
+        return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+    }
+
+    /// What comes after an Apply or Cancel: the next unnamed payment, if the user was labeling
+    /// them. A cancelled one isn't asked about again in this chat.
+    func afterProposal(_ proposal: AskEditProposal, applied: Bool) async -> AskReply? {
+        offered = nil
+        if !applied { skipped.formUnion(proposal.transactionIds) }
+        guard labeling else { return nil }
+        return await labelingReply(to: AskEdit.labelPrompt)
+    }
+
+    // MARK: - Session
+
+    var transcript: Transcript? { session?.transcript }
+
+    private func startSession(history: [AskChatTurn]) {
+        recap = Self.recap(of: history)
+        session = try? OnDeviceAI.makeAskSession(modelContext: modelContext, earlierChat: recap, asked: asked)
+    }
+
+    private func stream(_ text: String, onText: (String) -> Void) async throws -> String {
+        guard let session else { throw OnDeviceAIError.modelUnavailable("The model isn't ready.") }
+        var answer = ""
+        // Greedy, so a question gets the same tool and the same answer every time it's asked.
+        for try await snapshot in session.streamResponse(to: text, options: GenerationOptions(sampling: .greedy)) {
+            answer = snapshot.content
+            onText(answer)
+        }
+        answer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if answer.isEmpty { throw OnDeviceAIError.emptyResponse }
+        return answer
+    }
+
+    /// Wording that leans on the previous question, such as "And last month?".
+    static func isFollowUp(_ text: String) -> Bool {
+        let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["and ", "what about", "how about", "same ", "compare", "show the", "how much in total"]
+            .contains { lower.hasPrefix($0) }
+    }
+
+    /// The last few questions, for the instructions of a new session. Answers stay out, so the
+    /// model can't repeat an old amount as if it were new.
+    static func recap(of history: [AskChatTurn]) -> String {
+        history.filter(\.isUser).suffix(3).map { "User: \($0.text.prefix(160))" }
+            .joined(separator: "\n")
+    }
+
+    // MARK: - Checking answers
+
+    private func unverifiedAmounts(in answer: String, question: String) -> [Double] {
+        AskAnswerCheck.unverifiedAmounts(in: answer, facts: [question, recap] + toolOutputs())
+    }
+
+    private func toolOutputs() -> [String] {
+        guard let session else { return [] }
+        return session.transcript.compactMap { entry in
+            guard case .toolOutput(let output) = entry else { return nil }
+            return output.segments.map { segment in
+                switch segment {
+                case .text(let text): return text.content
+                case .structure(let structure): return structure.content.jsonString
+                default: return ""
+                }
+            }
+            .joined(separator: " ")
+        }
+    }
+
+    private func toolNamesInLastTurn() -> Set<String> {
+        guard let session else { return [] }
+        var names = Set<String>()
+        for entry in session.transcript.reversed() {
+            switch entry {
+            case .prompt:
+                if !names.isEmpty { return names }
+            case .toolOutput(let output):
+                names.insert(output.toolName)
+            default:
+                break
+            }
+        }
+        return names
+    }
+
+    /// Next questions that follow from what was just answered.
+    static func followUps(afterTools names: Set<String>) -> [String] {
+        var tips: [String] = []
+        if names.contains("getSpending") { tips += ["Compare to last month", "Show the largest charges"] }
+        if names.contains("getMoneySnapshot") { tips += ["How's my budget?", "Compare to last month"] }
+        if names.contains("getBudgetStatus") { tips += ["What's my biggest category?"] }
+        if names.contains("getUpcomingPayments") { tips += ["What are my account balances?"] }
+        if names.contains("getAccountBalances") { tips += ["What's due next?"] }
+        if names.contains("getRecurringCharges") { tips += ["What's due next?"] }
+        if names.contains("searchTransactions") { tips += ["How much in total?"] }
+        if tips.isEmpty {
+            tips = ["How much did I spend this month?", "How's my budget?", "What's due next?"]
+        }
+        var seen = Set<String>()
+        return tips.filter { seen.insert($0).inserted }.prefix(3).map { $0 }
+    }
+
+    // MARK: - Failures
+
+    static func isContextOverflow(_ error: Error) -> Bool {
+        if #available(iOS 27.0, *), let modelError = error as? LanguageModelError,
+           case .contextSizeExceeded = modelError {
+            return true
+        }
+        if let generation = error as? LanguageModelSession.GenerationError,
+           case .exceededContextWindowSize = generation {
+            return true
+        }
+        // Some overflows arrive as a general inference failure that only says so in its text.
+        if String(describing: error).contains("context window") { return true }
+        return false
+    }
+
+    /// What to show instead of a framework error.
+    static func message(for error: Error) -> String {
+        if isContextOverflow(error) {
+            return "This chat got too long for the on-device model. Ask again and it will start fresh."
+        }
+        if let local = error as? OnDeviceAIError {
+            return local.errorDescription ?? fallbackMessage
+        }
+        if #available(iOS 27.0, *), let modelError = error as? LanguageModelError {
+            switch modelError {
+            case .guardrailViolation, .refusal:
+                return blockedMessage
+            case .rateLimited:
+                return busyMessage
+            case .unsupportedLanguageOrLocale:
+                return languageMessage
+            default:
+                return fallbackMessage
+            }
+        }
+        if let generation = error as? LanguageModelSession.GenerationError {
+            switch generation {
+            case .guardrailViolation, .refusal:
+                return blockedMessage
+            case .rateLimited, .concurrentRequests:
+                return busyMessage
+            case .assetsUnavailable:
+                return "Apple Intelligence is still getting ready on this device. Try again soon."
+            case .unsupportedLanguageOrLocale:
+                return languageMessage
+            default:
+                return fallbackMessage
+            }
+        }
+        return fallbackMessage
+    }
+
+    private static let blockedMessage = "Apple Intelligence wouldn't answer that one. Try rewording it."
+    private static let busyMessage = "Apple Intelligence is busy. Try again in a moment."
+    private static let languageMessage = "Apple Intelligence doesn't support this language or region yet."
+    private static let fallbackMessage = "Something went wrong with Apple Intelligence. Try again."
+}

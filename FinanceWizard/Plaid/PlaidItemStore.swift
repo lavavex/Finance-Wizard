@@ -67,11 +67,7 @@ enum PlaidItemStore {
     /// All linked items with access tokens loaded from Keychain.
     /// Items whose tokens are missing from Keychain are skipped.
     static func loadItems() -> [PlaidLinkedItem] {
-        guard let data = UserDefaults.standard.data(forKey: metadataKey),
-              let metas = try? JSONDecoder().decode([ItemMeta].self, from: data) else {
-            return []
-        }
-        return metas.compactMap { meta in
+        loadMetas().compactMap { meta in
             guard let token = PlaidKeychain.get(account: accessTokenPrefix + meta.id), !token.isEmpty else {
                 return nil
             }
@@ -89,45 +85,40 @@ enum PlaidItemStore {
         }
     }
 
-    /// Persist all items: tokens to Keychain, metadata (no tokens) to UserDefaults.
-    static func saveItems(_ items: [PlaidLinkedItem]) {
-        for item in items {
-            try? PlaidKeychain.set(item.accessToken, account: accessTokenPrefix + item.id)
-        }
-        let metas = items.map {
-            ItemMeta(
-                id: $0.id,
-                institutionName: $0.institutionName,
-                accountNames: $0.accountNames,
-                transactionsCursor: $0.transactionsCursor,
-                linkedAt: $0.linkedAt,
-                errorCode: $0.errorCode,
-                errorMessage: $0.errorMessage,
-                lastStatusCheckAt: $0.lastStatusCheckAt
-            )
-        }
-        if let data = try? JSONEncoder().encode(metas) {
-            UserDefaults.standard.set(data, forKey: metadataKey)
-        }
+    /// Ids of linked Items, without reading the Keychain. Use this to decide whether a bank is
+    /// linked: a token read can fail for a moment, and that doesn't unlink anything.
+    static var linkedItemIDs: Set<String> {
+        Set(loadMetas().map(\.id))
     }
 
-    /// Insert or replace an item by id.
-    static func upsert(_ item: PlaidLinkedItem) {
-        var items = loadItems()
-        if let idx = items.firstIndex(where: { $0.id == item.id }) {
-            items[idx] = item
+    /// Set when a bank is linked again as a new Item, so its transactions return under new ids.
+    private static let incomeDedupeKey = "plaid.incomeDedupeNeeded"
+
+    static var needsIncomeDedupe: Bool {
+        get { UserDefaults.standard.bool(forKey: incomeDedupeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: incomeDedupeKey) }
+    }
+
+    /// Insert or replace an item by id. The token is written first, so a Keychain failure
+    /// throws without recording a bank that has no token.
+    static func upsert(_ item: PlaidLinkedItem) throws {
+        try PlaidKeychain.set(item.accessToken, account: accessTokenPrefix + item.id)
+        var metas = loadMetas()
+        let meta = ItemMeta(item)
+        if let idx = metas.firstIndex(where: { $0.id == item.id }) {
+            metas[idx] = meta
         } else {
-            items.append(item)
+            metas.append(meta)
         }
-        saveItems(items)
+        saveMetas(metas)
     }
 
     /// Update only the transactions sync cursor for one Item (after a successful sync page).
     static func updateCursor(itemID: String, cursor: String) {
-        var items = loadItems()
-        guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
-        items[idx].transactionsCursor = cursor
-        saveItems(items)
+        var metas = loadMetas()
+        guard let idx = metas.firstIndex(where: { $0.id == itemID }) else { return }
+        metas[idx].transactionsCursor = cursor
+        saveMetas(metas)
     }
 
     /// Record Plaid item error status (or clear it by passing nils via clearItemError).
@@ -136,12 +127,12 @@ enum PlaidItemStore {
         errorCode: String?,
         errorMessage: String?
     ) {
-        var items = loadItems()
-        guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
-        items[idx].errorCode = errorCode
-        items[idx].errorMessage = errorMessage
-        items[idx].lastStatusCheckAt = Date()
-        saveItems(items)
+        var metas = loadMetas()
+        guard let idx = metas.firstIndex(where: { $0.id == itemID }) else { return }
+        metas[idx].errorCode = errorCode
+        metas[idx].errorMessage = errorMessage
+        metas[idx].lastStatusCheckAt = Date()
+        saveMetas(metas)
     }
 
     /// Clear stored error after a successful relink or healthy /item/get.
@@ -151,11 +142,11 @@ enum PlaidItemStore {
 
     /// Empty every item’s cursor so the next sync re-downloads full history.
     static func resetAllCursors() {
-        var items = loadItems()
-        for i in items.indices {
-            items[i].transactionsCursor = ""
+        var metas = loadMetas()
+        for i in metas.indices {
+            metas[i].transactionsCursor = ""
         }
-        saveItems(items)
+        saveMetas(metas)
     }
 
     /// Drop every linked Item: Keychain tokens + metadata.
@@ -167,8 +158,7 @@ enum PlaidItemStore {
     /// Delete Keychain token and metadata for one Item.
     static func remove(itemID: String) {
         PlaidKeychain.delete(account: accessTokenPrefix + itemID)
-        let items = loadItems().filter { $0.id != itemID }
-        saveItems(items)
+        saveMetas(loadMetas().filter { $0.id != itemID })
     }
 
     /// True when the user has at least one linked bank.
@@ -188,5 +178,31 @@ enum PlaidItemStore {
         var errorCode: String?
         var errorMessage: String?
         var lastStatusCheckAt: Date?
+
+        init(_ item: PlaidLinkedItem) {
+            id = item.id
+            institutionName = item.institutionName
+            accountNames = item.accountNames
+            transactionsCursor = item.transactionsCursor
+            linkedAt = item.linkedAt
+            errorCode = item.errorCode
+            errorMessage = item.errorMessage
+            lastStatusCheckAt = item.lastStatusCheckAt
+        }
+    }
+
+    /// Metadata edits skip the Keychain, so an unreadable token can’t drop a bank’s record.
+    private static func loadMetas() -> [ItemMeta] {
+        guard let data = UserDefaults.standard.data(forKey: metadataKey),
+              let metas = try? JSONDecoder().decode([ItemMeta].self, from: data) else {
+            return []
+        }
+        return metas
+    }
+
+    private static func saveMetas(_ metas: [ItemMeta]) {
+        if let data = try? JSONEncoder().encode(metas) {
+            UserDefaults.standard.set(data, forKey: metadataKey)
+        }
     }
 }

@@ -35,7 +35,7 @@ struct SplashScreenView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Finance Wizard")
+        .accessibilityLabel("Budget Magi")
     }
 }
 

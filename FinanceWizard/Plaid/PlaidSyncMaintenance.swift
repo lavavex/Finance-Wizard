@@ -14,6 +14,152 @@ import Foundation
 import SwiftData
 
 extension PlaidSyncEngine {
+    /// When an employer is also a merchant, Plaid tags some paychecks as salary and others as a
+    /// purchase from that merchant. A deposit from a source Plaid has identified as payroll is
+    /// payroll too, if it's paycheck-sized, so a small store refund keeps its label.
+    @MainActor
+    @discardableResult
+    static func relabelPayrollDeposits(modelContext: ModelContext) -> Int {
+        let rows = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
+        let bySource = Dictionary(grouping: rows) {
+            $0.source.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        var relabeled = 0
+        for group in bySource.values {
+            let paychecks = group.filter { isPayrollPFC($0.pfc) }.map(\.amount).sorted()
+            guard !paychecks.isEmpty else { continue }
+            let minimum = paychecks[paychecks.count / 2] * 0.25
+            for row in group where row.category == "Other Income"
+                && row.amount >= minimum
+                && !(row.pfc ?? "").uppercased().hasPrefix("INCOME") {
+                row.category = "Payroll"
+                relabeled += 1
+            }
+        }
+        return relabeled
+    }
+
+    /// One bank names a paycheck's employer and another shows only the payroll code from the
+    /// same bank line, like "PAYROLLXYZ". A paycheck known only by a code takes the employer's
+    /// name when exactly one named employer's bank line carries that code.
+    @MainActor
+    @discardableResult
+    static func nameIncomeByPayrollCode(modelContext: ModelContext) -> Int {
+        let rows = ((try? modelContext.fetch(FetchDescriptor<Income>())) ?? []).filter { isPayrollPFC($0.pfc) }
+        let employers = employersByPayrollCode(rows.map { ($0.source, $0.rawName) })
+        var renamed = 0
+        for row in rows where isBankLine(source: row.source, rawName: row.rawName) {
+            let names = Set(payrollCodes(in: row.source).compactMap { employers[$0] })
+            guard names.count == 1, let name = names.first, name != row.source else { continue }
+            row.source = name
+            renamed += 1
+        }
+        return renamed
+    }
+
+    /// Codes that belong to a single named employer. A code two employers share says nothing.
+    static func employersByPayrollCode(_ paychecks: [(source: String, rawName: String?)]) -> [String: String] {
+        var names: [String: Set<String>] = [:]
+        for paycheck in paychecks where !isBankLine(source: paycheck.source, rawName: paycheck.rawName) {
+            for code in payrollCodes(in: paycheck.rawName ?? "") {
+                names[code, default: []].insert(paycheck.source)
+            }
+        }
+        return names.compactMapValues { $0.count == 1 ? $0.first : nil }
+    }
+
+    /// True when the bank's own line is all there is, so nobody has named the payer.
+    private static func isBankLine(source: String, rawName: String?) -> Bool {
+        let raw = (rawName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty || raw.caseInsensitiveCompare(source.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
+    }
+
+    /// Long tokens of a bank line, minus words any employer's line could carry.
+    private static func payrollCodes(in line: String) -> Set<String> {
+        let generic: Set<String> = [
+            "DIRECTDEP", "DIRECTDEPOSIT", "DIRDEPOSIT", "PAYCHECK", "PAYROLLS", "DEPOSITS",
+            "CORPORATION", "INCORPORATED", "PAYMENTS", "TRANSFER", "REIMBURSEMENT", "EMPLOYEE",
+            "EMPLOYER", "SERVICES", "COMPANIES", "INTERNATIONAL", "HOLDINGS", "ENTERPRISES",
+        ]
+        let tokens = line.uppercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        return Set(tokens.filter { $0.count >= 8 && !generic.contains($0) })
+    }
+
+    private static func isPayrollPFC(_ pfc: String?) -> Bool {
+        let detailed = (pfc ?? "").uppercased()
+        return detailed.contains("SALARY") || detailed.contains("WAGES") || detailed.contains("PAYROLL")
+    }
+
+    /// Some banks post a card payment as a bare "ACH PMT" or "PAYMENT", which reads the same as
+    /// any bill. When a linked card received that exact amount within a few days, and no other
+    /// bank row already accounts for it, the bank row is that payment and not spending.
+    /// - Returns: How many rows were refiled as card payments.
+    @MainActor
+    @discardableResult
+    static func pairVaguePaymentsWithCards(modelContext: ModelContext) -> Int {
+        let accounts = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
+        let rows = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
+        let paired = vaguePaymentsMatchingCardPayments(
+            in: rows,
+            creditAccountIds: Set(accounts.filter(\.isCredit).map(\.accountId))
+        )
+        for row in paired {
+            row.category = TransactionAnalytics.creditCardPaymentCategory
+            row.categoryLocked = true
+            row.overrideSource = "credit-payment"
+            // The card's own row already records this payment, so a second one would double Total paid.
+            deleteCreditPaymentOnly(transactionID: row.transactionId, modelContext: modelContext)
+        }
+        return paired.count
+    }
+
+    /// The card's row can post a few days before the bank's, and rarely after.
+    private static let cardPostsBeforeBankDays = -5...2
+
+    static func vaguePaymentsMatchingCardPayments(
+        in rows: [Transaction],
+        creditAccountIds: Set<String>,
+        calendar: Calendar = .current
+    ) -> [Transaction] {
+        func cents(_ row: Transaction) -> Int { Int((abs(row.amount) * 100).rounded()) }
+        func isOnCard(_ row: Transaction) -> Bool {
+            row.plaidAccountId.map(creditAccountIds.contains) ?? false
+        }
+        let payments = rows.filter { TransactionAnalytics.isCreditCardPaymentCategory($0.category) }
+        var received = Dictionary(grouping: payments.filter(isOnCard), by: cents)
+
+        /// Uses up the nearest card row for this bank row, so one payment can't explain two.
+        func claim(for bank: Transaction) -> Bool {
+            let key = cents(bank)
+            let bankDay = calendar.startOfDay(for: bank.date)
+            let nearest = (received[key] ?? []).enumerated()
+                .compactMap { index, card -> (index: Int, gap: Int)? in
+                    let cardDay = calendar.startOfDay(for: card.date)
+                    guard let days = calendar.dateComponents([.day], from: bankDay, to: cardDay).day,
+                          cardPostsBeforeBankDays.contains(days) else { return nil }
+                    return (index, abs(days))
+                }
+                .min { $0.gap < $1.gap }
+            guard let nearest else { return false }
+            received[key]?.remove(at: nearest.index)
+            return true
+        }
+
+        let byDate: (Transaction, Transaction) -> Bool = { $0.date < $1.date }
+        // Bank rows already known as payments claim their card rows first.
+        for bank in payments.filter({ !isOnCard($0) && $0.plaidAccountId != nil }).sorted(by: byDate) {
+            _ = claim(for: bank)
+        }
+        return rows
+            .filter {
+                $0.plaidAccountId != nil && !isOnCard($0) && !$0.isCategoryLocked
+                    && !TransactionAnalytics.isExcludedFromSpendCategory($0.category)
+                    && MoneyInsights.looksLikeVaguePayment($0.title)
+            }
+            .sorted(by: byDate)
+            .filter(claim)
+    }
+
     /// Remove `BankAccount`s on this Item that are no longer linked at Plaid.
     @MainActor
     static func pruneAccounts(
@@ -31,7 +177,9 @@ extension PlaidSyncEngine {
     @MainActor
     @discardableResult
     static func pruneOrphanBankAccounts(modelContext: ModelContext) -> Int {
-        let linkedIds = Set(PlaidItemStore.loadItems().map(\.id))
+        // Demo accounts belong to no linked Item.
+        if DemoMode.isActive { return 0 }
+        let linkedIds = PlaidItemStore.linkedItemIDs
         let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         var removed = 0
         for account in all {
@@ -47,7 +195,7 @@ extension PlaidSyncEngine {
     @MainActor
     @discardableResult
     static func dedupeBankAccounts(modelContext: ModelContext) -> Int {
-        let linkedIds = Set(PlaidItemStore.loadItems().map(\.id))
+        let linkedIds = PlaidItemStore.linkedItemIDs
         let all = (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? []
         var groups: [String: [BankAccount]] = [:]
         for account in all {
@@ -92,8 +240,7 @@ extension PlaidSyncEngine {
         // Relink creates new Plaid transaction_ids for the same real-world spend;
         // remove content duplicates left after the old Item was dropped.
         let c = dedupeTransactions(modelContext: modelContext)
-        let d = dedupeIncome(modelContext: modelContext)
-        return a + b + c + d
+        return a + b + c
     }
 
     // MARK: - Transaction / income content dedupe
@@ -146,6 +293,8 @@ extension PlaidSyncEngine {
     }
 
     /// Same day + amount + source (+ account mask when present) → keep one income row.
+    /// Income rows don't record their Plaid account, so this can't tell a re-delivered row from
+    /// two real deposits. Only run it after a bank was linked again as a new Item.
     @MainActor
     @discardableResult
     static func dedupeIncome(modelContext: ModelContext) -> Int {

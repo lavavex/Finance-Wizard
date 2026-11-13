@@ -18,6 +18,27 @@ struct ReviewQueueView: View {
     // Optional filter: nil means “show all reasons.”
     @State private var filter: ReviewQueueReason? = nil
     @State private var statusMessage: String?
+    /// Model suggestions by merchant title. Nothing changes until the user applies them.
+    @State private var suggestions: [String: String] = [:]
+    @State private var isSuggesting = false
+
+    private static let suggestionLimit = 20
+
+    /// One row per merchant whose category is a guess. A bank line like "PAYMENT" names no
+    /// merchant, so a category for it would be made up and then applied to unrelated payments.
+    private var merchantsToSuggest: [Transaction] {
+        var seen = Set<String>()
+        return ReviewQueueAnalytics.items(in: transactions)
+            .filter { $0.reasons.contains(.weakCategory) && !$0.transaction.isCategoryLocked }
+            .map(\.transaction)
+            .filter { !MoneyInsights.looksLikeVaguePayment($0.title) }
+            .filter { seen.insert($0.title).inserted }
+    }
+
+    private var canSuggest: Bool {
+        guard case .available = OnDeviceAI.availabilityStatus() else { return false }
+        return !merchantsToSuggest.isEmpty
+    }
 
     private var items: [ReviewQueueItem] {
         let all = ReviewQueueAnalytics.items(in: transactions)
@@ -41,6 +62,35 @@ struct ReviewQueueView: View {
                     Label(statusMessage, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .font(.caption)
+                }
+            }
+
+            if isSuggesting || !suggestions.isEmpty {
+                Section {
+                    if isSuggesting {
+                        ProgressView("Suggesting categories…")
+                    }
+                    ForEach(suggestions.keys.sorted(), id: \.self) { title in
+                        LabeledContent(title, value: suggestions[title] ?? "")
+                            .swipeActions {
+                                Button("Skip") { suggestions[title] = nil }
+                            }
+                    }
+                    if !isSuggesting, !suggestions.isEmpty {
+                        Button("Apply \(suggestions.count) Suggestions") { applySuggestions() }
+                    }
+                } header: {
+                    Text("Suggested categories")
+                } footer: {
+                    Text("Written on this device. Swipe to skip one. Applying also sets the category for future charges from that merchant.")
+                }
+            } else if canSuggest {
+                Section {
+                    Button {
+                        Task { await suggestCategories() }
+                    } label: {
+                        Label("Suggest categories", systemImage: "apple.intelligence")
+                    }
                 }
             }
 
@@ -75,6 +125,41 @@ struct ReviewQueueView: View {
         }
         .navigationTitle("Needs review")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Suggestions
+
+    private func suggestCategories() async {
+        isSuggesting = true
+        defer { isSuggesting = false }
+        let allowed = KnownCategory.defaultNames.filter {
+            !TransactionAnalytics.isExcludedFromSpendCategory($0) && !ReviewQueueAnalytics.looksWeakCategory($0)
+        }
+        for row in merchantsToSuggest.prefix(Self.suggestionLimit) {
+            // A failure on one merchant shouldn't lose the rest.
+            guard let name = try? await OnDeviceAI.suggestCategory(
+                title: row.title,
+                amount: row.amount,
+                allowedCategories: allowed
+            ) else { continue }
+            if name != row.category { suggestions[row.title] = name }
+        }
+        if suggestions.isEmpty { statusMessage = "No better categories found." }
+    }
+
+    private func applySuggestions() {
+        for row in transactions where !row.isCategoryLocked {
+            guard let name = suggestions[row.title] else { continue }
+            row.category = name
+            row.categoryLocked = true
+            row.overrideSource = "user"
+        }
+        for (title, name) in suggestions where !DemoMode.isActive {
+            VendorRulesStore.upsert(vendor: title, paymentMethod: nil, category: name)
+        }
+        let count = suggestions.count
+        suggestions = [:]
+        save("Updated \(count) merchants")
     }
 
     // MARK: - Mutations (write to the model, then save)

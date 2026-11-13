@@ -5,7 +5,7 @@ title: Sync & API
 
 # Sync & Plaid API
 
-Finance Wizard talks **directly to Plaid** using **your** developer `client_id` and `secret`. There is no Finance Wizard server in the path.
+Budget Magi talks **directly to Plaid** using **your** developer `client_id` and `secret`. There is no Budget Magi server in the path.
 
 ## Setup (once)
 
@@ -48,7 +48,7 @@ Same as Sync now, but **clears cursors** first so Plaid re-sends the full transa
 
 ### Link bank account (Hosted Link)
 
-Finance Wizard uses [Hosted Link](https://plaid.com/docs/link/hosted-link/) in an `ASWebAuthenticationSession`:
+Budget Magi uses [Hosted Link](https://plaid.com/docs/link/hosted-link/) in an `ASWebAuthenticationSession`:
 
 ```text
 1. POST /link/token/create with hosted_link:
@@ -82,28 +82,15 @@ No Dashboard allowlist is required for `completion_redirect_uri` (custom scheme)
 
 ### Webhooks
 
-Live Worker (Cloudflare free tier + KV):
+The app sends this URL as `webhook` on `/link/token/create`:
 
 ```text
 https://plaid-webhooks.lavavex.workers.dev/plaid/webhook
 ```
 
-- Health: `GET https://plaid-webhooks.lavavex.workers.dev/health`
-- Pending events: `GET https://plaid-webhooks.lavavex.workers.dev/pending?item_id=…`
+The Worker (`workers/plaid-webhooks/`) answers `200` and discards each webhook. It logs and stores nothing, and `GET /health` is its only other route. The app doesn’t depend on webhooks: Hosted Link finishes by polling `/link/token/get`, `/item/get` reports login errors, and **Sync** pulls the data.
 
-The app sends this URL as `webhook` on every `/link/token/create` (Link + Relink). You can also set the same URL in the Plaid Dashboard for team-level defaults.
-
-**Important webhooks we handle (by code):**
-
-| Type | Code | Meaning |
-|------|------|---------|
-| TRANSACTIONS | `SYNC_UPDATES_AVAILABLE` | New/changed txs — tap Sync |
-| TRANSACTIONS | `RECURRING_TRANSACTIONS_UPDATE` | Recurring streams changed |
-| TRANSACTIONS | `INITIAL_UPDATE` / `HISTORICAL_UPDATE` / `DEFAULT_UPDATE` / `TRANSACTIONS_REMOVED` | Extra transaction signals |
-| ITEM | `ERROR` (e.g. `ITEM_LOGIN_REQUIRED`) | Needs Relink |
-| ITEM | `PENDING_EXPIRATION` / `USER_PERMISSION_REVOKED` | Needs Relink |
-
-The Worker **stores** last event per Item in KV. The iOS app does **not** auto-sync from webhooks yet (no push path into SwiftData without your access tokens on a server). Use **Sync** in the app; `/item/get` still surfaces login errors on sync.
+Hosted Link’s `redirect_uri` is a separate requirement: OAuth banks need the `budgetmagi.pages.dev` page in `pages/budgetmagi/`.
 
 Host depends on Settings environment:
 
@@ -126,7 +113,15 @@ Plaid amount convention:
 - **Category** from `personal_finance_category` (mapped to Dining, Gas, …) unless a local learn rule or lock applies.  
 - **Payment method** from account name + mask (e.g. `Checking ···0000`) or institution name.  
 - **Transfers** (savings ↔ checking, internal moves) are **skipped** — never enter spend or income.  
+- **Clean-up** treats a bank as linked if its metadata exists, so a failed Keychain read can't remove accounts. Duplicate income is removed only on the first complete Sync after a bank is linked again as a new Item, because identical deposits can be real.  
+- **Person to Person** rows (Zelle, Venmo, Cash App, Square Cash, PayPal, Apple Cash) are kept. Money sent counts as spend in the **Person to Person** category. Money received is listed under Income but isn't part of Total Income.  
+- **Balance transfers** on a card are filed as **Balance Transfer**, excluded from spend. Their fees stay in **Fees**.  
+- **Payroll:** after each Sync, a paycheck-sized deposit from a source Plaid has tagged as salary or wages elsewhere is labeled **Payroll**, because Plaid can tag an employer that's also a merchant as a purchase.  
+- **Learned rules** (`VendorRulesStore`) map a vendor, and optionally a card, to a category. A rule can also cover one exact amount of a vendor, which is how a bare PAYMENT line keeps separate categories for separate bills. An amount rule wins over a general one.  
+- **Payroll codes:** `Income.rawName` keeps Plaid's `original_description`. `nameIncomeByPayrollCode` gives a paycheck known only by its bank line the employer name from another paycheck whose bank line shares a long token with it, when that token belongs to one employer.  
+- Expense categories follow Plaid’s published names, and `ClassifierTaxonomyTests` checks every spend category in that list. A category fix reaches existing rows on **Full re-sync**, which keeps categories you locked.  
 - **Credit card bill payments** → `CreditCardPayment` (Accounts → Total paid) **and** a `Transaction` with category **Credit Card Payment** (list-visible, excluded from Total Spend).  
+- **Bank lines that hide the payee:** `pairVaguePaymentsWithCards` runs after every Sync. A depository row titled only PAYMENT, ACH PMT or similar becomes a Credit Card Payment when a linked card has a payment row of the same amount from five days before to two days after, and no other bank row already claims it. It adds no `CreditCardPayment`, since the card's own row is the record. Category locks are respected.  
 - **Credit balances / limits** come from `POST /accounts/get` on each Sync.  
 - **Credit terms** (min payment, due date, last payment/statement, APRs, overdue) from `POST /liabilities/get` when the Item has Liabilities.  
 - **Bank logo / brand color** from `POST /item/get` → `POST /institutions/get_by_id` (`include_optional_metadata`).  
@@ -143,7 +138,17 @@ Editing a transaction **Save**s on device only:
 
 ## Backup
 
-Settings **Backup & restore** writes an encrypted `.fwbackup` of this phone (keys, banks, SwiftData, prefs, logos). Restore accepts only the current backup format version; older files are rejected.
+Settings **Backup & restore** writes an encrypted `.fwbackup` of this phone (keys, banks, SwiftData, prefs, logos). Restore accepts only the current backup format version and its exact PBKDF2 cost; other files are rejected.
+
+| Policy | Banks already on the device | Other banks | Budget and payoff plans |
+|--------|-----------------------------|-------------|-------------------------|
+| **Safe merge** | Token, cursor, and rows are untouched. Backup rows are skipped, because the live cursor is past them and Sync would not repair them. | Token, cursor, and missing rows are added. | Newer `updatedAt` wins |
+| **Replace connections** | Backup token and cursor win, and existing rows take the backup’s values (category and rail locks stay). Sync replays from the restored cursor. | Same | Newer `updatedAt` wins |
+| **Wipe device, then restore** | Local data is deleted first. If the restore fails, the previous data is put back from an in-memory copy. | Same | Backup’s copy |
+
+Rows are matched to a bank by Plaid account id, then account label (`Name ···1234`), then institution name. A row that matches no bank, such as an imported card, can’t be re-downloaded, so safe merge adds it if it’s missing.
+
+The app deletes its temporary `.fwbackup` copies and debug exports after a restore or share, and at launch.
 
 ## Security notes
 
