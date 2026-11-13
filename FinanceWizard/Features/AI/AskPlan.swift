@@ -51,6 +51,34 @@ enum AskPlan {
         now: Date = .now,
         calendar: Calendar = .current
     ) -> MoneyInsight {
+        build(all, income: income, accounts: accounts, plans: plans, incomeSource: incomeSource, now: now, calendar: calendar).insight
+    }
+
+    /// The same budget as limits for the Budget tab. A category's limit is its budgeted spending
+    /// plus the bills filed under it, because the Budget tab counts both against the limit.
+    /// Empty when there's no income or nothing left to budget.
+    static func budgetLimits(
+        _ all: [Transaction],
+        income: [Income],
+        accounts: [BankAccount],
+        plans: [PayoffPlan],
+        incomeSource: String = "",
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> [String: Double] {
+        build(all, income: income, accounts: accounts, plans: plans, incomeSource: incomeSource, now: now, calendar: calendar).limits
+    }
+
+    private static func build(
+        _ all: [Transaction],
+        income: [Income],
+        accounts: [BankAccount],
+        plans: [PayoffPlan],
+        incomeSource: String,
+        now: Date,
+        calendar: Calendar
+    ) -> (insight: MoneyInsight, limits: [String: Double]) {
+        var limits: [String: Double] = [:]
         var sections: [MoneyInsight.Section] = []
         let thisMonth = TransactionAnalytics.monthStart(for: now)
         let earliest = calendar.date(byAdding: .month, value: -3, to: thisMonth) ?? thisMonth
@@ -77,10 +105,10 @@ enum AskPlan {
         let counted = fromSource.isEmpty ? steady : fromSource
         let monthlyIncome = counted.reduce(0) { $0 + $1.amount } / months
         guard monthlyIncome > 0 else {
-            return MoneyInsight(
+            return (MoneyInsight(
                 headline: "I don't see any income in the last three months, so I can't build a budget yet.",
                 sections: []
-            )
+            ), [:])
         }
         var incomeLines = Dictionary(grouping: counted, by: \.source)
             .mapValues { $0.reduce(0) { $0 + $1.amount } / months }
@@ -89,7 +117,8 @@ enum AskPlan {
             .map { "\($0.key): about \(dollars($0.value)) a month" }
         sections.append(.init(title: "Income", lines: incomeLines))
 
-        let detected = SubscriptionAnalytics.detect(in: all, now: now)
+        let cancelled = SubscriptionAnalytics.cancelledVendors(in: all)
+        let detected = SubscriptionAnalytics.detect(in: all, now: now).filter { !cancelled.contains($0.normalizedVendor) }
         let bills = detected.filter { !SubscriptionAnalytics.isOverdue($0, now: now) }
             .sorted { $0.estimatedMonthly > $1.estimatedMonthly }
         let billTotal = bills.reduce(0) { $0 + $1.estimatedMonthly }
@@ -149,6 +178,13 @@ enum AskPlan {
             if !rest.isEmpty {
                 lines.append("Everything else: \(dollars(rest.reduce(0) { $0 + budgeted($1.key, $1.value) }))")
             }
+            let categoryOf = Dictionary(spend.map { ($0.transactionId, $0.category) }, uniquingKeysWith: { first, _ in first })
+            for (category, average) in other { limits[category, default: 0] += budgeted(category, average) }
+            for bill in bills {
+                guard let category = bill.sampleTransactionIds.last.flatMap({ categoryOf[$0] }) else { continue }
+                limits[category, default: 0] += bill.estimatedMonthly.rounded()
+            }
+            limits = limits.filter { $0.value > 0 }
             if needsTotal > left {
                 lines.append("Needs alone come to \(dollars(needsTotal)), which is more than what's left")
             }
@@ -189,7 +225,7 @@ enum AskPlan {
                 lines: Array(vague)
             ))
         }
-        return MoneyInsight(headline: headline, sections: sections)
+        return (MoneyInsight(headline: headline, sections: sections), limits)
     }
 
     // MARK: - Card payoff

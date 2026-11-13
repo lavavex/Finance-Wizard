@@ -213,7 +213,8 @@ struct RecurringChargesTool: Tool {
             // Uncapped: detection looks back 400 days, and a yearly charge can be that old.
             let rows = (try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []
             let snaps = SubscriptionAnalytics.snapshots(from: rows)
-            let detected = SubscriptionAnalytics.detect(snapshots: snaps)
+            let cancelled = SubscriptionAnalytics.cancelledVendors(in: rows)
+            let detected = SubscriptionAnalytics.detect(snapshots: snaps).filter { !cancelled.contains($0.normalizedVendor) }
             // A bill that skipped its date isn't an upcoming cost until it charges again.
             let groups = detected.filter { !SubscriptionAnalytics.isOverdue($0) }
             let lapsed = detected.filter { SubscriptionAnalytics.isOverdue($0) }

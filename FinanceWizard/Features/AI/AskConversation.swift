@@ -57,6 +57,10 @@ final class AskConversation {
             session = nil
             return reply
         }
+        if let reply = await settingReply(to: text) {
+            session = nil
+            return reply
+        }
         if !Self.isFollowUp(text) {
             let intent = await OnDeviceAI.askIntent(for: text)
             if intent == .recategorize {
@@ -123,8 +127,54 @@ final class AskConversation {
             plans: plans,
             incomeSource: AskPlan.incomeSource(namedIn: question, among: income)
         )
-        let tips = AskEdit.unnamedPayments(in: transactions()).isEmpty ? [] : [AskEdit.labelPrompt]
-        return (budget, tips + ["How do I pay off my cards?", "How's my budget?"])
+        budgetQuestion = question
+        var tips = budgetLimits(for: question).isEmpty ? [] : [AskEdit.useBudgetPrompt]
+        if !AskEdit.unnamedPayments(in: transactions()).isEmpty { tips.append(AskEdit.labelPrompt) }
+        return (budget, tips + ["How do I pay off my cards?"])
+    }
+
+    /// The question behind the last budget shown, so "Use this budget" sets the same one.
+    private var budgetQuestion = ""
+
+    private func budgetLimits(for question: String) -> [String: Double] {
+        let income = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
+        return AskPlan.budgetLimits(
+            transactions(),
+            income: income,
+            accounts: (try? modelContext.fetch(FetchDescriptor<BankAccount>())) ?? [],
+            plans: (try? modelContext.fetch(FetchDescriptor<PayoffPlan>())) ?? [],
+            incomeSource: AskPlan.incomeSource(namedIn: question, among: income)
+        )
+    }
+
+    // MARK: - Budget limits and recurring bills
+
+    /// "Use this budget", "set my dining budget to $200", "I cancelled Example Stream". These are
+    /// recognized by their wording before any sorting, then read by the model.
+    private func settingReply(to text: String) async -> AskReply? {
+        let currentPlan = try? modelContext.fetch(FetchDescriptor<BudgetPlan>()).first
+        if text == AskEdit.useBudgetPrompt {
+            guard let proposal = AskEdit.budgetProposal(limits: budgetLimits(for: budgetQuestion), current: currentPlan) else {
+                return AskReply(text: "There's nothing left to budget after bills and card minimums, so I have no limits to set.", followUps: [])
+            }
+            offered = proposal
+            return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+        }
+        if AskEdit.looksLikeLimitRequest(text), let request = await OnDeviceAI.limitRequest(for: text),
+           let proposal = AskEdit.limitProposal(asked: text, category: request.category, amount: request.amount, current: currentPlan) {
+            offered = proposal
+            return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+        }
+        if AskEdit.looksLikeRecurringRequest(text), let request = await OnDeviceAI.recurringRequest(for: text),
+           request.status != .unclear {
+            let marker = request.status == .notRecurring ? "none" : request.status.rawValue
+            guard let proposal = AskEdit.recurringProposal(named: request.merchant, asked: text, marker: marker, in: transactions()) else {
+                return AskReply(text: "I couldn't find charges from \(request.merchant), or it's already marked that way.", followUps: [])
+            }
+            offered = proposal
+            return AskReply(text: proposal.summary, followUps: [], proposal: proposal)
+        }
+        return nil
     }
 
     // MARK: - Changing categories
@@ -149,14 +199,15 @@ final class AskConversation {
         guard !rows.isEmpty else {
             return AskReply(text: "I couldn't find the charges you mean. \(help)", followUps: labelTip)
         }
-        guard AskEdit.categories.contains(where: { $0.caseInsensitiveCompare(request.category) == .orderedSame }) else {
+        let category = AskEdit.categoryNamed(in: text, current: Set(rows.map(\.category))) ?? request.category
+        guard AskEdit.categories.contains(where: { $0.caseInsensitiveCompare(category) == .orderedSame }) else {
             return AskReply(
-                text: "I don't have a category called \(request.category). The choices are \(AskEdit.categories.joined(separator: ", ")).",
+                text: "I don't have a category called \(category). The choices are \(AskEdit.categories.joined(separator: ", ")).",
                 followUps: []
             )
         }
-        guard let proposal = AskEdit.proposal(for: rows, category: request.category, amount: amount) else {
-            return AskReply(text: "Those charges are already under \(request.category).", followUps: [])
+        guard let proposal = AskEdit.proposal(for: rows, category: category, amount: amount) else {
+            return AskReply(text: "Those charges are already under \(category).", followUps: [])
         }
         offered = proposal
         return AskReply(text: proposal.summary, followUps: [], proposal: proposal)

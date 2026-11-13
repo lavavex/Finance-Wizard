@@ -259,6 +259,26 @@ final class MoneyInsightsTests: XCTestCase {
         XCTAssertEqual(lines(plan, under: "One-time deposits"), ["Loan Payout: $3,000.00 on Oct 10"])
     }
 
+    func testBudgetLimitsIncludeBillsAndLeaveOutCancelledOnes() {
+        var rows: [Transaction] = []
+        var pay: [Income] = []
+        for month in 8...10 {
+            rows.append(row("Example Rent", 500, month: month, day: 1, category: "Housing"))
+            rows.append(row("Example Stream", 20, month: month, day: 2, category: "Subscriptions"))
+            rows.append(row("Example Shop", 600 + Double(month - 9) * 30, month: month, day: 5, category: "Shopping"))
+            pay.append(paycheck("Example Employer", 1000, month: month))
+        }
+        let limits = AskPlan.budgetLimits(rows, income: pay, accounts: [], plans: [], now: date(11, 6))
+        // $1,000 in, $520 of bills, so shopping gets the $480 left, and each bill sits in its category.
+        XCTAssertEqual(limits, ["Housing": 500, "Subscriptions": 20, "Shopping": 480])
+
+        for row in rows where row.title == "Example Stream" { row.subscriptionCadenceOverride = "cancelled" }
+        let plan = AskPlan.budget(rows, income: pay, accounts: [], plans: [], now: date(11, 6))
+        XCTAssertEqual(lines(plan, under: "Bills and card minimums"), ["Example Rent: $500.00"])
+
+        XCTAssertEqual(AskPlan.budgetLimits([], income: [], accounts: [], plans: [], now: date(11, 6)), [:])
+    }
+
     func testBudgetSaysSoWhenThereIsNoIncomeOrNothingLeft() {
         let none = AskPlan.budget([], income: [], accounts: [], plans: [], now: date(11, 6))
         XCTAssertTrue(none.headline.contains("can't build a budget"), none.headline)

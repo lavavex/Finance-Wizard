@@ -2,8 +2,9 @@
 //  AskEdit.swift
 //  Finance Wizard
 //
-//  Category changes made from Ask. The model reads what the user wants, the app finds the
-//  charges and words the change, and nothing is written until the user taps Apply.
+//  Changes made from Ask: categories, budget limits, and what counts as a recurring bill. The
+//  model reads what the user wants, the app finds what it affects and words the change, and
+//  nothing is written until the user taps Apply.
 //
 
 import Foundation
@@ -12,14 +13,26 @@ import WidgetKit
 
 /// A change waiting for the user's Apply.
 struct AskEditProposal: Equatable {
-    var transactionIds: [String]
-    /// The bank lines being changed, as the app shows them.
-    var titles: [String]
-    var category: String
-    /// Set when the change covers one exact amount of a line that hides several payees.
-    var amount: Double?
     /// What Ask says before the buttons.
     var summary: String
+    var action: Action
+
+    enum Action: Equatable {
+        /// `titles` are the bank lines as the app shows them. `amount` is set when the change
+        /// covers one exact amount of a line that hides several payees.
+        case category(transactionIds: [String], titles: [String], category: String, amount: Double?)
+        /// Replaces every category limit and the overall monthly limit.
+        case budget(limits: [String: Double], monthly: Double)
+        case limit(category: String, amount: Double)
+        /// `marker` is what the Recurring tab stores: a cadence, "cancelled", or "none".
+        case recurring(transactionIds: [String], vendor: String, marker: String)
+    }
+
+    /// The charges a category change touches, which a cancelled change shouldn't be asked about again.
+    var transactionIds: [String] {
+        if case .category(let ids, _, _, _) = action { return ids }
+        return []
+    }
 }
 
 @MainActor
@@ -98,6 +111,24 @@ enum AskEdit {
         return (written.map { charges(named: $0, amount: nil, in: rows) } ?? [], nil)
     }
 
+    /// A category the user named outright, which outranks the model's own idea of where a
+    /// merchant belongs. "Entertainment, not pets" names two, and the one the charges already
+    /// have, or that follows "not", isn't the one they want.
+    static func categoryNamed(in question: String, current: Set<String>) -> String? {
+        let lower = " " + question.lowercased() + " "
+        let named = categories.filter { category in
+            let word = category.lowercased()
+            guard let range = lower.range(of: word) else { return false }
+            let before = lower[..<range.lowerBound]
+            let after = lower[range.upperBound...]
+            // Whole words only, so "health" doesn't match "healthy".
+            guard !(before.last?.isLetter ?? false), !(after.first?.isLetter ?? false) else { return false }
+            return !before.hasSuffix("not ") && !before.hasSuffix("isn't ") && !before.hasSuffix("isn’t ")
+        }
+        let wanted = named.filter { name in !current.contains { $0.caseInsensitiveCompare(name) == .orderedSame } }
+        return wanted.count == 1 ? wanted[0] : nil
+    }
+
     // MARK: - Proposing
 
     /// Nil when nothing would change.
@@ -127,25 +158,146 @@ enum AskEdit {
             summary += " Later \(titles[0]) charges of exactly \(AskLedger.money(ruleAmount)) will go there too."
         }
         return AskEditProposal(
-            transactionIds: changing.map(\.transactionId),
-            titles: titles,
-            category: category,
-            amount: ruleAmount,
-            summary: summary
+            summary: summary,
+            action: .category(transactionIds: changing.map(\.transactionId), titles: titles, category: category, amount: ruleAmount)
+        )
+    }
+
+    // MARK: - Budget limits
+
+    /// What the chat sends for the "use this budget" chip.
+    static let useBudgetPrompt = "Use this budget"
+
+    /// Turns the budget Ask built into the Budget tab's limits.
+    static func budgetProposal(limits: [String: Double], current: BudgetPlan?) -> AskEditProposal? {
+        guard !limits.isEmpty else { return nil }
+        let monthly = limits.values.reduce(0, +)
+        let had = current?.categoryLimits.filter { $0.value > 0 }.count ?? 0
+        let count = limits.count == 1 ? "1 category limit" : "\(limits.count) category limits"
+        var summary = "Set \(count) on the Budget tab, \(AskLedger.money(monthly)) a month in all?"
+        summary += had > 0 ? " This replaces the \(had) you have now." : " You can change any of them there."
+        return AskEditProposal(summary: summary, action: .budget(limits: limits, monthly: monthly))
+    }
+
+    /// "Set my dining budget to $200". The amount has to be one the user typed.
+    static func limitProposal(asked question: String, category: String, amount: Double?, current: BudgetPlan?) -> AskEditProposal? {
+        let stated = AskAnswerCheck.numbers(in: question).filter { $0 > 0 }
+        guard let category = KnownCategory.budgetPickerOrder.map(\.rawValue)
+            .first(where: { $0.caseInsensitiveCompare(category) == .orderedSame }),
+            let amount = stated.first(where: { typed in amount.map { abs($0 - typed) < 0.005 } ?? true }) ?? stated.first
+        else { return nil }
+        let was = current?.limit(forCategory: category)
+        if let was, abs(was - amount) < 0.005 { return nil }
+        let summary = was.map { "Change your \(category) limit from \(AskLedger.money($0)) to \(AskLedger.money(amount)) a month?" }
+            ?? "Set a \(category) limit of \(AskLedger.money(amount)) a month?"
+        return AskEditProposal(summary: summary, action: .limit(category: category, amount: amount))
+    }
+
+    /// A message that sets a budget limit: it names a budget or limit, gives an amount, and isn't a question.
+    static func looksLikeLimitRequest(_ text: String) -> Bool {
+        let lower = " " + text.lowercased() + " "
+        guard !looksLikeQuestion(text), !AskAnswerCheck.numbers(in: text).isEmpty else { return false }
+        return [" budget ", " limit ", " cap "].contains(where: lower.contains)
+    }
+
+    // MARK: - Recurring bills
+
+    /// A statement about whether something is a bill: cancelled, on a schedule, or not recurring.
+    static func looksLikeRecurringRequest(_ text: String) -> Bool {
+        let lower = " " + text.lowercased() + " "
+        guard !looksLikeQuestion(text) else { return false }
+        if lower.contains("cancel") { return true }
+        // A schedule word alone could be a lookup, like "Example Stream monthly cost".
+        let schedule = [
+            " monthly ", " yearly ", " annual", " weekly ", " recurring ", " subscription ",
+            " every month", " every year", " every week", " each month", " each year",
+        ]
+        let states = [" is ", " isn't ", " isn’t ", " not a ", " bills me ", " charges me ", " treat ", " mark "]
+        return schedule.contains(where: lower.contains) && states.contains(where: lower.contains)
+    }
+
+    static func looksLikeQuestion(_ text: String) -> Bool {
+        let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower.hasSuffix("?") { return true }
+        return ["how ", "what", "which ", "when ", "why ", "where ", "who ", "show ", "list ", "do ", "does ", "did ", "is ", "are ", "can ", "compare"]
+            .contains(where: lower.hasPrefix)
+    }
+
+    /// Every charge from the same vendor as the ones named, as the Recurring tab groups them.
+    static func recurringProposal(named merchant: String, asked question: String, marker: String, in rows: [Transaction]) -> AskEditProposal? {
+        let found = charges(asked: question, merchant: merchant, amount: nil, in: rows).rows
+        guard let title = found.first?.title else { return nil }
+        let vendor = SubscriptionAnalytics.normalizeVendor(title)
+        let all = rows.filter { SubscriptionAnalytics.normalizeVendor($0.title) == vendor }
+        let changing = all.filter { ($0.subscriptionCadenceOverride ?? "").lowercased() != marker }
+        guard !changing.isEmpty else { return nil }
+        let summary: String
+        switch marker {
+        case "cancelled":
+            summary = "Mark \(title) as cancelled? It moves to Ended on the Recurring tab and stops counting as a bill. This only updates the app, and doesn't cancel anything with \(title)."
+        case "none":
+            summary = "Stop treating \(title) as a recurring charge? It comes off the Recurring tab."
+        default:
+            summary = "Treat \(title) as a \(marker) bill? It shows on the Recurring tab even when the amount changes."
+        }
+        return AskEditProposal(
+            summary: summary,
+            action: .recurring(transactionIds: changing.map(\.transactionId), vendor: title, marker: marker)
         )
     }
 
     // MARK: - Applying
 
-    /// Writes the change the same way the transaction screen does. Returns what to say.
+    /// Writes the change the same way the app's own screens do. Returns what to say.
     @discardableResult
     static func apply(_ proposal: AskEditProposal, modelContext: ModelContext) -> String {
-        let ids = Set(proposal.transactionIds)
+        let done: String
+        switch proposal.action {
+        case .category(let ids, let titles, let category, let amount):
+            done = applyCategory(ids: ids, titles: titles, category: category, amount: amount, modelContext: modelContext)
+        case .budget(let limits, let monthly):
+            let plan = budgetPlan(in: modelContext)
+            plan.categoryLimits = [:]
+            for (category, amount) in limits { plan.setLimit(amount, forCategory: category) }
+            plan.monthlyLimit = monthly
+            done = "Done. Your Budget tab now has \(limits.count) category limits, \(AskLedger.money(monthly)) a month in all."
+        case .limit(let category, let amount):
+            budgetPlan(in: modelContext).setLimit(amount, forCategory: category)
+            done = "Done. Your \(category) limit is \(AskLedger.money(amount)) a month."
+        case .recurring(let ids, let vendor, let marker):
+            let wanted = Set(ids)
+            for row in ((try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []) where wanted.contains(row.transactionId) {
+                row.subscriptionCadenceOverride = marker
+            }
+            switch marker {
+            case "cancelled": done = "Done. \(vendor) is marked cancelled."
+            case "none": done = "Done. \(vendor) is no longer treated as recurring."
+            default: done = "Done. \(vendor) is a \(marker) bill."
+            }
+        }
+        do {
+            try modelContext.save()
+        } catch {
+            return "That didn't save: \(error.localizedDescription)"
+        }
+        WidgetCenter.shared.reloadAllTimelines()
+        return done
+    }
+
+    static func budgetPlan(in modelContext: ModelContext) -> BudgetPlan {
+        if let plan = try? modelContext.fetch(FetchDescriptor<BudgetPlan>()).first { return plan }
+        let plan = BudgetPlan()
+        modelContext.insert(plan)
+        return plan
+    }
+
+    private static func applyCategory(ids: [String], titles: [String], category: String, amount: Double?, modelContext: ModelContext) -> String {
+        let ids = Set(ids)
         let rows = ((try? modelContext.fetch(FetchDescriptor<Transaction>())) ?? []).filter { ids.contains($0.transactionId) }
         let payments = (try? modelContext.fetch(FetchDescriptor<CreditCardPayment>())) ?? []
-        let isPayment = TransactionAnalytics.isCreditCardPaymentCategory(proposal.category)
+        let isPayment = TransactionAnalytics.isCreditCardPaymentCategory(category)
         for row in rows {
-            row.category = proposal.category
+            row.category = category
             row.categoryLocked = true
             row.overrideSource = "user"
             // Total paid follows the category, as it does when the row is edited by hand.
@@ -163,21 +315,15 @@ enum AskEdit {
                 modelContext.delete(mirrored)
             }
         }
-        if !DemoMode.isActive, !TransactionAnalytics.isExcludedFromSpendCategory(proposal.category) {
-            for title in proposal.titles {
+        if !DemoMode.isActive, !TransactionAnalytics.isExcludedFromSpendCategory(category) {
+            for title in titles {
                 if !MoneyInsights.looksLikeVaguePayment(title) {
-                    VendorRulesStore.upsert(vendor: title, paymentMethod: nil, category: proposal.category)
-                } else if let amount = proposal.amount {
-                    VendorRulesStore.upsert(vendor: title, paymentMethod: nil, category: proposal.category, amount: amount)
+                    VendorRulesStore.upsert(vendor: title, paymentMethod: nil, category: category)
+                } else if let amount {
+                    VendorRulesStore.upsert(vendor: title, paymentMethod: nil, category: category, amount: amount)
                 }
             }
         }
-        do {
-            try modelContext.save()
-        } catch {
-            return "That didn't save: \(error.localizedDescription)"
-        }
-        WidgetCenter.shared.reloadAllTimelines()
-        return "Done. \(rows.count == 1 ? "1 charge is" : "\(rows.count) charges are") now under \(proposal.category)."
+        return "Done. \(rows.count == 1 ? "1 charge is" : "\(rows.count) charges are") now under \(category)."
     }
 }

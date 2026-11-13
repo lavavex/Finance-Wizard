@@ -223,16 +223,26 @@ final class AskLedgerTests: XCTestCase {
         XCTAssertTrue(AskEdit.charges(asked: "Fix my categories", merchant: "categories", amount: nil, in: rows).rows.isEmpty)
     }
 
+    func testACategoryTheUserNamedOutranksTheModels() {
+        XCTAssertEqual(AskEdit.categoryNamed(in: "Example Apartments should be under Travel", current: ["Housing"]), "Travel")
+        XCTAssertEqual(AskEdit.categoryNamed(in: "Example Site is entertainment, not pets", current: ["Pets"]), "Entertainment")
+        XCTAssertEqual(AskEdit.categoryNamed(in: "It's not shopping, it's dining", current: ["Miscellaneous"]), "Dining")
+        // Nothing named, or no way to tell which of two is meant, leaves it to the model.
+        XCTAssertNil(AskEdit.categoryNamed(in: "the 177.09 payment is my phone bill", current: ["Miscellaneous"]))
+        XCTAssertNil(AskEdit.categoryNamed(in: "Example Cafe is dining or groceries", current: ["Shopping"]))
+        XCTAssertNil(AskEdit.categoryNamed(in: "Example Gym keeps me healthy", current: ["Shopping"]))
+    }
+
     func testProposalSaysWhatWillChangeAndWhatIsRemembered() throws {
         let shop = try XCTUnwrap(AskEdit.proposal(for: [charge("Example Shop", 20, category: "Pets"), charge("Example Shop", 5, category: "Pets")], category: "entertainment"))
         XCTAssertEqual(shop.summary, "File 2 Example Shop charges ($25.00 in all) under Entertainment instead of Pets? Later charges from it will go there too.")
 
         let vague = try XCTUnwrap(AskEdit.proposal(for: [charge("PAYMENT", 177.09)], category: "Home Internet", amount: 177.09))
-        XCTAssertEqual(vague.amount, 177.09)
+        XCTAssertEqual(vague.action, .category(transactionIds: vague.transactionIds, titles: ["PAYMENT"], category: "Home Internet", amount: 177.09))
         XCTAssertTrue(vague.summary.hasSuffix("Later PAYMENT charges of exactly $177.09 will go there too."), vague.summary)
 
         let mixed = try XCTUnwrap(AskEdit.proposal(for: [charge("PAYMENT", 10), charge("PAYMENT", 20)], category: "Utilities"))
-        XCTAssertNil(mixed.amount)
+        XCTAssertEqual(mixed.action, .category(transactionIds: mixed.transactionIds, titles: ["PAYMENT"], category: "Utilities", amount: nil))
         XCTAssertFalse(mixed.summary.contains("Later"), mixed.summary)
 
         XCTAssertNil(AskEdit.proposal(for: [charge("Example Shop", 20, category: "Dining")], category: "Dining"))
@@ -276,6 +286,67 @@ final class AskLedgerTests: XCTestCase {
         XCTAssertEqual(VendorRulesStore.match(vendor: "payment", paymentMethod: "Checking", amount: 177.09)?.category, "Home Internet")
         XCTAssertNil(VendorRulesStore.match(vendor: "PAYMENT", paymentMethod: "Checking", amount: 152.07))
         XCTAssertNil(VendorRulesStore.match(vendor: "PAYMENT", paymentMethod: "Checking"))
+    }
+
+    // MARK: - Budget limits and recurring bills from Ask
+
+    func testWordingDecidesWhatIsASettingRequest() {
+        for limit in ["Set my dining budget to 200", "Cap shopping at $150 a month", "Raise my grocery limit to 400"] {
+            XCTAssertTrue(AskEdit.looksLikeLimitRequest(limit), limit)
+        }
+        for other in ["How's my budget?", "Help me make a budget", "How much of my budget do I have left this month?", "What is my dining limit of 200 for?"] {
+            XCTAssertFalse(AskEdit.looksLikeLimitRequest(other), other)
+        }
+        for bill in ["I cancelled Example Stream", "Example Stream is a monthly bill", "Example Stream is not a subscription", "Example Power bills me every month"] {
+            XCTAssertTrue(AskEdit.looksLikeRecurringRequest(bill), bill)
+        }
+        for other in ["What recurring charges are coming up?", "How much do my recurring charges cost per month?", "Example Stream monthly cost", "dining total this month?"] {
+            XCTAssertFalse(AskEdit.looksLikeRecurringRequest(other), other)
+        }
+    }
+
+    func testLimitNeedsARealCategoryAndAnAmountTheUserTyped() throws {
+        let plan = BudgetPlan(categoryLimits: ["Dining": 150])
+        let change = try XCTUnwrap(AskEdit.limitProposal(asked: "Set my dining budget to 200", category: "dining", amount: 200, current: plan))
+        XCTAssertEqual(change.summary, "Change your Dining limit from $150.00 to $200.00 a month?")
+        XCTAssertEqual(change.action, .limit(category: "Dining", amount: 200))
+        // The model's amount is ignored when the user typed a different one.
+        let typed = try XCTUnwrap(AskEdit.limitProposal(asked: "Cap shopping at 80", category: "Shopping", amount: 800, current: nil))
+        XCTAssertEqual(typed.action, .limit(category: "Shopping", amount: 80))
+        XCTAssertNil(AskEdit.limitProposal(asked: "Set my dining budget to 150", category: "Dining", amount: 150, current: plan))
+        XCTAssertNil(AskEdit.limitProposal(asked: "Set my fun budget to 50", category: "Fun", amount: 50, current: nil))
+    }
+
+    func testUsingABudgetReplacesTheLimits() throws {
+        context.insert(BudgetPlan(monthlyLimit: 900, categoryLimits: ["Dining": 150, "Travel": 300]))
+        try context.save()
+        let plan = try XCTUnwrap(context.fetch(FetchDescriptor<BudgetPlan>()).first)
+
+        let proposal = try XCTUnwrap(AskEdit.budgetProposal(limits: ["Dining": 100, "Housing": 1200], current: plan))
+        XCTAssertEqual(proposal.summary, "Set 2 category limits on the Budget tab, $1,300.00 a month in all? This replaces the 2 you have now.")
+        AskEdit.apply(proposal, modelContext: context)
+
+        XCTAssertEqual(plan.categoryLimits, ["Dining": 100, "Housing": 1200])
+        XCTAssertEqual(plan.monthlyLimit, 1300)
+        XCTAssertNil(AskEdit.budgetProposal(limits: [:], current: plan))
+    }
+
+    func testMarkingABillCoversEveryChargeFromThatVendor() throws {
+        for (index, amount) in [15.99, 15.99, 17.99].enumerated() {
+            context.insert(charge("Example Stream", amount, category: "Subscriptions", id: "stream-\(index)"))
+        }
+        context.insert(charge("Example Shop", 20, category: "Shopping", id: "shop"))
+        try context.save()
+        let rows = try context.fetch(FetchDescriptor<Transaction>())
+
+        let proposal = try XCTUnwrap(AskEdit.recurringProposal(named: "example stream", asked: "I cancelled Example Stream", marker: "cancelled", in: rows))
+        XCTAssertTrue(proposal.summary.hasPrefix("Mark Example Stream as cancelled?"), proposal.summary)
+        XCTAssertEqual(AskEdit.apply(proposal, modelContext: context), "Done. Example Stream is marked cancelled.")
+
+        XCTAssertEqual(rows.filter { $0.subscriptionCadenceOverride == "cancelled" }.map(\.title), ["Example Stream", "Example Stream", "Example Stream"])
+        XCTAssertEqual(SubscriptionAnalytics.cancelledVendors(in: rows), [SubscriptionAnalytics.normalizeVendor("Example Stream")])
+        XCTAssertNil(AskEdit.recurringProposal(named: "Example Stream", asked: "I cancelled Example Stream", marker: "cancelled", in: rows))
+        XCTAssertNil(AskEdit.recurringProposal(named: "Nobody", asked: "I cancelled Nobody", marker: "cancelled", in: rows))
     }
 
     func testEveryToolIsRegisteredAndNamedInTheInstructions() {

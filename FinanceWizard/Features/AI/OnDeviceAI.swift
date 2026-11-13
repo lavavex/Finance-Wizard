@@ -149,6 +149,59 @@ enum OnDeviceAI {
     }
 
     @Generable
+    struct LimitRequest {
+        @Guide(description: "The spending category the limit is for")
+        var category: String
+        @Guide(description: "The monthly limit in dollars")
+        var amount: Double
+    }
+
+    /// The category and amount in a message like "set my dining budget to $200".
+    static func limitRequest(for message: String) async -> LimitRequest? {
+        guard case .available = availabilityStatus() else { return nil }
+        let list = KnownCategory.budgetPickerOrder.map(\.rawValue).joined(separator: ", ")
+        let session = LanguageModelSession(instructions: """
+            The user is setting a monthly spending limit for one category. Read out the category and the dollar amount.
+            The category must be exactly one of: \(list).
+            Eating out and restaurants are Dining. Food from a store is Groceries. Fuel is Gas (Car).
+            """)
+        let options = GenerationOptions(sampling: .greedy)
+        return try? await session.respond(to: message, generating: LimitRequest.self, options: options).content
+    }
+
+    @Generable
+    enum RecurringStatus: String {
+        case cancelled
+        case monthly
+        case yearly
+        case weekly
+        case notRecurring
+        case unclear
+    }
+
+    @Generable
+    struct RecurringRequest {
+        @Guide(description: "The store, service, or bill the user named, exactly as they wrote it")
+        var merchant: String
+        @Guide(description: "What the user says about it")
+        var status: RecurringStatus
+    }
+
+    /// What a message says about a bill: that it's cancelled, how often it charges, or that it isn't one.
+    static func recurringRequest(for message: String) async -> RecurringRequest? {
+        guard case .available = availabilityStatus() else { return nil }
+        let session = LanguageModelSession(instructions: """
+            The user is telling you about one of their bills or subscriptions. Read out its name and what they say about it.
+            cancelled: they cancelled it or it has ended.
+            monthly, yearly, weekly: they say it is a bill or subscription that charges that often.
+            notRecurring: they say it is not a subscription or not a repeating charge.
+            unclear: they are asking a question, or saying something else.
+            """)
+        let options = GenerationOptions(sampling: .greedy)
+        return try? await session.respond(to: message, generating: RecurringRequest.self, options: options).content
+    }
+
+    @Generable
     struct PaymentAnswer {
         @Guide(description: "The category that fits what the user said the payment was for")
         var category: String

@@ -294,6 +294,14 @@ enum SubscriptionAnalytics {
         return candidate.lastDate >= cutoff
     }
 
+    /// Vendors the user marked cancelled. Detection still finds their old charges, so anything
+    /// that totals bills leaves these out.
+    static func cancelledVendors(in transactions: [Transaction]) -> Set<String> {
+        Set(transactions.compactMap { row in
+            (row.subscriptionCadenceOverride ?? "").lowercased() == "cancelled" ? normalizeVendor(row.title) : nil
+        })
+    }
+
     /// Past its usual date by about half a cycle, so it may have ended or moved to another
     /// account. Still listed until `isActive` gives up on it.
     nonisolated static func isOverdue(_ candidate: SubscriptionCandidate, now: Date = Date()) -> Bool {
