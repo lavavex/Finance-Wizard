@@ -176,6 +176,8 @@ enum AskEdit {
         let count = limits.count == 1 ? "1 category limit" : "\(limits.count) category limits"
         var summary = "Set \(count) on the Budget tab, \(AskLedger.money(monthly)) a month in all?"
         summary += had > 0 ? " This replaces the \(had) you have now." : " You can change any of them there."
+        // Every limit, since bills are folded in and the budget above doesn't show them this way.
+        summary += "\n" + limits.sorted { $0.value > $1.value }.map { "\n- \($0.key): \(AskLedger.money($0.value))" }.joined()
         return AskEditProposal(summary: summary, action: .budget(limits: limits, monthly: monthly))
     }
 
@@ -225,9 +227,15 @@ enum AskEdit {
 
     /// Every charge from the same vendor as the ones named, as the Recurring tab groups them.
     static func recurringProposal(named merchant: String, asked question: String, marker: String, in rows: [Transaction]) -> AskEditProposal? {
+        // A bill the app already tracks comes first, so "Kindle" means the "Amazon Kindle"
+        // subscription and not a one-off purchase titled "Kindle".
+        let wanted = key(merchant)
+        let tracked = wanted.count < 3 ? nil : SubscriptionAnalytics.detectAll(in: rows)
+            .filter { key($0.displayVendor).contains(wanted) || wanted.contains(key($0.displayVendor)) }
+            .max { $0.lastDate < $1.lastDate }
         let found = charges(asked: question, merchant: merchant, amount: nil, in: rows).rows
-        guard let title = found.first?.title else { return nil }
-        let vendor = SubscriptionAnalytics.normalizeVendor(title)
+        guard let title = tracked?.displayVendor ?? found.first?.title else { return nil }
+        let vendor = tracked?.normalizedVendor ?? SubscriptionAnalytics.normalizeVendor(title)
         let all = rows.filter { SubscriptionAnalytics.normalizeVendor($0.title) == vendor }
         let changing = all.filter { ($0.subscriptionCadenceOverride ?? "").lowercased() != marker }
         guard !changing.isEmpty else { return nil }

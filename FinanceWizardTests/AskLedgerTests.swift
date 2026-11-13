@@ -323,7 +323,7 @@ final class AskLedgerTests: XCTestCase {
         let plan = try XCTUnwrap(context.fetch(FetchDescriptor<BudgetPlan>()).first)
 
         let proposal = try XCTUnwrap(AskEdit.budgetProposal(limits: ["Dining": 100, "Housing": 1200], current: plan))
-        XCTAssertEqual(proposal.summary, "Set 2 category limits on the Budget tab, $1,300.00 a month in all? This replaces the 2 you have now.")
+        XCTAssertEqual(proposal.summary, "Set 2 category limits on the Budget tab, $1,300.00 a month in all? This replaces the 2 you have now.\n\n- Housing: $1,200.00\n- Dining: $100.00")
         AskEdit.apply(proposal, modelContext: context)
 
         XCTAssertEqual(plan.categoryLimits, ["Dining": 100, "Housing": 1200])
@@ -347,6 +347,19 @@ final class AskLedgerTests: XCTestCase {
         XCTAssertEqual(SubscriptionAnalytics.cancelledVendors(in: rows), [SubscriptionAnalytics.normalizeVendor("Example Stream")])
         XCTAssertNil(AskEdit.recurringProposal(named: "Example Stream", asked: "I cancelled Example Stream", marker: "cancelled", in: rows))
         XCTAssertNil(AskEdit.recurringProposal(named: "Nobody", asked: "I cancelled Nobody", marker: "cancelled", in: rows))
+    }
+
+    func testCancellingPrefersTheBillTheAppTracksOverAOneOffWithAShorterName() throws {
+        var rows = [charge("Stream", 40, category: "Shopping", id: "one-off")]
+        for month in 8...10 {
+            let row = charge("Example Stream", 15.99, category: "Subscriptions", id: "bill-\(month)")
+            row.date = date(day: 2, month: month)
+            rows.append(row)
+        }
+        let proposal = try XCTUnwrap(AskEdit.recurringProposal(named: "Stream", asked: "I cancelled Stream", marker: "cancelled", in: rows))
+        guard case .recurring(let ids, let vendor, _) = proposal.action else { return XCTFail("\(proposal.action)") }
+        XCTAssertEqual(vendor, "Example Stream")
+        XCTAssertEqual(Set(ids), ["bill-8", "bill-9", "bill-10"])
     }
 
     func testEveryToolIsRegisteredAndNamedInTheInstructions() {
