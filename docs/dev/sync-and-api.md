@@ -5,7 +5,7 @@ title: Sync & API
 
 # Sync & Plaid API
 
-Finance Wizard talks **directly to Plaid** using **your** developer `client_id` and `secret`. There is no Finance Wizard server in the path.
+Budget Magi talks **directly to Plaid** using **your** developer `client_id` and `secret`. There is no Budget Magi server in the path.
 
 ## Setup (once)
 
@@ -48,7 +48,7 @@ Same as Sync now, but **clears cursors** first so Plaid re-sends the full transa
 
 ### Link bank account (Hosted Link)
 
-Finance Wizard uses [Hosted Link](https://plaid.com/docs/link/hosted-link/) in an `ASWebAuthenticationSession`:
+Budget Magi uses [Hosted Link](https://plaid.com/docs/link/hosted-link/) in an `ASWebAuthenticationSession`:
 
 ```text
 1. POST /link/token/create with hosted_link:

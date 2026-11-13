@@ -186,7 +186,7 @@ Folders under `FinanceWizard/`, `Shared/`, and `Widget/` are **file-system synce
 
 Repo root is the folder that contains `.xcodeproj`, `FinanceWizard/`, `Shared/`, `Widget/`, and `docs/`.
 
-**Public repo:** [github.com/lavavex/Finance-Wizard](https://github.com/lavavex/Finance-Wizard)
+**Public repo:** [github.com/lavavex/Budget-Magi](https://github.com/lavavex/Budget-Magi)
 
 ### Branches
 
@@ -201,12 +201,12 @@ Repo root is the folder that contains `.xcodeproj`, `FinanceWizard/`, `Shared/`,
 2. Use **your** GitHub remote as `origin`. Add `upstream` if you forked:
 
 ```bash
-git clone git@github.com:YOUR_USER/Finance-Wizard.git
-cd Finance-Wizard
-git remote add upstream git@github.com:lavavex/Finance-Wizard.git
+git clone git@github.com:YOUR_USER/Budget-Magi.git
+cd Budget-Magi
+git remote add upstream git@github.com:lavavex/Budget-Magi.git
 ```
 
-3. Branch from **`dev`**, commit, `git push origin your-branch`, open a pull request against **`lavavex/Finance-Wizard`** targeting **`dev`**.
+3. Branch from **`dev`**, commit, `git push origin your-branch`, open a pull request against **`lavavex/Budget-Magi`** targeting **`dev`**.
 4. Do not put LAN git hosts, personal SSH keys, or machine Xcode paths in committed docs. Those belong in **`docs/local/`** (gitignored except `docs/local/README.md`).
 
 Typical ignore (see `.gitignore`): `xcuserdata/`, `DerivedData/`, `.DS_Store`, `docs/local/*` (except the README), local `AGENTS.md`.

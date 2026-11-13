@@ -27,6 +27,7 @@ Use the TestFlight build to try new features and report bugs before a public App
 - **Accounts** — cards, checking, and savings: balances, utilization, bills coming due.
 - **Budget** — a monthly cap and category limits against real spend.
 - **Recurring** — subscriptions and repeating bills, with next-charge dates.
+- **Ask** — on-device AI that looks up your numbers, builds a budget or a card payoff plan, and fixes categories when you tell it what a charge is. It runs on Apple Intelligence, so your questions and data stay on the phone.
 - **Widgets** — Total Spend, spend by category, and cash balances on the Home Screen.
 
 ## Your data stays on the phone
@@ -34,6 +35,8 @@ Use the TestFlight build to try new features and report bugs before a public App
 Bank passwords are entered only in **Plaid’s** sign-in screen. Access tokens and your Plaid secret live in the iPhone Keychain. Transactions live in SwiftData on this device (widgets read the same store). Optional encrypted backup if you want a copy you control.
 
 A free [Plaid](https://dashboard.plaid.com) account is enough to start (Sandbox uses fake test banks).
+
+Read the [privacy policy](https://budgetmagi.pages.dev/privacy.html), or get [support](https://budgetmagi.pages.dev/support.html).
 
 ## Documentation
 

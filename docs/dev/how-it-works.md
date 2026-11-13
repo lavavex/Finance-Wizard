@@ -5,7 +5,7 @@ title: How it works
 
 # How it works
 
-End-to-end map of Finance Wizard: launch, data, Plaid, tabs, widgets. File names are the ones in the repo today.
+End-to-end map of Budget Magi: launch, data, Plaid, tabs, widgets. File names are the ones in the repo today.
 
 Related: [Architecture](architecture.md) (folders), [Data model](data-model.md) (fields), [Sync & API](sync-and-api.md) (Plaid endpoints).
 
@@ -20,7 +20,7 @@ They do **not** share memory. They share one SwiftData file via App Group `group
 
 ```text
 iPhone
-├── Finance Wizard.app
+├── Budget Magi.app
 │     FinanceWizardApp
 │       ModelContainer (App Group)
 │       RootWithSplash → OnboardingGate → Welcome or tabs
@@ -97,7 +97,7 @@ Analytics that both app and widgets use (pure functions on arrays):
 
 ## Plaid path
 
-Credentials and tokens never go to a Finance Wizard server.
+Credentials and tokens never go to a Budget Magi server.
 
 ```text
 Settings: client_id + env  → UserDefaults     PlaidCredentialsStore.swift
